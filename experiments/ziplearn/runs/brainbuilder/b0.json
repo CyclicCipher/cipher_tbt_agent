@@ -1,0 +1,479 @@
+{
+ "experiment": "B0",
+ "passed": false,
+ "e18": {
+  "tensors_compared": 29,
+  "equal": true,
+  "first_difference": null,
+  "max_err": {},
+  "only_in_e18": [],
+  "only_in_brain": [
+   "alpha",
+   "boundary.cls_flags",
+   "boundary.keep",
+   "boundary.register_dims"
+  ],
+  "score_second_copy": 1.0,
+  "score_all": 0.4375,
+  "e18_score": 1.0,
+  "score_norm_none_typed_M": 0.0,
+  "score_norm_none_derived_M": 1.0,
+  "derived_M_written": {
+   "prev_token": 16.02,
+   "induction": 7.307,
+   "read_out": 9.439
+  },
+  "nonzeros": {
+   "blocks.0.attn.qkv.weight": 21,
+   "blocks.0.attn.proj.weight": 9,
+   "blocks.1.attn.qkv.weight": 26,
+   "blocks.1.attn.proj.weight": 8,
+   "head.weight": 8,
+   "emb.weight": 18
+  },
+  "d": 64,
+  "n_head": [
+   2,
+   2
+  ]
+ },
+ "e28": {
+  "seed0": {
+   "seed": 0,
+   "evidence": "78d2dbb",
+   "play": [
+    [
+     0,
+     93
+    ],
+    [
+     1,
+     31
+    ]
+   ],
+   "entries": 121,
+   "rules": {
+    "ACTION1": {
+     "radius": 1,
+     "cells": 3,
+     "entries": 36
+    },
+    "ACTION2": {
+     "radius": 2,
+     "cells": 3,
+     "entries": 32
+    },
+    "ACTION3": {
+     "radius": 1,
+     "cells": 3,
+     "entries": 36
+    },
+    "ACTION4": {
+     "radius": 1,
+     "cells": 2,
+     "entries": 17
+    }
+   },
+   "d": 260,
+   "n_head": [
+    10,
+    1,
+    1,
+    4
+   ],
+   "M": 10.450191772337016,
+   "M_written": {
+    "gather[-1,-1]": 10.323,
+    "gather[-1,0]": 10.323,
+    "gather[-1,1]": 10.323,
+    "gather[0,-1]": 10.323,
+    "gather[0,1]": 10.323,
+    "gather[1,-1]": 10.323,
+    "gather[1,0]": 10.323,
+    "gather[1,1]": 10.323,
+    "lookup": 12.981,
+    "goal_read": 12.981,
+    "bcast_act": 7.3,
+    "bcast_goal": 7.3,
+    "surprise": 10.45,
+    "inverse": 9.179,
+    "nogo": 9.179,
+    "task_write": 9.179,
+    "halt_row": 10.45,
+    "read_act": 10.45,
+    "read_pred": 10.45
+   },
+   "levels": {
+    "0": {
+     "n": 300,
+     "known": 300,
+     "bp_known": 300,
+     "bs_all": 300,
+     "bt_known": 300,
+     "pt_known": 300,
+     "bt_unk": 0,
+     "pt_unk": 0,
+     "bp_unk": 0,
+     "st_unk": 0
+    },
+    "1": {
+     "n": 300,
+     "known": 230,
+     "bp_known": 230,
+     "bs_all": 300,
+     "bt_known": 186,
+     "pt_known": 186,
+     "bt_unk": 39,
+     "pt_unk": 23,
+     "bp_unk": 49,
+     "st_unk": 39
+    },
+    "2": {
+     "n": 300,
+     "known": 0,
+     "bp_known": 0,
+     "bs_all": 300,
+     "bt_known": 0,
+     "pt_known": 0,
+     "bt_unk": 246,
+     "pt_unk": 222,
+     "bp_unk": 265,
+     "st_unk": 246
+    }
+   },
+   "all_known_agreement": [
+    530,
+    530
+   ],
+   "ties_brain": 1434,
+   "ties_sim": 1434,
+   "brain_equals_sim_all": 900,
+   "plans": 900,
+   "first_brain_sim_difference": null,
+   "seconds_brain": 23.5,
+   "seconds_sim": 6.4,
+   "invariance": {
+    "d_layout+64": {
+     "d": 315,
+     "n_head": [
+      15,
+      1,
+      1,
+      3
+     ],
+     "hd": [
+      21,
+      315,
+      315,
+      105
+     ],
+     "identical": 900,
+     "of": 900,
+     "ties": 1434,
+     "first_difference": null,
+     "seconds": 29.6,
+     "M_written": {
+      "gather[-1,0]": 9.787,
+      "lookup": 13.619,
+      "bcast_act": 6.92,
+      "inverse": 10.348
+     }
+    },
+    "rope2d": {
+     "error": "CompileError: layer 1: 159 position-free pairs do not fit beside the position pairs of a 465-wide head (232 pairs)"
+    }
+   },
+   "compile_seconds": 0.037,
+   "expected": {
+    "known": [
+     300,
+     230
+    ],
+    "ties": 1434
+   },
+   "pass_all_known": true,
+   "pass_ties": true,
+   "pass_bit_for_bit": true,
+   "pass_invariance": false
+  },
+  "seed1": {
+   "seed": 1,
+   "evidence": "78d2dbb",
+   "play": [
+    [
+     0,
+     93
+    ],
+    [
+     1,
+     31
+    ]
+   ],
+   "entries": 121,
+   "rules": {
+    "ACTION1": {
+     "radius": 1,
+     "cells": 3,
+     "entries": 36
+    },
+    "ACTION2": {
+     "radius": 2,
+     "cells": 3,
+     "entries": 32
+    },
+    "ACTION3": {
+     "radius": 1,
+     "cells": 3,
+     "entries": 36
+    },
+    "ACTION4": {
+     "radius": 1,
+     "cells": 2,
+     "entries": 17
+    }
+   },
+   "d": 260,
+   "n_head": [
+    10,
+    1,
+    1,
+    4
+   ],
+   "M": 10.450191772337016,
+   "M_written": {
+    "gather[-1,-1]": 10.323,
+    "gather[-1,0]": 10.323,
+    "gather[-1,1]": 10.323,
+    "gather[0,-1]": 10.323,
+    "gather[0,1]": 10.323,
+    "gather[1,-1]": 10.323,
+    "gather[1,0]": 10.323,
+    "gather[1,1]": 10.323,
+    "lookup": 12.981,
+    "goal_read": 12.981,
+    "bcast_act": 7.3,
+    "bcast_goal": 7.3,
+    "surprise": 10.45,
+    "inverse": 9.179,
+    "nogo": 9.179,
+    "task_write": 9.179,
+    "halt_row": 10.45,
+    "read_act": 10.45,
+    "read_pred": 10.45
+   },
+   "levels": {
+    "0": {
+     "n": 277,
+     "known": 277,
+     "bp_known": 277,
+     "bs_all": 277,
+     "bt_known": 218,
+     "pt_known": 218,
+     "bt_unk": 0,
+     "pt_unk": 0,
+     "bp_unk": 0,
+     "st_unk": 0
+    },
+    "1": {
+     "n": 290,
+     "known": 232,
+     "bp_known": 232,
+     "bs_all": 290,
+     "bt_known": 216,
+     "pt_known": 216,
+     "bt_unk": 56,
+     "pt_unk": 43,
+     "bp_unk": 43,
+     "st_unk": 56
+    },
+    "2": {
+     "n": 300,
+     "known": 0,
+     "bp_known": 0,
+     "bs_all": 300,
+     "bt_known": 0,
+     "pt_known": 0,
+     "bt_unk": 276,
+     "pt_unk": 264,
+     "bp_unk": 277,
+     "st_unk": 276
+    }
+   },
+   "all_known_agreement": [
+    509,
+    509
+   ],
+   "ties_brain": 1475,
+   "ties_sim": 1475,
+   "brain_equals_sim_all": 867,
+   "plans": 867,
+   "first_brain_sim_difference": null,
+   "seconds_brain": 23.7,
+   "seconds_sim": 6.4,
+   "invariance": {
+    "d_layout+64": {
+     "d": 315,
+     "n_head": [
+      15,
+      1,
+      1,
+      3
+     ],
+     "hd": [
+      21,
+      315,
+      315,
+      105
+     ],
+     "identical": 867,
+     "of": 867,
+     "ties": 1475,
+     "first_difference": null,
+     "seconds": 29.4,
+     "M_written": {
+      "gather[-1,0]": 9.787,
+      "lookup": 13.619,
+      "bcast_act": 6.92,
+      "inverse": 10.348
+     }
+    },
+    "rope2d": {
+     "error": "CompileError: layer 1: 159 position-free pairs do not fit beside the position pairs of a 465-wide head (232 pairs)"
+    }
+   },
+   "compile_seconds": 0.039,
+   "expected": {
+    "known": [
+     277,
+     232
+    ],
+    "ties": 1475
+   },
+   "pass_all_known": true,
+   "pass_ties": true,
+   "pass_bit_for_bit": true,
+   "pass_invariance": false
+  }
+ },
+ "e28_today": {
+  "seed0": {
+   "seed": 0,
+   "evidence": "today",
+   "play": [
+    [
+     0,
+     93
+    ],
+    [
+     1,
+     40
+    ]
+   ],
+   "entries": 128,
+   "rules": {
+    "ACTION1": {
+     "radius": 1,
+     "cells": 3,
+     "entries": 39
+    },
+    "ACTION2": {
+     "radius": 2,
+     "cells": 3,
+     "entries": 35
+    },
+    "ACTION3": {
+     "radius": 1,
+     "cells": 3,
+     "entries": 37
+    },
+    "ACTION4": {
+     "radius": 1,
+     "cells": 2,
+     "entries": 17
+    }
+   },
+   "d": 260,
+   "n_head": [
+    10,
+    1,
+    1,
+    4
+   ],
+   "M": 10.450191772337016,
+   "M_written": {
+    "gather[-1,-1]": 10.323,
+    "gather[-1,0]": 10.323,
+    "gather[-1,1]": 10.323,
+    "gather[0,-1]": 10.323,
+    "gather[0,1]": 10.323,
+    "gather[1,-1]": 10.323,
+    "gather[1,0]": 10.323,
+    "gather[1,1]": 10.323,
+    "lookup": 12.981,
+    "goal_read": 12.981,
+    "bcast_act": 7.3,
+    "bcast_goal": 7.3,
+    "surprise": 10.45,
+    "inverse": 9.179,
+    "nogo": 9.179,
+    "task_write": 9.179,
+    "halt_row": 10.45,
+    "read_act": 10.45,
+    "read_pred": 10.45
+   },
+   "levels": {
+    "0": {
+     "n": 300,
+     "known": 300,
+     "bp_known": 300,
+     "bs_all": 300,
+     "bt_known": 300,
+     "pt_known": 300,
+     "bt_unk": 0,
+     "pt_unk": 0,
+     "bp_unk": 0,
+     "st_unk": 0
+    },
+    "1": {
+     "n": 300,
+     "known": 230,
+     "bp_known": 230,
+     "bs_all": 300,
+     "bt_known": 186,
+     "pt_known": 186,
+     "bt_unk": 39,
+     "pt_unk": 23,
+     "bp_unk": 50,
+     "st_unk": 39
+    },
+    "2": {
+     "n": 300,
+     "known": 0,
+     "bp_known": 0,
+     "bs_all": 300,
+     "bt_known": 0,
+     "pt_known": 0,
+     "bt_unk": 245,
+     "pt_unk": 222,
+     "bp_unk": 265,
+     "st_unk": 245
+    }
+   },
+   "all_known_agreement": [
+    530,
+    530
+   ],
+   "ties_brain": 1444,
+   "ties_sim": 1444,
+   "brain_equals_sim_all": 900,
+   "plans": 900,
+   "first_brain_sim_difference": null,
+   "seconds_brain": 24.8,
+   "seconds_sim": 6.8,
+   "invariance": {},
+   "compile_seconds": 0.037,
+   "pass_bit_for_bit": true
+  }
+ },
+ "seconds": 163.8
+}

@@ -139,6 +139,25 @@ def _freqs(hd, dev, base=10000.0):
     return base ** (-torch.arange(hd, device=dev, dtype=torch.float32) / hd)
 
 
+def rope_theta(hd, two_d=False, n_zero=0, dev="cpu"):
+    """The ONE definition of a RoPE head's per-pair frequencies (ziplearn's instructions and the Attn below both read it).
+    1-D (`two_d=False`): `_freqs(P)` over the P = hd // 2 pairs, pair 0 the fastest -- today's RoPE, unchanged. 2-D
+    (`two_d=True`, the `rope2d` codec of BrainBuilder, DESIGN §21.4 edit 4): the row axis owns pairs 0 .. P//2-1 and the
+    column axis pairs P//2 .. P-1, and EACH axis gets its own full ladder `_freqs(P//2)` (axial RoPE), so both axes hold
+    the high frequencies that tell a distance of one from zero -- under one shared ladder the column half would keep only
+    the slow frequencies (theta <= base^-1/2) and no column offset could be resolved. `n_zero` (2-D only) sets the LAST
+    n_zero pairs -- the lowest-frequency pairs, where `Layout.channels` puts content -- to theta = 0: position-free
+    channels, so a content match between two positions is exact (DESIGN §15's position-free channels, here for RoPE)."""
+    P = hd // 2
+    if not two_d:
+        return _freqs(P, dev)
+    half = P // 2
+    theta = torch.cat([_freqs(half, dev), _freqs(P - half, dev)])
+    if n_zero:
+        theta[P - int(n_zero):] = 0.0
+    return theta
+
+
 class Attn(nn.Module):
     """Causal self-attention with a swappable positional scheme, because position has to reach the QK product for RoPE and
     PoPE and `nn.TransformerEncoderLayer` gives no way in.
@@ -169,17 +188,33 @@ class Attn(nn.Module):
             if pos == "pope" and n_zero:                  # ziplearn DESIGN §15: a few channels with NO position, so a
                 theta[:n_zero] = 0.0                      # pure content match has a home that does not depend on distance
             self.register_buffer("theta", theta, persistent=False)
+        if pos == "rope":                                 # the 2-D ladder `coords` selects (rope_theta); n_zero = exact content pairs
+            self.register_buffer("theta2d", rope_theta(self.hd, True, n_zero), persistent=False)
 
-    def forward(self, x, cache=None, start=0):
+    def forward(self, x, cache=None, start=0, coords=None):
         """`cache` (a dict) and `start` make this an incremental forward: the new positions start..start+T-1 attend to the
         cached keys/values of all earlier positions and to each other causally; the cache is extended. Positions enter
-        RoPE/PoPE as absolute indices, so a cached prefix and a fresh full pass agree exactly (E31)."""
+        RoPE/PoPE as absolute indices, so a cached prefix and a fresh full pass agree exactly (E31).
+
+        `coords` (a LongTensor T x 2, BrainBuilder's `rope2d` codec, ziplearn DESIGN §21.4 edit 4): with `pos == "rope"`
+        the rotary pairs 0 .. P/2-1 rotate by coords[:, 0]·θ_c (the row axis) and the pairs P/2 .. P-1 by coords[:, 1]·θ_c
+        (the column axis), each axis with its own frequency ladder `theta2d` (`rope_theta(hd, True, n_zero)`); a sequence
+        is the row-0 case with col = position. `coords=None` is the one-dimensional RoPE above, exactly. Under
+        `pos == "learned"` (E28's one-hot coordinates) `coords` is ignored — position is in the residual, not here; under
+        PoPE it is not defined and raises."""
         B, T, C = x.shape
         q, k, v = self.qkv(x).chunk(3, dim=-1)
         q, k, v = (z.view(B, T, self.h, self.hd).transpose(1, 2) for z in (q, k, v))
         t = torch.arange(start, start + T, device=x.device, dtype=torch.float32)[:, None]
+        if coords is not None and self.pos == "pope":
+            raise ValueError("Attn: coords (rope2d) is defined for pos='rope' only")
         if self.pos == "rope":
-            ang = t * self.theta                                              # (T, hd/2)
+            if coords is None:
+                ang = t * self.theta                                          # (T, hd/2)
+            else:                                                             # rope2d: row phases on the first half of the pairs, column on the second
+                P = self.theta2d.shape[0]
+                c = coords.to(device=x.device, dtype=torch.float32)
+                ang = torch.cat([c[:, 0:1] * self.theta2d[:P // 2], c[:, 1:2] * self.theta2d[P // 2:]], dim=-1)
             cos, sin = ang.cos()[None, None], ang.sin()[None, None]
             def rot(z):
                 a, b = z[..., 0::2], z[..., 1::2]
@@ -206,7 +241,8 @@ class Attn(nn.Module):
             S = k.shape[2]
             qpos = torch.arange(start, start + T, device=x.device)[:, None]
             kpos = torch.arange(S, device=x.device)[None, :]
-            y = F.scaled_dot_product_attention(q, k, v, attn_mask=(kpos <= qpos), scale=1.0 / math.sqrt(self.hd))
+            mask = (kpos <= qpos) if self.causal else None                    # a non-causal head (E28) sees the whole bank
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, scale=1.0 / math.sqrt(self.hd))
         return self.proj(y.transpose(1, 2).reshape(B, T, C))
 
 
@@ -232,17 +268,38 @@ class AttnRes(nn.Module):
         return torch.einsum("nbt,nbtd->btd", a, v)
 
 
+def _norm(d_model, norm):
+    """`norm="layer"`: LayerNorm (the trained arm). `norm="none"`: Identity — a WRITTEN block over one-hot codes (ziplearn
+    DESIGN §21.4 edit 1; E28 bypassed `Block` because LayerNorm rescales a one-hot, E18 survived it by margin)."""
+    if norm == "layer":
+        return nn.LayerNorm(d_model)
+    if norm == "none":
+        return nn.Identity()
+    raise ValueError(f"norm must be 'layer' or 'none', got {norm!r}")
+
+
+def _per_layer(n_head, n_layer, what="n_head"):
+    """`n_head` as one int for every layer, or a list with one entry per layer (edit 3: a layer holding one whole-window
+    match is a one-head layer with hd = d, as `WrittenSim.lookup = Attn(d, 1)` is)."""
+    if isinstance(n_head, int):
+        return [n_head] * n_layer
+    heads = list(n_head)
+    if len(heads) != n_layer:
+        raise ValueError(f"{what}: per-layer list has {len(heads)} entries for {n_layer} layers")
+    return heads
+
+
 class Block(nn.Module):
-    def __init__(self, d_model, n_head, pos, res="std", n_zero=0):
+    def __init__(self, d_model, n_head, pos, res="std", n_zero=0, norm="layer"):
         super().__init__()
-        self.n1, self.n2 = nn.LayerNorm(d_model), nn.LayerNorm(d_model)
+        self.n1, self.n2 = _norm(d_model, norm), _norm(d_model, norm)
         self.attn = Attn(d_model, n_head, pos, n_zero)
         self.mlp = nn.Sequential(nn.Linear(d_model, 4 * d_model), nn.GELU(), nn.Linear(4 * d_model, d_model))
         if res != "std":                                              # one mixer before each sub-layer, as in the paper
             self.res_attn, self.res_mlp = AttnRes(d_model), AttnRes(d_model)
 
-    def forward(self, x, cache=None, start=0):
-        x = x + self.attn(self.n1(x), cache, start)
+    def forward(self, x, cache=None, start=0, coords=None):
+        x = x + self.attn(self.n1(x), cache, start, coords)
         return x + self.mlp(self.n2(x))
 
 
@@ -250,16 +307,17 @@ class Model(nn.Module):
     """A small causal decoder over digits. Predicts every OUTPUT block from everything before it, so the accuracy at the
     j-th block IS the accuracy after j-1 demonstrations — the trials curve falls out of one forward pass."""
 
-    def __init__(self, d_model=96, n_layer=3, n_head=4, max_len=256, pos="learned", n_vocab=V, res="std", n_zero=0):
+    def __init__(self, d_model=96, n_layer=3, n_head=4, max_len=256, pos="learned", n_vocab=V, res="std", n_zero=0, norm="layer"):
         super().__init__()
         # `n_vocab` defaults to the digit alphabet; `halt.py` widens it by one for a HALT token the model emits itself.
         # `res`: "std" = the usual residual sum; "attnres" = attention residuals with one transformer block per AttnRes
         # block (the paper's Block AttnRes, S = 2 sub-layers); "attnres_full" = every sub-layer output its own source.
+        # `n_head`: an int, or a list with one head count per layer; `norm`: "layer" or "none" (a written brain).
         self.emb = nn.Embedding(n_vocab, d_model)
         self.pos_kind, self.res = pos, res
         self.pos = nn.Parameter(torch.randn(1, max_len, d_model) * 0.02) if pos == "learned" else None
-        self.blocks = nn.ModuleList([Block(d_model, n_head, pos, res, n_zero) for _ in range(n_layer)])
-        self.norm = nn.LayerNorm(d_model)
+        self.blocks = nn.ModuleList([Block(d_model, nh, pos, res, n_zero, norm) for nh in _per_layer(n_head, n_layer)])
+        self.norm = _norm(d_model, norm)
         self.head = nn.Linear(d_model, n_vocab)
         if res != "std":
             self.res_final = AttnRes(d_model)                         # the output aggregates all block representations
@@ -276,19 +334,20 @@ class Model(nn.Module):
     def new_caches(self):
         return [{} for _ in self.blocks]
 
-    def forward_embedded(self, h, caches=None, start=0):
+    def forward_embedded(self, h, caches=None, start=0, coords=None):
         """The blocks on already-embedded inputs; returns the final residual (before the output norm and head). With
-        `caches` (one dict per block, from `new_caches`) the call is incremental from position `start` (E31)."""
+        `caches` (one dict per block, from `new_caches`) the call is incremental from position `start` (E31). `coords`
+        is passed through to every head (rope2d, see `Attn.forward`)."""
         cs = caches if caches is not None else [None] * len(self.blocks)
         if self.res == "std":
             for b, c in zip(self.blocks, cs):
-                h = b(h, c, start)
+                h = b(h, c, start, coords)
         elif self.res == "attnres":
             blocks, partial = [], h                                   # b0 = the embedding, appended at the first boundary
             for b, c in zip(self.blocks, cs):
                 x = b.res_attn(blocks + [partial])
                 blocks.append(partial)                                # block boundary: the finished sum becomes a source
-                partial = b.attn(b.n1(x), c, start)                   # a block's sum holds OUTPUTS only, not its input
+                partial = b.attn(b.n1(x), c, start, coords)           # a block's sum holds OUTPUTS only, not its input
                 x = b.res_mlp(blocks + [partial])
                 partial = partial + b.mlp(b.n2(x))
             h = self.res_final(blocks + [partial])
@@ -296,7 +355,7 @@ class Model(nn.Module):
             src = [h]
             for b, c in zip(self.blocks, cs):
                 x = b.res_attn(src)
-                src.append(b.attn(b.n1(x), c, start))
+                src.append(b.attn(b.n1(x), c, start, coords))
                 x = b.res_mlp(src)
                 src.append(b.mlp(b.n2(x)))
             h = self.res_final(src)
@@ -314,6 +373,135 @@ class Model(nn.Module):
         return {n: [round(float(a), 3) for a in m.last] for n, m in mixers}
 
 
+class BoundaryOp(nn.Module):
+    """The WRITTEN boundary operator between core passes (ziplearn DESIGN §21.3 item 9, §21.4 edit 5) — a module of
+    tensors, no learned weight: what `WrittenSim.rollout` (e28.py lines 178–189) did in Python between two passes.
+
+      keep           a d-vector mask, 1 = keep the dim, 0 = clear it (E28: the gathered-neighbour subspaces are cleared);
+      quantise       a list of (read matrix d x g, write slice of width g): argmax over the g pre-activations `x @ read`,
+                     a one-hot into the slice (E28: the colour subspace re-quantised to one-hot after the lookup);
+      commit         a list of (from slice, to slice) copies, applied after quantise (`pred -> colour`: the simulator
+                     advances one step);
+      anchor         the slice the anchor vector is copied into, on cell tokens only (E28: the action, the per-pass anchor);
+      halt_flag      a dim index the runner reads, or None;
+      register_dims  the dims compared between passes for convergence (exact: one-hot after quantise), possibly empty;
+      cls_flags      the token-class flag dims the operator acts on (E28: cells; a brain: cells and registers); None = every
+                     token. Entry, border and zero tokens carry no such flag and pass through untouched, as E28's memory
+                     tokens did (`x[0, n:, ...]`);
+      cell_flag      the flag dim of the tokens the anchor goes into; None = every operated token;
+      register_flag  the flag dim of the register tokens, whose `register_dims` the convergence test compares; None = every
+                     operated token;
+      anchor_token   the sequence index of the register token whose anchor slice is the anchor when the runner passes
+                     none (the blueprint's `anchor.from = ACTION`: the register's quantised action, read by the operator
+                     itself -- a tensor op, no Python around the model); None = the runner's `anchor_vec` only;
+      tie_tol        the tolerance of the quantise: a group is a TIE when its maximum is not 1 to `tie_tol` (E28 line 185:
+                     1e-3 at M = 30, where the softmax leaks 1e-13), and the argmax breaks ties toward the LOWEST index among
+                     the values within `tie_tol` of the maximum (torch.argmax's rule on exact ties, made robust to a leak):
+                     the compiler passes 1 - p*, the leak the derived sharpness allows (DESIGN §21.4 step 5), so that the
+                     tie count and the tie-break are those of the exact arithmetic. A group that is all zero (no evidence
+                     reached the token: a register with nothing to select, a cell without a prediction) is neither
+                     quantised nor a tie: it stays zero.
+
+    `forward(x, anchor_vec=None, prev_regs=None) -> (x, halted)`: the halt flag is read first, as the pass raised it (so a
+    blueprint may clear it with the scratch and the MLP recomputes it every pass), then quantise -> commit -> keep ->
+    anchor -> the convergence test. `halted` is a bool tensor (B,), true where the halt flag is set or the register dims
+    equal `prev_regs` (the previous pass's `x[..., register_dims]` on the register tokens). `ties` counts, as E28 line 185 did, the operated
+    tokens whose quantised group was not already one-hot to `tie_tol` — the tie count B0 must reproduce (1,434 / 1,475).
+    `inject(x, anchor_vec)` is the anchor step alone, for the first pass."""
+
+    def __init__(self, keep, quantise=(), commit=(), anchor=None, halt_flag=None, register_dims=(), cls_flags=None, cell_flag=None,
+                 register_flag=None, anchor_token=None, tie_tol=1e-3):
+        super().__init__()
+        keep = torch.as_tensor(keep, dtype=torch.float32)
+        self.d = int(keep.numel())
+        self.register_buffer("keep", keep)
+        self.n_quant = len(quantise)
+        self.quant_write = []
+        for i, (read, write) in enumerate(quantise):
+            read = torch.as_tensor(read, dtype=torch.float32)
+            g = write.stop - write.start
+            if read.shape != (self.d, g):
+                raise ValueError(f"BoundaryOp.quantise[{i}]: read matrix {tuple(read.shape)} must be ({self.d}, {g}) for the write slice")
+            self.register_buffer(f"quant_read_{i}", read)
+            self.quant_write.append((write.start, write.stop))
+        self.commit = [(f.start, f.stop, t.start, t.stop) for f, t in commit]
+        for f0, f1, t0, t1 in self.commit:
+            if f1 - f0 != t1 - t0:
+                raise ValueError(f"BoundaryOp.commit: slices {f0}:{f1} and {t0}:{t1} differ in width")
+        self.anchor = (anchor.start, anchor.stop) if anchor is not None else None
+        self.halt_flag = halt_flag
+        self.register_buffer("register_dims", torch.as_tensor(list(register_dims), dtype=torch.long))
+        self.register_buffer("cls_flags", torch.as_tensor(list(cls_flags), dtype=torch.long) if cls_flags is not None else torch.zeros(0, dtype=torch.long))
+        self.cell_flag = cell_flag
+        self.register_flag = register_flag
+        self.anchor_token = anchor_token
+        self.tie_tol = float(tie_tol)
+        self.ties = 0
+
+    def _mask(self, x):
+        """Which tokens the operator acts on, read BEFORE anything is changed."""
+        if self.cls_flags.numel() == 0:
+            return torch.ones(x.shape[:-1], dtype=torch.bool, device=x.device)
+        return (x[..., self.cls_flags] > 0.5).any(-1)
+
+    def inject(self, x, anchor_vec, mask=None):
+        """The anchor alone: `anchor_vec` (a tensor of the anchor slice's width, or (B, width)) into the anchor slice of
+        the cell tokens (E28 line 179–180). With `anchor_vec=None` and an `anchor_token`, the anchor is that token's own
+        anchor slice (the ACTION register, after its quantise)."""
+        if self.anchor is None:
+            return x
+        a0, a1 = self.anchor
+        if anchor_vec is None:
+            if self.anchor_token is None:
+                return x
+            anchor_vec = x[:, self.anchor_token, a0:a1]                        # (B, width): the register's selection
+        cells = self._mask(x) if mask is None else mask
+        if self.cell_flag is not None:
+            cells = cells & (x[..., self.cell_flag] > 0.5)
+        a = torch.as_tensor(anchor_vec, dtype=x.dtype, device=x.device)
+        if a.dim() == 2:                                                       # per batch element: broadcast over tokens
+            a = a[:, None, :].expand(x.shape[0], x.shape[1], a1 - a0)
+        else:
+            a = a.expand(x.shape[0], x.shape[1], a1 - a0)
+        sub = x[..., a0:a1]
+        x = x.clone()
+        x[..., a0:a1] = torch.where(cells[..., None], a, sub)
+        return x
+
+    def quantise(self, pre):
+        """The tolerant argmax of one group (…, g): among the values within `tie_tol` of the maximum the LOWEST index
+        wins (torch.argmax on an exact tie), the one-hot of that index; an all-zero group gives an all-zero row."""
+        top = pre.max(-1, keepdim=True).values
+        near = (top - pre) <= self.tie_tol                                     # the tied set (the exact tie, leak-robust)
+        idx = near.float().argmax(-1)                                          # the lowest tied index
+        one = F.one_hot(idx, pre.shape[-1]).to(pre.dtype)
+        return one * (pre.abs().sum(-1, keepdim=True) > 0).to(pre.dtype)
+
+    def forward(self, x, anchor_vec=None, prev_regs=None):
+        mask = self._mask(x)                                                   # (B, T)
+        x = x.clone()
+        m3 = mask[..., None]
+        halted = torch.zeros(x.shape[0], dtype=torch.bool, device=x.device)
+        if self.halt_flag is not None:                                         # the flag as the pass raised it (before a clear)
+            halted = halted | ((x[..., self.halt_flag] > 0.5) & mask).any(-1)
+        for i in range(self.n_quant):                                          # quantise: argmax over the group -> one-hot
+            w0, w1 = self.quant_write[i]
+            pre = x @ getattr(self, f"quant_read_{i}")                         # (B, T, g)
+            live = pre.abs().sum(-1) > 0                                       # an all-zero group is no evidence, not a tie
+            self.ties += int((((pre.max(-1).values - 1).abs() > self.tie_tol) & mask & live).sum())
+            x[..., w0:w1] = torch.where(m3, self.quantise(pre), x[..., w0:w1])
+        for f0, f1, t0, t1 in self.commit:                                     # commit: copy after quantise
+            x[..., t0:t1] = torch.where(m3, x[..., f0:f1], x[..., t0:t1])
+        x = torch.where(m3, x * self.keep, x)                                  # keep / clear
+        x = self.inject(x, anchor_vec, mask)                                   # the next pass's anchor
+        if prev_regs is not None and self.register_dims.numel():
+            same = x[..., self.register_dims] == prev_regs                     # (B, T, n_reg)
+            if self.register_flag is not None:
+                same = same | ~(x[..., self.register_flag] > 0.5)[..., None]   # only the register tokens are compared
+            halted = halted | same.flatten(1).all(-1)
+        return x, halted
+
+
 class LoopedModel(nn.Module):
     """A looped transformer after Chen, Vegesna, Dahal & Wilson (arXiv:2609.19107; their MIT-licensed code at
     github.com/qlabs-eng/scaling-exponents, models/transformer.py): prelude block(s) -> a CORE applied K times ->
@@ -321,19 +509,34 @@ class LoopedModel(nn.Module):
     re-injected, x <- norm(x) + alpha * anchor, and once more before the coda -- the boundary operator, which stops the
     residual stream growing with depth and keeps every pass conditioned on the input. `tied`: one core applied K
     times (weights shared); untied: K distinct cores (a deeper plain stack with the operator). `active_k` may be
-    raised during training (model growth); untied growth copies core j % previous into the new cores."""
+    raised during training (model growth); untied growth copies core j % previous into the new cores.
+
+    BrainBuilder's flags (ziplearn DESIGN §21.4, defaults unchanged): `core_layers` = Blocks per core pass (E28's core is
+    gather then lookup: two); `boundary` = a `BoundaryOp` in place of `rms_norm(x) + alpha * anchor`; `norm="none"` for
+    written one-hot codes; `n_head` an int or one entry per layer over prelude + core + coda (the same list for every
+    untied core copy). The core layers are `self.blocks` (state_dict names `blocks.{L}.…`, the addresses the compiler
+    writes; core copy j, layer l = `blocks[j * core_layers + l]`); `cores` is the old name for the same list."""
 
     def __init__(self, d_model=96, n_head=4, max_len=256, pos="rope", n_vocab=V, loops=4, tied=True, n_prelude=1, n_coda=1,
-                 alpha=1.0, res="std", n_zero=0, mix="tied", window=0):
+                 alpha=1.0, res="std", n_zero=0, mix="tied", window=0, core_layers=1, boundary=None, norm="layer"):
         super().__init__()
+        heads = _per_layer(n_head, n_prelude + core_layers + n_coda)
+        zeros = _per_layer(n_zero, n_prelude + core_layers + n_coda, "n_zero")   # int, or one per layer (a brain's exact content pairs)
+        h_pre, h_core, h_coda = heads[:n_prelude], heads[n_prelude:n_prelude + core_layers], heads[n_prelude + core_layers:]
+        z_pre, z_core, z_coda = zeros[:n_prelude], zeros[n_prelude:n_prelude + core_layers], zeros[n_prelude + core_layers:]
+        self.n_cores, self.core_layers = (1 if tied else loops), core_layers
+        if res == "attnres" and (core_layers != 1 or boundary is not None):
+            raise ValueError("LoopedModel: attention residuals across passes (E30) are defined for a one-Block core without a BoundaryOp")
         self.emb = nn.Embedding(n_vocab, d_model)
         self.pos = nn.Parameter(torch.randn(1, max_len, d_model) * 0.02) if pos == "learned" else None
-        self.prelude = nn.ModuleList([Block(d_model, n_head, pos, "std", n_zero) for _ in range(n_prelude)])
-        self.cores = nn.ModuleList([Block(d_model, n_head, pos, "std", n_zero) for _ in range(1 if tied else loops)])
-        self.coda = nn.ModuleList([Block(d_model, n_head, pos, "std", n_zero) for _ in range(n_coda)])
-        self.norm = nn.LayerNorm(d_model)
+        self.prelude = nn.ModuleList([Block(d_model, nh, pos, "std", nz, norm) for nh, nz in zip(h_pre, z_pre)])
+        self.blocks = nn.ModuleList([Block(d_model, nh, pos, "std", nz, norm) for _ in range(self.n_cores) for nh, nz in zip(h_core, z_core)])
+        self.coda = nn.ModuleList([Block(d_model, nh, pos, "std", nz, norm) for nh, nz in zip(h_coda, z_coda)])
+        self.norm = _norm(d_model, norm)
         self.head = nn.Linear(d_model, n_vocab)
         self.alpha = nn.Parameter(torch.tensor(float(alpha)))
+        self.boundary = boundary
+        self.last_passes = 0
         self.loops, self.tied, self.active_k = loops, tied, loops
         # E30 (DESIGN §18): attention residuals ACROSS PASSES. The sources at pass k are the anchor (the prelude's output)
         # and the sums of passes 1..k-1 (the paper's Block form: a pass's sum holds its outputs only); the mixers read
@@ -355,14 +558,25 @@ class LoopedModel(nn.Module):
         prev = self.active_k
         if not self.tied:
             for j in range(prev, new_k):
-                src, dst = self.cores[j % prev], self.cores[j]
-                for ps, pd in zip(src.parameters(), dst.parameters()):
-                    pd.data.copy_(ps.data)
+                for src, dst in zip(self.core_blocks(j % prev), self.core_blocks(j)):
+                    for ps, pd in zip(src.parameters(), dst.parameters()):
+                        pd.data.copy_(ps.data)
         if self.res == "attnres" and self.mix == "per_pass":
             for mixers in (self.mix_attn, self.mix_mlp):
                 for j in range(prev, new_k):
                     mixers[j].w.data.copy_(mixers[j % prev].w.data)
         self.active_k = new_k
+
+    @property
+    def cores(self):
+        """The core Blocks under their pre-BrainBuilder name (`self.blocks` holds them)."""
+        return self.blocks
+
+    def core_blocks(self, k):
+        """The `core_layers` Blocks applied at pass k (tied: always the same; untied: core k % n_cores — beyond the
+        trained passes the cores cycle)."""
+        j = 0 if self.tied else k % self.n_cores
+        return list(self.blocks[j * self.core_layers:(j + 1) * self.core_layers])
 
     def _sources(self, anchor, sums):
         return [anchor] + (sums[-self.window:] if self.window > 0 else sums)
@@ -370,31 +584,69 @@ class LoopedModel(nn.Module):
     def _mixer(self, mixers, k):
         return mixers[0] if self.mix == "tied" else mixers[k % len(mixers)]
 
-    def forward(self, tok):
+    def embed(self, tok, start=0):
         h = self.emb(tok)
         if self.pos is not None:
-            h = h + self.pos[:, :tok.shape[1]]
-        for b in self.prelude:
-            h = b(h)
+            h = h + self.pos[:, start:start + tok.shape[1]]
+        return h
+
+    def new_caches(self):
+        """One k/v cache per Block APPLICATION — prelude, then `active_k` x `core_layers` core applications, then coda —
+        so a tied core's passes do not share one cache (E31's incremental forward on the looped model)."""
+        return [{} for _ in range(len(self.prelude) + self.active_k * self.core_layers + len(self.coda))]
+
+    def forward_embedded(self, h, caches=None, start=0, coords=None, anchors=None, converge=None):
+        """Prelude -> `active_k` core passes with the boundary operator between them -> coda, on already-embedded inputs;
+        returns the final residual (before the output norm and head), the mirror of `Model.forward_embedded` so that a
+        written brain's sequence axis (`Brain.think`) can append positions through the caches. `anchors` (a list, one
+        per pass) feeds the `BoundaryOp`: `anchors[0]` is injected before the first pass, the operator after pass k
+        receives `anchors[k + 1]` — E28's order (the action before its pass; re-quantise and clear after). Passes stop
+        early when the operator reports every batch element halted; `last_passes` records the count. `converge` = whether
+        register convergence may halt the loop: by default only when the runner gives no anchors (a plan of n actions is
+        n passes whatever the registers do; the executive's own loop stops when its registers settle)."""
+        n_pre = len(self.prelude)
+        cache_at = (lambda i: caches[i]) if caches is not None else (lambda i: None)
+        for i, b in enumerate(self.prelude):
+            h = b(h, cache_at(i), start, coords)
         anchor = h
+        self.last_passes = 0
+        if converge is None:
+            converge = anchors is None
         if self.res == "std":
+            if self.boundary is not None and anchors is not None and len(anchors) > 0:
+                h = self.boundary.inject(h, anchors[0])
+            prev_regs = None
             for k in range(self.active_k):
-                core = self.cores[0] if self.tied else self.cores[k % len(self.cores)]   # beyond the trained passes: cycle
-                h = core(h)
-                h = F.rms_norm(h, (h.shape[-1],)) + self.alpha * anchor  # the boundary operator, every pass
+                for l, b in enumerate(self.core_blocks(k)):
+                    h = b(h, cache_at(n_pre + k * self.core_layers + l), start, coords)
+                self.last_passes = k + 1
+                if self.boundary is None:
+                    h = F.rms_norm(h, (h.shape[-1],)) + self.alpha * anchor  # the boundary operator, every pass
+                else:
+                    nxt = anchors[k + 1] if anchors is not None and k + 1 < len(anchors) else None
+                    h, halted = self.boundary(h, anchor_vec=nxt, prev_regs=prev_regs if converge else None)
+                    if converge and self.boundary.register_dims.numel():
+                        prev_regs = h[..., self.boundary.register_dims]
+                    if bool(halted.all()):
+                        break
         else:                                                         # attention residuals across passes (E30)
             sums, partial = [], anchor
             for k in range(self.active_k):
-                core = self.cores[0] if self.tied else self.cores[k % len(self.cores)]
+                core = self.core_blocks(k)[0]
+                c = cache_at(n_pre + k)
                 x = self._mixer(self.mix_attn, k)(self._sources(anchor, sums))
-                partial = core.attn(core.n1(x))
+                partial = core.attn(core.n1(x), c, start, coords)
                 x = self._mixer(self.mix_mlp, k)(self._sources(anchor, sums) + [partial])
                 partial = partial + core.mlp(core.n2(x))
                 sums.append(partial)                                  # the pass's sum: its outputs only
+                self.last_passes = k + 1
             h = self.res_final(self._sources(anchor, sums))
-        for b in self.coda:
-            h = b(h)
-        return self.head(self.norm(h))
+        for i, b in enumerate(self.coda):
+            h = b(h, cache_at(n_pre + self.active_k * self.core_layers + i), start, coords)
+        return h
+
+    def forward(self, tok):
+        return self.head(self.norm(self.forward_embedded(self.embed(tok))))
 
     @torch.no_grad()
     def routes(self, tok):

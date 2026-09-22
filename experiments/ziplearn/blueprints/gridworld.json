@@ -1,0 +1,139 @@
+{
+  "name": "gridworld",
+  "field": {"kind": "lattice", "r": 1},
+  "subspaces": [
+    {"name": "colour",   "width": "C",  "kind": "onehot"},
+    {"name": "nbr[o]",   "width": "C",  "kind": "onehot"},
+    {"name": "pred",     "width": "V",  "kind": "dist"},
+    {"name": "action",   "width": "nA", "kind": "onehot"},
+    {"name": "util",     "width": "nA", "kind": "scalar"},
+    {"name": "noise",    "width": "nA", "kind": "scalar"},
+    {"name": "goal",     "width": "C",  "kind": "onehot"},
+    {"name": "task",     "width": 8,    "kind": "onehot"},
+    {"name": "conf",     "width": 1,    "kind": "scalar"},
+    {"name": "row",      "width": "H",  "kind": "onehot"},
+    {"name": "col",      "width": "W",  "kind": "onehot"},
+    {"name": "out",      "width": "V",  "kind": "dist"},
+    {"name": "cell",     "width": 1,    "kind": "flag"},
+    {"name": "entry",    "width": 1,    "kind": "flag"},
+    {"name": "register", "width": 1,    "kind": "flag"},
+    {"name": "border",   "width": 1,    "kind": "flag"},
+    {"name": "zero",     "width": 1,    "kind": "flag"},
+    {"name": "surprise", "width": 1,    "kind": "flag"},
+    {"name": "halt",     "width": 1,    "kind": "flag"},
+    {"name": "goal_met", "width": 1,    "kind": "flag"},
+    {"name": "bias",     "width": 1,    "kind": "flag"}
+  ],
+  "tokens": [
+    {"class": "cell",     "flag": "cell",
+     "fields": {"colour": "input", "row": "coord.row", "col": "coord.col", "bias": "const:1"}},
+    {"class": "entry",    "flag": "entry",
+     "fields": {"colour": "store", "nbr[*]": "store", "action": "store", "out": "store", "conf": "store", "goal_met": "store"}},
+    {"class": "register", "flag": "register",
+     "fields": {"noise": "runner", "goal": "store", "row": "store", "col": "store"}},
+    {"class": "border",   "flag": "border",
+     "fields": {"colour": "const:-1"}},
+    {"class": "zero",     "flag": "zero",
+     "fields": {}}
+  ],
+  "circuits": [
+    {"name": "gather[o]", "instr": "Gather",
+     "params": {"offset": "o", "src": "colour", "dst": "nbr[o]", "null": "border", "cls": "cell"},
+     "per": "offset", "place": {"layer": "auto", "head": "auto"},
+     "reads": ["row", "col", "colour"], "writes": ["nbr[o]"], "prunable": true},
+
+    {"name": "lookup", "instr": "Match",
+     "params": {"q": ["colour", "nbr[*]", "action"], "k": ["colour", "nbr[*]", "action"], "v": "out", "dst": "colour",
+                "key_class": "entry", "null": "zero", "weights": {"action": "auto"}, "mode": "replace"},
+     "per": null, "place": {"layer": "auto", "head": "auto"},
+     "reads": ["colour", "nbr[*]", "action"], "writes": ["colour"], "prunable": false},
+
+    {"name": "goal_read", "instr": "Match",
+     "params": {"q": ["colour", "nbr[*]"], "k": ["colour", "nbr[*]"], "v": "goal_met", "dst": "goal_met",
+                "key_class": "entry", "null": "zero", "weights": {}, "mode": "add"},
+     "per": null, "place": {"layer": "auto", "head": "auto"},
+     "reads": ["colour", "nbr[*]"], "writes": ["goal_met"], "prunable": false},
+
+    {"name": "bcast_act", "instr": "Broadcast",
+     "params": {"reg": "ACTION", "sub": "action", "dst": "action"},
+     "per": null, "place": {"layer": "auto", "head": "auto"},
+     "reads": ["register"], "writes": ["action"], "prunable": false},
+
+    {"name": "bcast_goal", "instr": "Broadcast",
+     "params": {"reg": "GOAL", "sub": "goal", "dst": "goal"},
+     "per": null, "place": {"layer": "auto", "head": "auto"},
+     "reads": ["register"], "writes": ["goal"], "prunable": false},
+
+    {"name": "surprise", "instr": "Compare",
+     "params": {"a": "pred", "b": "colour", "flag": "surprise"},
+     "per": null, "place": {"layer": 0, "head": "auto"},
+     "reads": ["pred", "colour"], "writes": ["surprise"], "prunable": false},
+
+    {"name": "inverse", "instr": "Pool",
+     "params": {"reg": "ACTION", "key_class": "cell", "src": "goal - colour", "W": "inverse", "dst": "util",
+                "gate": null, "sign": 1},
+     "per": null, "place": {"layer": "auto", "head": "auto"},
+     "reads": ["goal", "colour"], "writes": ["util"], "prunable": false},
+
+    {"name": "nogo", "instr": "Pool",
+     "params": {"reg": "ACTION", "key_class": "cell", "src": "colour", "W": "nogo", "dst": "util",
+                "gate": null, "sign": -1},
+     "per": null, "place": {"layer": "auto", "head": "auto"},
+     "reads": ["colour"], "writes": ["util"], "prunable": false},
+
+    {"name": "task_write", "instr": "Pool",
+     "params": {"reg": "TASK", "key_class": "cell", "src": "surprise", "W": "task_write", "dst": "task",
+                "gate": "surprise", "sign": 1},
+     "per": null, "place": {"layer": "auto", "head": "auto"},
+     "reads": ["surprise"], "writes": ["task"], "prunable": false},
+
+    {"name": "halt_row", "instr": "Row",
+     "params": {"key": {"goal_met": 1}, "threshold": 0.5, "value": {"halt": 1}},
+     "per": null, "place": {"layer": "auto", "head": "auto"},
+     "reads": ["goal_met"], "writes": ["halt"], "prunable": false},
+
+    {"name": "read_act", "instr": "Readout",
+     "params": {"sub": "action", "vocab": "nA", "M_out": 10.0},
+     "per": null, "place": {"layer": "auto", "head": "auto"},
+     "reads": ["action"], "writes": [], "prunable": false},
+
+    {"name": "read_pred", "instr": "Readout",
+     "params": {"sub": "pred", "vocab": "V", "M_out": 10.0},
+     "per": null, "place": {"layer": "auto", "head": "auto"},
+     "reads": ["pred"], "writes": [], "prunable": false}
+  ],
+  "stores": [
+    {"name": "rules", "class": "entry", "key": ["colour", "nbr[*]", "action"], "value": "out",
+     "form": "tokens", "capacity": 192, "nulls": ["border", "zero"]},
+    {"name": "goals", "class": "entry", "key": ["colour", "nbr[*]"], "value": "goal_met",
+     "form": "tokens", "capacity": 64, "nulls": ["zero"]}
+  ],
+  "registers": [
+    {"name": "ACTION", "slots": 1, "holds": ["action", "util", "noise"], "filled_by": "core"},
+    {"name": "GOAL",   "slots": 1, "holds": ["goal", "row", "col"],      "filled_by": "store"},
+    {"name": "TASK",   "slots": 1, "holds": ["task"],                    "filled_by": "core"},
+    {"name": "STEP",   "slots": 1, "holds": [],                          "filled_by": "runner"}
+  ],
+  "loop": {
+    "core": "auto",
+    "tied": true,
+    "boundary": {
+      "keep": ["colour", "pred", "action", "noise", "goal", "task", "conf", "row", "col", "out",
+               "cell", "entry", "register", "border", "zero", "bias"],
+      "clear": ["nbr[*]", "util", "surprise", "goal_met", "halt"],
+      "quantise": [{"read": ["colour"], "write": "pred"},
+                   {"read": ["util", "noise"], "write": "action"}],
+      "commit": [["pred", "colour"]],
+      "anchor": {"sub": "action", "from": "ACTION"},
+      "halt": "halt"
+    },
+    "sequence": null
+  },
+  "routes": [],
+  "tests": [
+    {"name": "rollout_vs_table",
+     "generator": "brainbuilder.e28_plans(play_levels=2, budget=150, sleep=True, levels=[0, 1, 2], states=40, plans=300, length=[1, 4])",
+     "oracle": "ziplib.store.Store.predict",
+     "criterion": {"min": 0.98}}
+  ]
+}

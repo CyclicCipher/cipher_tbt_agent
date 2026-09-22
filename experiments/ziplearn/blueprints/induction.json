@@ -1,0 +1,55 @@
+{
+  "name": "induction",
+  "field": {"kind": "lattice", "r": 1},
+  "subspaces": [
+    {"name": "tok",   "width": "C", "kind": "onehot"},
+    {"name": "_pad1", "width": 1,   "kind": "scalar"},
+    {"name": "prev",  "width": "C", "kind": "onehot"},
+    {"name": "_pad2", "width": 1,   "kind": "scalar"},
+    {"name": "out",   "width": "V", "kind": "dist"},
+    {"name": "_pad3", "width": 35,  "kind": "scalar"},
+    {"name": "bias",  "width": 1,   "kind": "flag"}
+  ],
+  "tokens": [
+    {"class": "tok", "flag": "bias", "fields": {"tok": "input", "row": "coord.row", "col": "coord.col", "bias": "const:1"}}
+  ],
+  "circuits": [
+    {"name": "prev_token", "instr": "Gather",
+     "params": {"offset": [0, -1], "src": "tok", "dst": "prev", "null": null, "cls": "tok", "M": 3.0},
+     "per": null, "place": {"layer": 0, "head": 0},
+     "reads": ["bias", "tok"], "writes": ["prev"], "prunable": false},
+
+    {"name": "induction", "instr": "Match",
+     "params": {"q": ["tok"], "k": ["prev"], "v": "tok", "dst": "out",
+                "key_class": null, "null": null, "weights": {}, "mode": "add", "M": 2.0},
+     "per": null, "place": {"layer": 1, "head": 0},
+     "reads": ["tok", "prev"], "writes": ["out"], "prunable": false},
+
+    {"name": "read_out", "instr": "Readout",
+     "params": {"sub": "out", "vocab": "V", "M_out": 10.0},
+     "per": null, "place": {"layer": "auto", "head": "auto"},
+     "reads": ["out"], "writes": [], "prunable": false}
+  ],
+  "stores": [],
+  "registers": [],
+  "loop": {
+    "core": "auto",
+    "tied": true,
+    "boundary": {
+      "keep": ["tok", "_pad1", "prev", "_pad2", "out", "_pad3", "bias"],
+      "clear": [],
+      "quantise": [],
+      "commit": [],
+      "anchor": null,
+      "halt": null
+    },
+    "sequence": null
+  },
+  "routes": [],
+  "tests": [
+    {"name": "induction",
+     "generator": "brainbuilder.e18_patterns(n=256, period=8, distinct=True)",
+     "oracle": "brainbuilder.e18_next_token(second_copy=True)",
+     "criterion": {"min": 1.0}}
+  ]
+}
