@@ -1,0 +1,4 @@
+[expA chain+word fine grid, prefix 300k] chain 2.2288 | grid_bayes_by_ctx (share 0.01) 2.1516 | best global point (0.7, 0.5) 2.1719 | per-context oracle (32 contexts) 2.1439 (+ prior 0.0032 = 2.1471) | posterior - oracle +0.0076 +- 0.0006 | posterior - global best -0.0204 +- 0.0034
+  part A done at 31s
+[A2-min: 42-point (beta_chain, beta_rest) grid, 18 experts, decaying switch, prefix 300k] chain 2.2287 | bayes_over_grid2 (decay) 2.1678 | best global point (0.75, 0.5) 2.2027 | per-context oracle (32 contexts) 2.1661 (+ prior 0.0029 = 2.1689) | posterior - oracle +0.0018 +- 0.0013 | posterior - global best -0.0349 +- 0.0042
+  part B done at 89s

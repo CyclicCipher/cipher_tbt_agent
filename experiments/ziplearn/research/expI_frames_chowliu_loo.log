@@ -1,0 +1,227 @@
+expI: Chow-Liu tree vs naive Bayes, LOO-selected Hamming kernel, five held-out boards (E35 apparatus, K = 8, radius 1)
+   training: 115 frames on 4 boards (LockPath L0-1, CollectAll L0-1), target palette [0, 1, 2, 3, 4, 5]  [18s]
+   train lockpath_l0    n= 23 shape=[7, 9] colours=[0, 1, 2, 3] not-in-training-targets=[] in-palette cells 1.000 varying 0.365
+   train lockpath_l1    n= 29 shape=[7, 11] colours=[0, 1, 2, 3, 4, 5] not-in-training-targets=[] in-palette cells 1.000 varying 0.299
+   train collectall_l0  n= 27 shape=[6, 9] colours=[0, 1, 2, 4] not-in-training-targets=[] in-palette cells 1.000 varying 0.259
+   train collectall_l1  n= 36 shape=[7, 10] colours=[0, 1, 2, 4] not-in-training-targets=[] in-palette cells 1.000 varying 0.314
+   held  lockpath_l2    n= 85 shape=[8, 11] colours=[0, 1, 2, 3, 6, 7] not-in-training-targets=[6, 7] in-palette cells 0.977 varying 0.455
+   held  lockpath_l3    n= 63 shape=[7, 13] colours=[0, 1, 2, 3, 4, 5, 6, 7, 8] not-in-training-targets=[6, 7, 8] in-palette cells 0.967 varying 0.220
+   held  collectall_l2  n= 50 shape=[7, 11] colours=[0, 1, 2, 4] not-in-training-targets=[] in-palette cells 1.000 varying 0.351
+   held  multikey_l1    n= 18 shape=[5, 13] colours=[0, 1, 2, 3, 4, 5, 9, 10] not-in-training-targets=[9, 10] in-palette cells 0.981 varying 0.246
+   held  toggle_l0      n= 17 shape=[5, 9] colours=[0, 1, 2, 3, 5, 8] not-in-training-targets=[8] in-palette cells 0.980 varying 0.200
+   blocks: chain 1:12804, 2:20924, 3:26068, 4:28811, 5:30099, 6:30556; one shot 2:20924, 4:28811, 6:30556 stored windows (from 30640 pairs each)  [20s]
+   one_shot_0.25: CMI matrix (bits, cells in raster order 0..8, centre = 4):
+       0.00  0.40  0.31  0.29  0.02  0.09  0.23  0.13  0.21
+       0.40  0.00  0.60  0.21  0.02  0.23  0.24  0.23  0.10
+       0.31  0.60  0.00  0.19  0.02  0.47  0.15  0.14  0.24
+       0.29  0.21  0.19  0.00  0.02  0.21  0.48  0.23  0.07
+       0.02  0.02  0.02  0.02  0.00  0.02  0.02  0.02  0.02
+       0.09  0.23  0.47  0.21  0.02  0.00  0.11  0.19  0.24
+       0.23  0.24  0.15  0.48  0.02  0.11  0.00  0.59  0.33
+       0.13  0.23  0.14  0.23  0.02  0.19  0.59  0.00  0.37
+       0.21  0.10  0.24  0.07  0.02  0.24  0.33  0.37  0.00
+   one_shot_0.25: I(cell; y) = [0.29, 0.17, 0.11, 0.21, 0.79, 0.22, 0.09, 0.16, 0.3] bits; CMI given y: corner-adjacent-edge 0.375, edge-edge 0.214, corner-centre 0.021, edge-centre 0.021, mean of 36 pairs 0.207; tree9 edges [(1, 2, 0.6), (6, 7, 0.59), (3, 6, 0.48), (2, 5, 0.47), (0, 1, 0.4), (7, 8, 0.37), (0, 3, 0.29), (0, 4, 0.02)]
+   one_shot_0.5: CMI matrix (bits, cells in raster order 0..8, centre = 4):
+       0.00  0.33  0.26  0.24  0.03  0.07  0.18  0.09  0.15
+       0.33  0.00  0.50  0.12  0.03  0.15  0.16  0.13  0.08
+       0.26  0.50  0.00  0.13  0.03  0.44  0.10  0.09  0.22
+       0.24  0.12  0.13  0.00  0.03  0.12  0.41  0.14  0.06
+       0.03  0.03  0.03  0.03  0.00  0.03  0.03  0.03  0.03
+       0.07  0.15  0.44  0.12  0.03  0.00  0.08  0.10  0.21
+       0.18  0.16  0.10  0.41  0.03  0.08  0.00  0.54  0.30
+       0.09  0.13  0.09  0.14  0.03  0.10  0.54  0.00  0.32
+       0.15  0.08  0.22  0.06  0.03  0.21  0.30  0.32  0.00
+   one_shot_0.5: I(cell; y) = [0.26, 0.16, 0.08, 0.16, 0.45, 0.17, 0.06, 0.15, 0.27] bits; CMI given y: corner-adjacent-edge 0.319, edge-edge 0.130, corner-centre 0.028, edge-centre 0.028, mean of 36 pairs 0.165; tree9 edges [(6, 7, 0.54), (1, 2, 0.5), (2, 5, 0.44), (3, 6, 0.41), (0, 1, 0.33), (7, 8, 0.32), (0, 3, 0.24), (4, 5, 0.03)]
+   one_shot_0.75: CMI matrix (bits, cells in raster order 0..8, centre = 4):
+       0.00  0.29  0.22  0.21  0.03  0.05  0.15  0.06  0.10
+       0.29  0.00  0.45  0.07  0.03  0.10  0.09  0.07  0.06
+       0.22  0.45  0.00  0.08  0.03  0.42  0.07  0.06  0.20
+       0.21  0.07  0.08  0.00  0.03  0.06  0.37  0.09  0.05
+       0.03  0.03  0.03  0.03  0.00  0.03  0.03  0.03  0.03
+       0.05  0.10  0.42  0.06  0.03  0.00  0.05  0.06  0.19
+       0.15  0.09  0.07  0.37  0.03  0.05  0.00  0.51  0.29
+       0.06  0.07  0.06  0.09  0.03  0.06  0.51  0.00  0.29
+       0.10  0.06  0.20  0.05  0.03  0.19  0.29  0.29  0.00
+   one_shot_0.75: I(cell; y) = [0.24, 0.15, 0.06, 0.11, 0.16, 0.12, 0.04, 0.14, 0.25] bits; CMI given y: corner-adjacent-edge 0.287, edge-edge 0.078, corner-centre 0.031, edge-centre 0.032, mean of 36 pairs 0.138; tree9 edges [(6, 7, 0.51), (1, 2, 0.45), (2, 5, 0.42), (3, 6, 0.37), (7, 8, 0.29), (0, 1, 0.29), (0, 3, 0.21), (4, 5, 0.03)]
+   trees built  [20s]
+   LOO one_shot_0.25  (3000 windows, 4005 obs): window-out picks k=50 h=0.75    (0.207 bits, acc 0.947; k=1 0.682 / 0.934); pair-out picks k=50 h=0.75    (0.206 bits, acc 0.948; k=1 2.727 / 0.692); by-acc picks k=7 h=0.75 / k=7 h=0.5  [22s]
+   LOO one_shot_0.5   (3000 windows, 3245 obs): window-out picks k=100 h=1.0    (0.402 bits, acc 0.907; k=1 1.354 / 0.866); pair-out picks k=100 h=1.0    (0.402 bits, acc 0.907; k=1 3.587 / 0.607); by-acc picks k=100 h=0.75 / k=100 h=0.75  [25s]
+   LOO one_shot_0.75  (3000 windows, 3009 obs): window-out picks k=200 h=1.0    (0.740 bits, acc 0.815; k=1 2.605 / 0.741); pair-out picks k=200 h=1.0    (0.740 bits, acc 0.815; k=1 3.979 / 0.554); by-acc picks k=200 h=0.75 / k=200 h=0.75  [27s]
+   LOO block1         (3000 windows, 7209 obs): window-out picks k=50 h=0.5     (0.144 bits, acc 0.959; k=1 0.577 / 0.955); pair-out picks k=15 h=0.5     (0.112 bits, acc 0.971; k=1 1.380 / 0.854); by-acc picks k=50 h=0.25 / k=50 h=0.25  [29s]
+   LOO block2         (3000 windows, 4352 obs): window-out picks k=50 h=0.5     (0.642 bits, acc 0.861; k=1 1.547 / 0.849); pair-out picks k=50 h=0.5     (0.606 bits, acc 0.863; k=1 2.553 / 0.666); by-acc picks k=7 h=0.5 / k=100 h=0.25  [31s]
+   LOO block3         (3000 windows, 3609 obs): window-out picks k=50 h=0.75    (0.880 bits, acc 0.757; k=1 2.443 / 0.743); pair-out picks k=50 h=0.75    (0.854 bits, acc 0.758; k=1 3.168 / 0.527); by-acc picks k=50 h=0.25 / k=3 h=0.25  [34s]
+   LOO block4         (3000 windows, 3159 obs): window-out picks k=50 h=1.0     (1.089 bits, acc 0.661; k=1 3.155 / 0.688); pair-out picks k=50 h=1.0     (1.079 bits, acc 0.662; k=1 3.739 / 0.404); by-acc picks k=15 h=0.25 / k=15 h=0.25  [36s]
+   LOO block5         (3000 windows, 3045 obs): window-out picks k=15 h=1.5     (1.254 bits, acc 0.666; k=1 3.816 / 0.618); pair-out picks k=15 h=1.5     (1.252 bits, acc 0.677; k=1 3.895 / 0.312); by-acc picks k=7 h=1.5 / k=15 h=1.0  [38s]
+   LOO block6         (3000 windows, 3007 obs): window-out picks k=15 h=1.5     (1.347 bits, acc 0.713; k=1 4.244 / 0.576); pair-out picks k=15 h=1.5     (1.356 bits, acc 0.711; k=1 3.981 / 0.254); by-acc picks k=50 h=0.75 / k=50 h=0.75  [41s]
+   held out: 233 frames x 3 draws = 699 corrupted frames per t  [41s]
+   t=0.25: one-shot predictors done  [48s]
+   t=0.25: chain_hard done  [53s]
+   t=0.25: chain_soft_loo_window done  [53s]
+   t=0.25: chain_soft_loo_pair done  [54s]
+   t=0.25: chain_soft_expE_heldout_selected done  [54s]
+   t=0.25: chain_nb9 done  [55s]
+   t=0.25: chain_nb5 done  [55s]
+   t=0.25: chain_tan9 done  [55s]
+
+   t = 0.25: 56994 held-out cells (0.979 in the training palette); kernels: soft_loo_window = k=50 h=0.75, soft_loo_pair = k=50 h=0.75, soft_expE_heldout_selected = k=all h=0.5; chain kernels loo_window: k=50 h=0.5, k=50 h=0.5; loo_pair: k=15 h=0.5, k=50 h=0.5
+   predictor                         pooled  b-mean  lockpath_l2  lockpath_l3 collectall_l  multikey_l1    toggle_l0   bits  entr   gap  pmax | in-palette: acc  gap
+   input                              0.767   0.764        0.771        0.763        0.772        0.752        0.763
+   colour_prior                       0.577   0.537        0.614        0.553        0.598        0.485        0.437
+   centre                             0.850   0.841        0.855        0.834        0.883        0.821        0.810   0.733 0.481 +0.253 0.863 | 0.868 -0.016
+   nb_corners                         0.907   0.908        0.902        0.897        0.929        0.916        0.895   0.688 0.328 +0.361 0.927 | 0.926 -0.007
+   nb9                                0.919   0.917        0.919        0.907        0.941        0.915        0.905   0.796 0.300 +0.495 0.929 | 0.939 -0.003
+   nb5                                0.924   0.922        0.928        0.909        0.947        0.911        0.915   0.658 0.277 +0.381 0.935 | 0.944 -0.020
+   tan5                               0.928   0.925        0.932        0.909        0.955        0.912        0.914   0.648 0.221 +0.427 0.947 | 0.948 +0.025
+   tan9                               0.926   0.921        0.930        0.908        0.951        0.915        0.902   0.822 0.212 +0.610 0.947 | 0.945 +0.063
+   tan9_m1                            0.922   0.917        0.927        0.904        0.948        0.911        0.897   0.861 0.195 +0.666 0.950 | 0.942 +0.120
+   tan9_m20                           0.928   0.924        0.932        0.912        0.954        0.916        0.906   0.802 0.225 +0.578 0.945 | 0.948 +0.033
+   tan9_m100                          0.932   0.927        0.936        0.914        0.957        0.921        0.909   0.787 0.231 +0.556 0.944 | 0.952 +0.015
+   hard                               0.926   0.919        0.932        0.908        0.950        0.909        0.897   0.772 0.109 +0.663 0.987 | 0.945 +0.456
+   soft_loo_window                    0.939   0.928        0.951        0.919        0.964        0.914        0.891   0.423 0.256 +0.166 0.947 | 0.959 -0.059
+   soft_loo_pair                      0.939   0.928        0.951        0.919        0.964        0.914        0.891   0.423 0.256 +0.166 0.947 | 0.959 -0.059
+   soft_expE_heldout_selected         0.938   0.925        0.951        0.919        0.958        0.914        0.885   0.449 0.491 -0.041 0.906 | 0.958 -0.239
+   chain_hard                         0.929   0.920        0.937        0.911        0.953        0.912        0.889
+   chain_nb9                          0.918   0.915        0.918        0.908        0.943        0.913        0.895
+   chain_nb5                          0.922   0.920        0.925        0.907        0.945        0.907        0.915
+   chain_tan9                         0.929   0.926        0.931        0.912        0.958        0.919        0.912
+   chain_soft_loo_window              0.944   0.929        0.955        0.923        0.972        0.918        0.879
+   chain_soft_loo_pair                0.944   0.930        0.955        0.923        0.973        0.917        0.881
+   chain_soft_expE_heldout_selected   0.940   0.926        0.956        0.922        0.957        0.916        0.881
+   apparatus check, LockPath L2 + CollectAll L2 pooled (check_frames_apparatus.json in brackets): hard 0.938 [0.941], nb9 0.927 [0.926], nb5 0.934 [0.934], centre 0.865 [0.863], input 0.771 [0.767], soft_expE_heldout_selected 0.953 [0.954]
+   out-of-palette cells (0.021 of cells, clean colour never a training target): bits per such cell centre 14.2, nb9 25.5, tan9 27.5, hard 10.6, soft_loo_window 11.8
+      soft_loo_window - hard                                       pooled +0.014 [+0.012, +0.016]  boards mean +0.009 +- 0.004 (+4/-1 of 5)  per board +0.019 +0.011 +0.014 +0.005 -0.006
+      soft_loo_pair - hard                                         pooled +0.014 [+0.012, +0.016]  boards mean +0.009 +- 0.004 (+4/-1 of 5)  per board +0.019 +0.011 +0.014 +0.005 -0.006
+      soft_expE_heldout_selected - soft_loo_window                 pooled -0.001 [-0.002, -0.001]  boards mean -0.002 +- 0.002 (+2/-3 of 5)  per board +0.000 -0.000 -0.007 +0.000 -0.006
+      tan9 - nb9                                                   pooled +0.006 [+0.005, +0.008]  boards mean +0.004 +- 0.003 (+4/-1 of 5)  per board +0.011 +0.001 +0.010 +0.001 -0.003
+      tan9 - nb5                                                   pooled +0.001 [-0.001, +0.003]  boards mean -0.001 +- 0.003 (+3/-2 of 5)  per board +0.002 -0.001 +0.003 +0.004 -0.012
+      nb5 - nb9                                                    pooled +0.005 [+0.004, +0.007]  boards mean +0.004 +- 0.002 (+4/-1 of 5)  per board +0.009 +0.002 +0.006 -0.004 +0.009
+      tan5 - nb5                                                   pooled +0.004 [+0.002, +0.005]  boards mean +0.003 +- 0.002 (+4/-1 of 5)  per board +0.005 +0.001 +0.008 +0.001 -0.000
+      soft_loo_window - tan9                                       pooled +0.014 [+0.012, +0.016]  boards mean +0.007 +- 0.006 (+3/-2 of 5)  per board +0.021 +0.011 +0.014 -0.001 -0.011
+      nb9 - hard                                                   pooled -0.006 [-0.009, -0.004]  boards mean -0.002 +- 0.004 (+2/-3 of 5)  per board -0.013 -0.001 -0.009 +0.006 +0.008
+      tan9 - hard                                                  pooled -0.000 [-0.002, +0.002]  boards mean +0.002 +- 0.002 (+3/-2 of 5)  per board -0.002 -0.000 +0.001 +0.007 +0.005
+      nb9 - centre                                                 pooled +0.069 [+0.066, +0.071]  boards mean +0.077 +- 0.008 (+5/-0 of 5)  per board +0.064 +0.073 +0.058 +0.093 +0.095
+      chain_soft_loo_window - soft_loo_window                      pooled +0.004 [+0.003, +0.005]  boards mean +0.002 +- 0.004 (+4/-1 of 5)  per board +0.004 +0.004 +0.008 +0.004 -0.012
+      chain_hard - hard                                            pooled +0.003 [+0.002, +0.005]  boards mean +0.001 +- 0.002 (+4/-1 of 5)  per board +0.005 +0.003 +0.003 +0.003 -0.008
+      chain_tan9 - tan9                                            pooled +0.004 [+0.002, +0.005]  boards mean +0.005 +- 0.001 (+5/-0 of 5)  per board +0.001 +0.004 +0.007 +0.004 +0.009
+      chain_nb5 - nb5                                              pooled -0.003 [-0.003, -0.002]  boards mean -0.002 +- 0.001 (+0/-4 of 5)  per board -0.003 -0.002 -0.002 -0.004 +0.000
+      chain_soft_loo_window - chain_hard                           pooled +0.015 [+0.013, +0.017]  boards mean +0.009 +- 0.005 (+4/-1 of 5)  per board +0.018 +0.012 +0.019 +0.006 -0.010
+      chain_soft_expE_heldout_selected - chain_soft_loo_window     pooled -0.003 [-0.005, -0.002]  boards mean -0.003 +- 0.003 (+2/-3 of 5)  per board +0.000 -0.001 -0.015 -0.002 +0.002
+      chain_tan9 - chain_nb9                                       pooled +0.011 [+0.009, +0.013]  boards mean +0.011 +- 0.003 (+5/-0 of 5)  per board +0.014 +0.004 +0.015 +0.006 +0.016
+      tan9_m1 - nb9                                                pooled +0.003 [+0.001, +0.005]  boards mean -0.000 +- 0.003 (+2/-3 of 5)  per board +0.008 -0.003 +0.007 -0.004 -0.008
+      tan9_m20 - nb9                                               pooled +0.009 [+0.008, +0.011]  boards mean +0.006 +- 0.003 (+5/-0 of 5)  per board +0.013 +0.005 +0.013 +0.001 +0.000
+      tan9_m100 - nb9                                              pooled +0.013 [+0.011, +0.014]  boards mean +0.010 +- 0.003 (+5/-0 of 5)  per board +0.017 +0.007 +0.016 +0.006 +0.003
+   [57s]
+   t=0.5: one-shot predictors done  [69s]
+   t=0.5: chain_hard done  [85s]
+   t=0.5: chain_soft_loo_window done  [87s]
+   t=0.5: chain_soft_loo_pair done  [88s]
+   t=0.5: chain_soft_expE_heldout_selected done  [91s]
+   t=0.5: chain_nb9 done  [92s]
+   t=0.5: chain_nb5 done  [92s]
+   t=0.5: chain_tan9 done  [93s]
+
+   t = 0.5: 56994 held-out cells (0.979 in the training palette); kernels: soft_loo_window = k=100 h=1.0, soft_loo_pair = k=100 h=1.0, soft_expE_heldout_selected = k=all h=0.5; chain kernels loo_window: k=50 h=0.5, k=50 h=0.5, k=50 h=0.75, k=50 h=1.0; loo_pair: k=15 h=0.5, k=50 h=0.5, k=50 h=0.75, k=50 h=1.0
+   predictor                         pooled  b-mean  lockpath_l2  lockpath_l3 collectall_l  multikey_l1    toggle_l0   bits  entr   gap  pmax | in-palette: acc  gap
+   input                              0.531   0.528        0.534        0.529        0.533        0.514        0.528
+   colour_prior                       0.577   0.537        0.614        0.553        0.598        0.485        0.437
+   centre                             0.756   0.735        0.776        0.738        0.774        0.707        0.683   1.083 0.824 +0.259 0.757 | 0.772 -0.031
+   nb_corners                         0.838   0.841        0.833        0.827        0.857        0.858        0.829   0.855 0.596 +0.259 0.851 | 0.855 -0.061
+   nb9                                0.863   0.862        0.867        0.845        0.883        0.861        0.853   0.895 0.568 +0.327 0.858 | 0.881 -0.052
+   nb5                                0.863   0.860        0.871        0.843        0.884        0.846        0.855   0.823 0.520 +0.303 0.867 | 0.881 -0.047
+   tan5                               0.867   0.865        0.876        0.844        0.890        0.858        0.858   0.823 0.435 +0.388 0.884 | 0.886 +0.039
+   tan9                               0.867   0.868        0.869        0.849        0.888        0.877        0.860   0.912 0.399 +0.512 0.892 | 0.885 +0.097
+   tan9_m1                            0.866   0.868        0.868        0.849        0.888        0.877        0.857   0.973 0.364 +0.610 0.898 | 0.885 +0.194
+   tan9_m20                           0.868   0.869        0.871        0.850        0.889        0.876        0.860   0.884 0.437 +0.447 0.886 | 0.887 +0.033
+   tan9_m100                          0.872   0.871        0.876        0.852        0.893        0.873        0.860   0.868 0.466 +0.402 0.882 | 0.890 -0.009
+   hard                               0.837   0.836        0.841        0.822        0.856        0.836        0.825   1.641 0.155 +1.486 0.986 | 0.855 +1.308
+   soft_loo_window                    0.891   0.884        0.900        0.871        0.912        0.880        0.856   0.620 0.593 +0.027 0.861 | 0.910 -0.169
+   soft_loo_pair                      0.891   0.884        0.900        0.871        0.912        0.880        0.856   0.620 0.593 +0.027 0.861 | 0.910 -0.169
+   soft_expE_heldout_selected         0.892   0.883        0.904        0.873        0.912        0.875        0.850   0.736 1.260 -0.524 0.758 | 0.911 -0.630
+   chain_hard                         0.867   0.859        0.879        0.847        0.886        0.854        0.827
+   chain_nb9                          0.859   0.861        0.856        0.847        0.879        0.870        0.854
+   chain_nb5                          0.847   0.847        0.851        0.829        0.869        0.835        0.854
+   chain_tan9                         0.873   0.876        0.873        0.858        0.890        0.889        0.869
+   chain_soft_loo_window              0.910   0.902        0.919        0.891        0.932        0.899        0.867
+   chain_soft_loo_pair                0.911   0.903        0.921        0.892        0.934        0.899        0.869
+   chain_soft_expE_heldout_selected   0.908   0.897        0.921        0.887        0.928        0.889        0.861
+   apparatus check, LockPath L2 + CollectAll L2 pooled (check_frames_apparatus.json in brackets): hard 0.846 [0.848], nb9 0.873 [0.874], nb5 0.876 [0.881], centre 0.775 [0.778], input 0.534 [0.532], soft_expE_heldout_selected 0.907 [0.906]
+   out-of-palette cells (0.021 of cells, clean colour never a training target): bits per such cell centre 15.2, nb9 19.7, tan9 21.2, hard 10.0, soft_loo_window 10.6
+      soft_loo_window - hard                                       pooled +0.053 [+0.051, +0.056]  boards mean +0.048 +- 0.005 (+5/-0 of 5)  per board +0.059 +0.050 +0.055 +0.044 +0.031
+      soft_loo_pair - hard                                         pooled +0.053 [+0.051, +0.056]  boards mean +0.048 +- 0.005 (+5/-0 of 5)  per board +0.059 +0.050 +0.055 +0.044 +0.031
+      soft_expE_heldout_selected - soft_loo_window                 pooled +0.001 [+0.000, +0.003]  boards mean -0.001 +- 0.002 (+3/-2 of 5)  per board +0.003 +0.001 +0.000 -0.005 -0.006
+      tan9 - nb9                                                   pooled +0.004 [+0.002, +0.007]  boards mean +0.007 +- 0.002 (+5/-0 of 5)  per board +0.002 +0.004 +0.004 +0.016 +0.007
+      tan9 - nb5                                                   pooled +0.004 [+0.001, +0.007]  boards mean +0.009 +- 0.006 (+4/-1 of 5)  per board -0.002 +0.006 +0.004 +0.030 +0.005
+      nb5 - nb9                                                    pooled +0.000 [-0.002, +0.003]  boards mean -0.002 +- 0.003 (+3/-2 of 5)  per board +0.004 -0.002 +0.001 -0.015 +0.002
+      tan5 - nb5                                                   pooled +0.004 [+0.002, +0.006]  boards mean +0.005 +- 0.002 (+5/-0 of 5)  per board +0.005 +0.001 +0.005 +0.012 +0.003
+      soft_loo_window - tan9                                       pooled +0.024 [+0.021, +0.026]  boards mean +0.015 +- 0.007 (+4/-1 of 5)  per board +0.031 +0.022 +0.024 +0.003 -0.004
+      nb9 - hard                                                   pooled +0.025 [+0.022, +0.028]  boards mean +0.026 +- 0.001 (+5/-0 of 5)  per board +0.026 +0.023 +0.027 +0.025 +0.027
+      tan9 - hard                                                  pooled +0.030 [+0.027, +0.032]  boards mean +0.032 +- 0.002 (+5/-0 of 5)  per board +0.028 +0.028 +0.031 +0.040 +0.034
+      nb9 - centre                                                 pooled +0.107 [+0.103, +0.111]  boards mean +0.127 +- 0.015 (+5/-0 of 5)  per board +0.092 +0.107 +0.110 +0.154 +0.170
+      chain_soft_loo_window - soft_loo_window                      pooled +0.019 [+0.017, +0.021]  boards mean +0.018 +- 0.002 (+5/-0 of 5)  per board +0.019 +0.020 +0.021 +0.019 +0.011
+      chain_hard - hard                                            pooled +0.030 [+0.027, +0.033]  boards mean +0.022 +- 0.006 (+5/-0 of 5)  per board +0.037 +0.026 +0.030 +0.017 +0.002
+      chain_tan9 - tan9                                            pooled +0.006 [+0.003, +0.008]  boards mean +0.007 +- 0.002 (+5/-0 of 5)  per board +0.004 +0.009 +0.002 +0.013 +0.010
+      chain_nb5 - nb5                                              pooled -0.016 [-0.018, -0.014]  boards mean -0.012 +- 0.003 (+0/-5 of 5)  per board -0.020 -0.014 -0.016 -0.011 -0.001
+      chain_soft_loo_window - chain_hard                           pooled +0.043 [+0.040, +0.046]  boards mean +0.043 +- 0.001 (+5/-0 of 5)  per board +0.041 +0.044 +0.047 +0.045 +0.039
+      chain_soft_expE_heldout_selected - chain_soft_loo_window     pooled -0.002 [-0.004, +0.000]  boards mean -0.004 +- 0.002 (+1/-4 of 5)  per board +0.002 -0.004 -0.004 -0.009 -0.006
+      chain_tan9 - chain_nb9                                       pooled +0.014 [+0.011, +0.016]  boards mean +0.015 +- 0.002 (+5/-0 of 5)  per board +0.017 +0.011 +0.011 +0.020 +0.015
+      tan9_m1 - nb9                                                pooled +0.004 [+0.001, +0.006]  boards mean +0.006 +- 0.003 (+5/-0 of 5)  per board +0.001 +0.004 +0.004 +0.016 +0.004
+      tan9_m20 - nb9                                               pooled +0.006 [+0.004, +0.008]  boards mean +0.008 +- 0.002 (+5/-0 of 5)  per board +0.004 +0.005 +0.006 +0.015 +0.007
+      tan9_m100 - nb9                                              pooled +0.009 [+0.007, +0.011]  boards mean +0.009 +- 0.001 (+5/-0 of 5)  per board +0.009 +0.007 +0.010 +0.012 +0.007
+   [94s]
+   t=0.75: one-shot predictors done  [109s]
+   t=0.75: chain_hard done  [137s]
+   t=0.75: chain_soft_loo_window done  [148s]
+   t=0.75: chain_soft_loo_pair done  [150s]
+   t=0.75: chain_soft_expE_heldout_selected done  [152s]
+   t=0.75: chain_nb9 done  [153s]
+   t=0.75: chain_nb5 done  [154s]
+   t=0.75: chain_tan9 done  [155s]
+
+   t = 0.75: 56994 held-out cells (0.979 in the training palette); kernels: soft_loo_window = k=200 h=1.0, soft_loo_pair = k=200 h=1.0, soft_expE_heldout_selected = k=all h=0.5; chain kernels loo_window: k=50 h=0.5, k=50 h=0.5, k=50 h=0.75, k=50 h=1.0, k=15 h=1.5, k=15 h=1.5; loo_pair: k=15 h=0.5, k=50 h=0.5, k=50 h=0.75, k=50 h=1.0, k=15 h=1.5, k=15 h=1.5
+   predictor                         pooled  b-mean  lockpath_l2  lockpath_l3 collectall_l  multikey_l1    toggle_l0   bits  entr   gap  pmax | in-palette: acc  gap
+   input                              0.296   0.294        0.299        0.290        0.303        0.291        0.286
+   colour_prior                       0.577   0.537        0.614        0.553        0.598        0.485        0.437
+   centre                             0.661   0.633        0.689        0.638        0.681        0.597        0.558   1.353 1.106 +0.247 0.655 | 0.675 -0.057
+   nb_corners                         0.797   0.791        0.804        0.781        0.818        0.797        0.756   0.995 0.843 +0.152 0.777 | 0.814 -0.137
+   nb9                                0.803   0.797        0.812        0.782        0.826        0.789        0.773   1.020 0.858 +0.162 0.777 | 0.820 -0.137
+   nb5                                0.811   0.804        0.826        0.785        0.833        0.791        0.783   0.982 0.757 +0.225 0.795 | 0.829 -0.087
+   tan5                               0.802   0.795        0.816        0.776        0.823        0.787        0.774   1.006 0.640 +0.366 0.815 | 0.819 +0.055
+   tan9                               0.789   0.792        0.789        0.774        0.808        0.805        0.784   1.071 0.595 +0.476 0.822 | 0.806 +0.148
+   tan9_m1                            0.787   0.790        0.787        0.772        0.807        0.803        0.782   1.166 0.550 +0.616 0.828 | 0.804 +0.289
+   tan9_m20                           0.793   0.795        0.795        0.777        0.812        0.807        0.783   1.024 0.654 +0.370 0.815 | 0.810 +0.042
+   tan9_m100                          0.800   0.799        0.804        0.783        0.819        0.806        0.785   0.999 0.707 +0.293 0.809 | 0.817 -0.032
+   hard                               0.729   0.736        0.727        0.715        0.742        0.748        0.748   2.727 0.168 +2.559 0.985 | 0.744 +2.405
+   soft_loo_window                    0.817   0.813        0.825        0.797        0.837        0.815        0.794   0.858 0.871 -0.013 0.763 | 0.834 -0.191
+   soft_loo_pair                      0.817   0.813        0.825        0.797        0.837        0.815        0.794   0.858 0.871 -0.013 0.763 | 0.834 -0.191
+   soft_expE_heldout_selected         0.817   0.804        0.830        0.797        0.843        0.790        0.760   1.268 2.189 -0.921 0.569 | 0.835 -0.973
+   chain_hard                         0.789   0.791        0.791        0.774        0.807        0.800        0.783
+   chain_nb9                          0.788   0.794        0.786        0.772        0.809        0.810        0.792
+   chain_nb5                          0.759   0.758        0.767        0.734        0.780        0.758        0.752
+   chain_tan9                         0.799   0.807        0.798        0.780        0.820        0.824        0.814
+   chain_soft_loo_window              0.840   0.838        0.845        0.822        0.859        0.849        0.816
+   chain_soft_loo_pair                0.840   0.838        0.845        0.822        0.860        0.849        0.815
+   chain_soft_expE_heldout_selected   0.844   0.840        0.851        0.825        0.864        0.843        0.818
+   apparatus check, LockPath L2 + CollectAll L2 pooled (check_frames_apparatus.json in brackets): hard 0.732 [0.739], nb9 0.817 [0.820], nb5 0.829 [0.828], centre 0.687 [0.683], input 0.300 [0.290], soft_expE_heldout_selected 0.834 [0.832]
+   out-of-palette cells (0.021 of cells, clean colour never a training target): bits per such cell centre 15.8, nb9 15.9, tan9 17.1, hard 10.0, soft_loo_window 9.8
+      soft_loo_window - hard                                       pooled +0.088 [+0.085, +0.092]  boards mean +0.077 +- 0.009 (+5/-0 of 5)  per board +0.098 +0.082 +0.094 +0.067 +0.046
+      soft_loo_pair - hard                                         pooled +0.088 [+0.084, +0.092]  boards mean +0.077 +- 0.009 (+5/-0 of 5)  per board +0.098 +0.082 +0.094 +0.067 +0.046
+      soft_expE_heldout_selected - soft_loo_window                 pooled +0.001 [-0.002, +0.003]  boards mean -0.009 +- 0.008 (+3/-2 of 5)  per board +0.005 +0.001 +0.006 -0.025 -0.034
+      tan9 - nb9                                                   pooled -0.014 [-0.016, -0.011]  boards mean -0.005 +- 0.008 (+2/-3 of 5)  per board -0.022 -0.008 -0.018 +0.015 +0.010
+      tan9 - nb5                                                   pooled -0.022 [-0.025, -0.019]  boards mean -0.012 +- 0.009 (+2/-3 of 5)  per board -0.037 -0.011 -0.025 +0.013 +0.001
+      nb5 - nb9                                                    pooled +0.008 [+0.006, +0.011]  boards mean +0.007 +- 0.002 (+5/-0 of 5)  per board +0.014 +0.003 +0.007 +0.002 +0.010
+      tan5 - nb5                                                   pooled -0.010 [-0.012, -0.008]  boards mean -0.009 +- 0.001 (+0/-5 of 5)  per board -0.011 -0.009 -0.010 -0.004 -0.009
+      soft_loo_window - tan9                                       pooled +0.028 [+0.025, +0.030]  boards mean +0.021 +- 0.005 (+5/-0 of 5)  per board +0.035 +0.023 +0.028 +0.010 +0.010
+      nb9 - hard                                                   pooled +0.074 [+0.070, +0.078]  boards mean +0.061 +- 0.012 (+5/-0 of 5)  per board +0.084 +0.068 +0.084 +0.042 +0.025
+      tan9 - hard                                                  pooled +0.061 [+0.057, +0.064]  boards mean +0.056 +- 0.005 (+5/-0 of 5)  per board +0.062 +0.059 +0.066 +0.057 +0.036
+      nb9 - centre                                                 pooled +0.142 [+0.138, +0.145]  boards mean +0.164 +- 0.017 (+5/-0 of 5)  per board +0.123 +0.144 +0.145 +0.192 +0.216
+      chain_soft_loo_window - soft_loo_window                      pooled +0.023 [+0.020, +0.026]  boards mean +0.025 +- 0.003 (+5/-0 of 5)  per board +0.020 +0.025 +0.022 +0.034 +0.021
+      chain_hard - hard                                            pooled +0.061 [+0.056, +0.065]  boards mean +0.055 +- 0.006 (+5/-0 of 5)  per board +0.064 +0.059 +0.065 +0.052 +0.035
+      chain_tan9 - tan9                                            pooled +0.010 [+0.007, +0.013]  boards mean +0.015 +- 0.004 (+5/-0 of 5)  per board +0.008 +0.006 +0.012 +0.019 +0.031
+      chain_nb5 - nb5                                              pooled -0.053 [-0.055, -0.050]  boards mean -0.046 +- 0.006 (+0/-5 of 5)  per board -0.059 -0.051 -0.053 -0.034 -0.031
+      chain_soft_loo_window - chain_hard                           pooled +0.050 [+0.046, +0.055]  boards mean +0.047 +- 0.004 (+5/-0 of 5)  per board +0.054 +0.048 +0.052 +0.049 +0.033
+      chain_soft_expE_heldout_selected - chain_soft_loo_window     pooled +0.004 [+0.002, +0.006]  boards mean +0.002 +- 0.002 (+4/-1 of 5)  per board +0.006 +0.003 +0.005 -0.006 +0.002
+      chain_tan9 - chain_nb9                                       pooled +0.011 [+0.008, +0.014]  boards mean +0.013 +- 0.003 (+5/-0 of 5)  per board +0.011 +0.007 +0.011 +0.014 +0.023
+      tan9_m1 - nb9                                                pooled -0.015 [-0.018, -0.013]  boards mean -0.006 +- 0.008 (+2/-3 of 5)  per board -0.025 -0.010 -0.019 +0.014 +0.009
+      tan9_m20 - nb9                                               pooled -0.010 [-0.012, -0.007]  boards mean -0.002 +- 0.007 (+2/-3 of 5)  per board -0.017 -0.005 -0.014 +0.018 +0.010
+      tan9_m100 - nb9                                              pooled -0.003 [-0.005, -0.000]  boards mean +0.003 +- 0.005 (+3/-2 of 5)  per board -0.008 +0.001 -0.007 +0.017 +0.011
+   [156s]

@@ -151,9 +151,19 @@ RECALIBRATION applied after averaging.
 (2013), DOI 10.1214/13-EJS823 (text extracted; verified). Theorem 3.1 generalises: a linear pool is at least as
 dispersed as its least dispersed component, MORE dispersed if the components are "regular", and OVERDISPERSED if the
 components are calibrated ("neutrally dispersed"); the tendency to increase dispersion, they note, explains why linear pooling succeeds in practice: the components
-are "frequently underdispersed" (p. 1762). The
-geometric pool is their generalized linear pool with link h(x) = log x; eq. (7) bounds the pooled variance on the
-link scale by (Σ w_i)² times the largest component variance — the dispersion of a log-link pool scales with S_w².
+are "frequently underdispersed" (p. 1762).
+CORRECTION (2026-09-22, round-1 check against the paper, arXiv:1106.1638): their "geometric pool" with link
+h(x) = log x is a generalized linear pool of CUMULATIVE DISTRIBUTION FUNCTIONS, G(y) = h⁻¹(Σ w_i h(F_i(y))) (their
+eq. 5, §3.2), not the log-linear pool of densities; and their eq. (7) is the variance of the probability-integral
+transform of the SPREAD-ADJUSTED LINEAR POOL (Proposition 3.6). Neither says anything about a log-linear density
+pool's dispersion; the sentence that stood here ("eq. (7) bounds the pooled variance on the link scale by (Σ w_i)²
+times the largest component variance") had no basis in the paper and is withdrawn. For the Gaussian case the fact
+wanted is elementary and is derived here, not cited: for components N(μ_i, 1/τ_i) the log-linear pool ∝ Π N_i^{w_i}
+is Gaussian with precision Σ w_i τ_i, so with exponents on the simplex the pool's precision is a convex combination
+of the components' (never above the sharpest) and only S_w = Σ w_i > 1 can exceed it. For a DISCRETE alphabet with
+V > 2 a simplex geometric pool CAN put more probability on the true symbol than any component, through its
+normaliser (Mattern 2013 Example 4.8; `research/check_math_refutations.json` key `ex48_V70`: 0.994 vs 0.6); on a
+binary alphabet it cannot (the pooled logit is a convex combination of the logits).
 
 **Paper:** V. A. Satopää and L. H. Ungar, *Combining and Extremizing Real-Valued Forecasts*, arXiv:1506.06405 (2015);
 their earlier logit aggregator is Satopää, Baron, Foster, Mellers, Tetlock, Ungar, Int. J. Forecasting 30(2), 344–356
@@ -268,14 +278,27 @@ when the Gaussian model holds, logistic regression is only ½–⅔ as efficient
    the conditional-to-marginal log-likelihood ratio of context i given the contexts already counted. It is 1 for a
    source conditionally independent of the earlier ones, 0 for a source that is a FUNCTION of them, between for
    partial overlap, and can exceed 1 when the sources are conditionally DEPENDENT in the opposite direction (the
-   partial-information case: `pool_math_check` "disjoint" wants exponents ≈ 3 each). S_w = Σ exponents is the
-   effective number of independent sources (Clemen & Winkler); S_w = 1 is the conservative, correlation-agnostic rule
-   (Covariance Intersection: the geometric mean with simplex weights is consistent for ANY correlation — Julier &
-   Uhlmann 1997, Hurley 2002, both from memory beyond Hurley's abstract), S_w = n the independence rule.
+   partial-information case: `pool_math_check` "disjoint" wants exponents ≈ 3 each on its grid — the grid's cap).
+   S_w = Σ exponents is NOT a count of sources (corrected 2026-09-22): it depends on the scale the pool is written
+   in. On the same "disjoint" structure the exact posterior is a geometric pool of the calibrated sources on the
+   PROBIT scale with exponents (2.55, 2.65, 2.74), S_w = 7.9, while Satopää's aggregator combines the same sources
+   with weights (1.003, 0.998, 1.003), S_w = 3.0, on the conditional-expectation scale
+   (`research/check_math_refutations.json` key `disjoint_Sw_two_scales`); the pooled distribution is what is
+   invariant. Clemen & Winkler's k/(1 + (k−1)ρ) is the precision of a linear combination of k equicorrelated point
+   estimates, a different object, and is not a statement about S_w. S_w = 1 is the conservative,
+   correlation-agnostic rule (Covariance Intersection: the geometric mean with simplex weights is consistent for ANY
+   correlation — Julier & Uhlmann 1997, Hurley 2002, both from memory beyond Hurley's abstract), S_w = n the
+   independence rule on the scale where the sources are conditionally independent.
 3. **Why E34's three numbers came out as they did.** `run_mixtures` (e34.py) computes `g` with
-   `wg = w[sm] / w[sm].sum()` — exponents forced to sum to 1 (Mattern's eq. 11, CI). By Gneiting & Ranjan eq. 7 such a
-   pool cannot be sharper than its sharpest expert; it can only re-shape. That is why 1.801 sits 0.02 below 1.820 and
-   why Mattern measured ~2 % for the same move. `pr_` uses exponent 1 on every SEEN expert with NO prior division:
+   `wg = w[sm] / w[sm].sum()` — exponents forced to sum to 1 (Mattern's eq. 11, CI). With exponents on the simplex
+   the geometric pool CAN give the true symbol more probability than every component through its normaliser whenever
+   V > 2 (Mattern 2013 Example 4.8; `research/check_math_refutations.json` key `ex48_V70`: 0.994 vs 0.6 at V = 70);
+   on a BINARY alphabet with simplex exponents it cannot (the pooled logit is a convex combination of the logits).
+   S_w > 1 is a second, separate sharpening. (The sentence that stood here — "by Gneiting & Ranjan eq. 7 such a pool
+   cannot be sharper than its sharpest expert; it can only re-shape" — was false for V > 2 and mis-cited, §4;
+   corrected 2026-09-22.) So 1.801 below 1.820 is a simplex geometric pool over 70 symbols doing what Example 4.8
+   allows, and Mattern's ~2 % (his LIN vs GEO, both learned) is the same move on binary decisions where only
+   re-shaping is available. `pr_` uses exponent 1 on every SEEN expert with NO prior division:
    the eighteen experts are mostly NESTED (chain ⊃ order-8 ⊃ … ⊃ order-1; skips and pairs are sub-contexts of the
    orders), so the exact exponents of all but one of them are ≈ 0 and exponent 1 counts the same evidence up to
    eighteen times — 7.665 bits/char is the arithmetic of that, not a property of products (the synthetic nested case
@@ -311,14 +334,20 @@ mixing contexts (`s.cls() * 9 + deep`) stay. Ranked by how much of the literatur
   regime argument says it reaches a slightly worse asymptote faster; `pool_math_check` puts it within 0.005–0.025
   bits of the optimum on Gaussian data (0.3373 vs 0.3320 nested; 0.3517 vs 0.3270 disjoint; 0.3496 vs 0.3262
   overlap). On text the Gaussian assumption is false, so this is a number to measure, not to predict.
-- **C3 — partial-information weights from the forecasts ALONE (Satopää's revealed aggregator).** Per bit and mixing
-  context: δ_i = Var(s_i)/(1 + Var(s_i)) on the probit scale (each expert's information fraction, recovered from the
-  spread of its own stretched forecast), X_i = s_i √(1−δ_i), Σ = Cov(X), w = diag(Σ)ᵀ Σ⁻¹, output
+- **C3 — partial-information weights from the forecasts ALONE (Satopää's revealed aggregator).** The probit-scale
+  construction for PROBABILITY forecasts is Satopää, Pemantle & Ungar 2016, *Modeling probability forecasts via
+  information diversity*, JASA 111(516), 1623–1633 (arXiv:1406.2148) — not Satopää & Ungar 2015 (arXiv:1506.06405),
+  which treats real-valued forecasts (§4; corrected 2026-09-22). Per bit and mixing context:
+  δ_i = Var(s_i)/(1 + Var(s_i)) on the probit scale (each expert's information fraction, recovered from the spread of
+  its own stretched forecast), X_i = s_i √(1−δ_i), Σ = Cov(X), w = diag(Σ)ᵀ Σ⁻¹, output
   Φ(wᵀX / √(1 − diag(Σ)ᵀ Σ⁻¹ diag(Σ))). Unsupervised (no outcome needed) and closed form; exact on its own model
   in all three synthetic structures (0.3333/0.3270/0.3262 against exact 0.3320/0.3270/0.3262; weights (−0.01, 0.09,
-  0.94) nested, (1,1,1) disjoint, (0.5,0.5,0.5) overlap — it found the information structure). Assumes calibrated
-  experts and a Gaussian latent; the KT experts are calibrated only in the aggregate. The 1/√Var(z|X) factor IS the
-  extremization, derived rather than fitted.
+  0.94) nested, (1,1,1) disjoint, (0.5,0.5,0.5) overlap — it found the information structure). Its assumption,
+  stated: Cov(X_i, Y) = Var(X_i) for every i (each forecast is a calibrated conditional expectation of the outcome
+  under a Gaussian latent) — this is what lets Σ be estimated without outcomes; the KT experts violate it per
+  mixing context (the synthesis note's T7: the chain's escape is miscalibrated with a depth-dependent sign) and are
+  calibrated only in the aggregate, so on text C3 runs under a false premise and its number is to be measured, not
+  predicted. The 1/√Var(z|X) factor IS the extremization, derived rather than fitted.
 - **C4 — recalibrate the linear mixture by counting (BLP by table = PAQ's SSE/APM).** Keep `Mixer` as is; add a
   count table keyed by (mixing context, quantised stretch(p_lin) in 32 buckets) → refined probability, updated as a
   running mean toward the outcome (this is E24's counting with forgetting, not a gradient). Ranjan & Gneiting say the
@@ -351,7 +380,11 @@ three calibrated sources each seeing a subset of the u's; weights by grid search
 
 Readings: nested ⇒ the exact exponents are (0, 0, 1) and the exponent-1 product is the E34 catastrophe in miniature;
 sum-1 geometric ≈ linear ≈ best single (no sharpening possible); disjoint ⇒ the exponent-1 product is NOT exact
-(marginal independence ≠ conditional independence given a thresholded latent) and the optimum is S_w ≈ 9; overlap ⇒
+(marginal independence ≠ conditional independence given a thresholded latent) and the grid's optimum (3, 3, 3) is
+its CORNER (the free grid is capped at 3.0 per exponent, `check_math_refutations.json` key
+`pool_math_check_free_grid_cap_per_exponent`) — the analytic optimum on the probit scale is (2.55, 2.65, 2.74),
+S_w = 7.9, which equals the exact posterior (a re-run with `free_grid(M, step=0.5, top=6.0)` so that the optimum is
+interior is pending); overlap ⇒
 the sum-1 pool recovers less than half of the available gain (0.607 → 0.473 vs 0.326), the free exponents nearly all
 of it. The closed forms C2 and C3 land within 0.03 bits of the optimum everywhere, C3 exactly (its own model). The
 apparatus caveat: these are Gaussian-latent sources; the Latin experts are KT count tables over nested strings.

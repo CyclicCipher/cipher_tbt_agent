@@ -47,18 +47,33 @@ selected by an order-1 context and the match length; GEO and LIN weights by onli
 | paper1 | 2.274 | 2.327 | 2.343 |
 | average (14 files) | 2.187 | 2.231 | 2.265 |
 
-"On average LIN compresses about 2% and BETA compresses about 3.6% worse than GEO" — on text (book1) 4.4%. So with the
-SAME eight experts, learning the exponents is worth ≈4% over Bayesian linear weights; the rest of PAQ's distance to
-PPM-class compressors comes from its models (hundreds of contexts, bit-level, SSE), not from the mixer. For E34 the
-analogue is 1.820 → ≈1.75, not 1.820 → 1.3.
+"On average LIN compresses about 2% and BETA compresses about 3.6% worse than GEO" (relative to GEO; relative to
+BETA, one base for both: 3.4% on average, 4.4% on book1 — `research/check_math_refutations.json` keys
+`mattern_avg_gap_rel_BETA` 0.0344, `mattern_book1_gap_rel_BETA` 0.0437). WHAT this measures (corrected 2026-09-22
+against his §5): GEO's exponents were renormalised to the simplex after every step — "After a weight update we
+ensure that w ≥ ε·1_m and wᵀ1_m = 1" (ε = 2⁻³⁰) — and the alphabet was decomposed into binary decisions ("We have
+implemented the weighting techniques for a binary alphabet"), on which a simplex geometric pool's logit is a convex
+combination of the component logits (pure re-shaping in logit space; `check_math_refutations.json` key
+`binary_simplex_geo_exceeds_pmax_count` = 0 of 10 000). So the one published same-experts comparison is learned
+SIMPLEX exponents vs Bayesian linear weights on binary decisions — the same class as E34's `geometric` (Bayesian
+weights renormalised over the seen experts), which already recovers 1.2% of it (1.820 → 1.801) — and says nothing
+about what free exponents (S_w ≠ 1) are worth; that has no published same-experts comparison. The rest of PAQ's
+distance to PPM-class compressors comes from its models (hundreds of contexts, bit-level, SSE), not from the mixer.
+"For E34 the analogue is 1.820 → ≈ 1.75" is an unmeasured extrapolation of the Calgary percentages, not a target
+(the synthesis note, I.3 item 8).
 
 Mattern, *Linear and Geometric Mixtures — Analysis*, DCC 2013 (arXiv:1302.2820), Remark 4.7, for weights on the simplex
 S: "max_{w∈S} geo(x; w, P) ≥ max_i geo(x; e_i, P) = p_max(x; P) = max_{w∈S} lin(x; w, P)": a linear mixture can never
 give the true symbol more probability than the best expert gives it; a geometric mixture can, even with exponents
-summing to one, through its normaliser (mass an expert rules out is removed — GLN's "right of veto"). That is why
-E34's `geometric` (1.801) beats `linear` (1.820) with the same weights, and why exponents summing to MORE than one
-(PAQ's are unconstrained) sharpen further — up to the product's 7.665 when eighteen near-duplicate contexts are each
-given exponent 1.
+summing to one, through its normaliser (mass an expert rules out is removed — GLN's "right of veto") whenever the
+alphabet has more than two symbols (his Example 4.8, N > 2; at V = 70, `check_math_refutations.json` key `ex48_V70`:
+0.994 vs the best expert's 0.6), but NOT on a binary alphabet, where the simplex pool's logit is a convex combination
+of the logits. Note the scope: Remark 4.7 is a PER-SYMBOL statement and bounds nothing cumulative (key
+`remark47_per_symbol_only`: two experts alternating in quality at 1.676 bits/symbol each, the fixed-share linear
+mixture at 0.050). That is why E34's `geometric` (1.801) can beat `linear` (1.820) with the same weights on 70
+symbols. Exponents summing to MORE than one (PAQ's are unconstrained) are a second, separate sharpening — up to the
+product's 7.665 when eighteen near-duplicate contexts are each given exponent 1; what they are worth on the same
+experts is unmeasured (above).
 
 ## 1. Sources
 
@@ -341,9 +356,13 @@ nats — with a full m-dimensional grid the count |G| = (L/δ)^m is the whole pr
     neuron (a construction; not in the literature): mixer k combines two inputs with exponents (u, v) on a 15×15 grid
     of [0, 3]² (225 points; 7.8 bits per context per mixer), 17 mixers for 18 experts, each input a distribution over
     V, cost 17 × 225 × 70 ≈ 2.7·10^5 flops per symbol; total prior cost 17 × 36 × 7.8 ≈ 4 800 bits ≈ 0.02 bits/char on
-    the book. Stacked geometric mixers stay geometric (GLN eq. 5: "the logit and sigmoid functions cancel"), so the tree
-    represents any product-form exponent vector; whether the tree's greedy-per-node Bayes finds what a jointly learned
-    vector finds is the open question (§4).
+    the book. With FIXED per-node exponents stacked geometric mixers stay geometric (GLN eq. 5: "the logit and sigmoid
+    functions cancel", for fixed weights), so the tree's leaf exponents are the products of the node exponents along
+    each path and the 15-level grid on [0, 3] represents only products of grid values. With per-node BAYESIAN
+    posteriors each node emits a LINEAR mixture of geometric mixers; feeding that into the next geometric node is no
+    longer a geometric mixture of the leaves, so no representability claim and no dominance bound is inherited by
+    the Bayesian tree (corrected 2026-09-22; this is why A3 has no bound, §4); whether the tree's greedy-per-node
+    Bayes finds what a jointly learned vector finds is the open question (§4).
 
 **B. The continuous Bayesian mixture (EWOO / Cover) over the exponent hypercube.** Closed form as an integral,
 regret (d/α) log T + 2/α (Hazan Thm 4.4) with α = σ(log(ε/(1−ε)) max‖w‖₁) (GLN Prop. 1(4a)): for ε = 10^−4 and
@@ -423,9 +442,12 @@ temperatures range from 1.1 in shallow-context cells to 2.0 in the deepest lette
 not innocuous at this scale of gain: fixed share 0.02 costs A1 0.014 and A2-min 0.015 bits/char against the decaying
 rate, the same order as the gains being measured — which is the Herbster–Warmuth slack term of §1 made visible; E34's
 `Mixer` still runs at 0.02. (iv) Against the chain the closed-form ladder is linear −0.8%, geometric −1.7%, A1 −2.0%,
-A2-min −2.7%; Mattern 2012's learned exponents gained 3.6% (average) and 4.4% (book1) over Bayesian weights with eight
-experts on a different corpus — so a 2-parameter closed-form grid with the right switching prior already recovers a
-large part of what learning the exponents is worth in the one published comparison. The next rungs are A3 (a tree of
+A2-min −2.7%; Mattern 2012's learned SIMPLEX exponents on binary decisions gained 3.4% (average) and 4.4% (book1)
+over Bayesian weights with eight experts on a different corpus (§0) — so a 2-parameter closed-form grid with the
+right switching prior already recovers a large part of what learning simplex exponents was worth in the one
+published comparison; the per-context posteriors of the synthesis note (chain + word, −3.5% at 300k) sit
+0.002–0.008 bits/char above their per-context hindsight oracles (`research/check_per_context_oracle.json`). The
+next rungs are A3 (a tree of
 two-input grid mixers, the full shape without a hand grouping) and running the decaying rate inside `Mixer` itself;
 the learned-exponent arm run once would give the reference number the rule forbids building on.
 

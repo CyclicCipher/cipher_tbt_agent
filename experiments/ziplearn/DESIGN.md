@@ -1,6 +1,6 @@
 # ZipLearner — design document
 
-*v0.8, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18; v0.7 adds §18 thinking inside the block, §19 the library problem and the continuous thesis; v0.8 adds §20 credit assignment without backpropagation; earlier: capacity, precision, order dependence, blocks across
+*v0.9, 2026-09-22 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18; v0.7 adds §18 thinking inside the block, §19 the library problem and the continuous thesis; v0.8 adds §20 credit assignment without backpropagation; v0.9 adds §21 BrainBuilder — the library / ZipLearn / BrainBuilder split, the blueprint, the compiler, gradient-descent compatibility and the blueprint research programme; earlier: capacity, precision, order dependence, blocks across
 layers, relational goals, written attention). E0–E30 and E33(a) have been run (E29 retracted as a design; E31 stopped after 2 cells; E32 and E33(b,c) shelved; E34 and E35 run); one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
@@ -1057,3 +1057,600 @@ per block, on the block's local target, never end to end. The alternative — pr
 is unproven, not refuted.
 
 **Order of work (approved 2026-09-21): E35, then E34 — both run (2026-09-22); E31 stopped after 2 cells; no gradient-arm work otherwise.**
+
+---
+
+## 21. BrainBuilder: the three-way split, the blueprint, and the blueprint research programme (DESIGNED 2026-09-22)
+
+**What this section decides.** The user's directive of 2026-09-22 splits ZipLearn into three scripts: a LIBRARY both
+others import; ZIPLEARN, which gives a built brain knowledge and skills by counting (what `ziplearner.py`, `arcgames.py`,
+`textlm.py`, `e28.py`, `e34.py` and `e35.py` do today); and BRAINBUILDER, which runs BEFORE ZipLearn and writes the
+network as a fully developed brain from a BLUEPRINT plus the architecture numbers. The genome analogy is exact in one
+respect and is the rule: the blueprint holds repeatable top-down instructions for building the brain (which circuits
+exist, where they sit, how they connect), never a synaptic weight that encodes a fact. Three designs were written and
+two judges scored them; this section takes the spine of the design that scored highest (the content STORE as one
+table with three tensor forms, the capacity accounting, parametric head templates), the compiler of the most concrete
+design (dependency-ordered layers, a derived sharpness, a verification gate, substrate edits as flags on the existing
+classes), and the brain of the most general design (an overproduced receptive field pruned by sleep, register tokens,
+an executive that is four placements of ordinary instructions, an ablation ladder). The judges' fatal findings are
+each answered in §21.1, not carried.
+
+Every claim below names a file, a function or a number. Where a piece is not designed it says NOT DESIGNED; §21.10
+lists them together. Nothing in this section calls `backward`, except §21.8, whose subject is what a gradient-descent
+trainer must be ABLE to do to a built brain.
+
+### 21.0 Vocabulary
+
+- *Substrate*: `experiments/transformers/h1_lid.py` — `Attn` (q/k/v/proj, RoPE by pairs, `causal`, the k/v `cache`),
+  `AttnRes` (the flag-conditioned route), `Block` (attn + MLP `Linear(d,4d) → GELU → Linear(4d,d)`), `Model`,
+  `LoopedModel` (a core applied K times with a boundary operator between passes). Five edits, §21.4.
+- *Residual layout*: named SUBSPACES of the residual vector, each a slice of dims (E28: `self.T`, `self.N[j]`, `self.A`,
+  `ROW`, `COL`, `OUT`, the four flag dims `E/F/S/Z`, allocated by `base += C` in `WrittenSim.__init__`).
+- *Token class*: cell, entry, register, border, zero — one flag dim each; what a token is, readable by a head.
+- *Instruction*: a weight TEMPLATE that one attention head, one MLP row pair, one route query or the boundary operator
+  can execute exactly over one-hot codes (§21.3). The E29 rule (§19): the set is the substrate's primitives; no entry
+  names a colour, a wall, a direction, an offset chosen because a game uses it, or a character.
+- *Circuit*: one instruction INSTANCE placed in the brain (its parameters, the subspaces it reads and writes).
+- *Blueprint*: the JSON document that lists subspaces, token classes, circuits, stores, registers, the loop, the
+  routes and the tests (§21.2). *Arch*: the size numbers (d, heads, head width, layers, position code, max length).
+- *Brain*: the compiled artefact — an `h1_lid` model whose weights are written tensors, plus the resolved layout, the
+  codec, the loop spec, the empty stores and registers. STRUCTURE and STATE are its two parameter classes (§21.8).
+- *Store*: the one count table (today `LocalRule`, `ContextLM.tables`, `GoalModel.win/death`), with three tensor forms:
+  memory tokens, an attended key/value BANK, MLP rows.
+- *Pass*: one application of the core to every position. *Anchor*: what the boundary operator injects before a pass
+  (E28: the action). *Boundary operator*: the written tensor op between passes (keep, clear, quantise, commit, anchor,
+  select, halt). *Halt flag*: a flag dim the runner reads and nothing else.
+
+### 21.1 What was kept out, and what replaced it
+
+1. *The typed offsets.* Two designs' example blueprints named the four gather offsets `(-1,0),(1,0),(0,-1),(0,1)` and
+   the action weight `nO + 2` — the quantities `LocalRule.sleep` LEARNED in E24 (rules keep 2–4 of 9 cells). Adopted
+   instead: the blueprint declares a receptive FIELD as an extent (every offset with `|di| ≤ r` and `|dj| ≤ r`, the
+   centre excluded — 8 offsets at r = 1, 24 at r = 2, 80 at r = 4), BrainBuilder writes one gather head per offset
+   (overproduction), and ZipLearn's sleep pass zeroes the heads whose cells the masks dropped (pruning). The born
+   neighbourhood is a number, like d; the used neighbourhood is learned. Query weights that depend on the number of
+   cells are computed by the compiler from the layout (§21.3, `Match`), not typed.
+2. *A Python dispatch at run time* ("the hash on CPU, attention on a miss"). `Brain.run` is plain torch: encode, loop
+   (pass, boundary operator, read the halt flag), coda. The Store's readers (`predict` by hash, `nearest` by matmul,
+   product-key candidates) exist ONLY in ZipLearn's offline apparatus — the sleep pass, the leave-one-out price, the
+   consolidation price — never inside a pass (§18 rule 3).
+3. *A second block class* (`WrittenBlock` beside `Block`) and *a hidden substrate op* (a binary-matrix threshold read
+   presented as an MLP kind). Every consolidated entry is written into the existing `Linear → GELU → Linear` MLP as a
+   `Row` (key row, bias `-threshold`, value row), at a scale where GELU is a threshold; the "Willshaw" form is many
+   `Row`s whose sparse keys share hidden units (§21.7), the same tensors. One `Block`, with `norm="none"` as a flag.
+4. *A noise source inside a head.* No instruction generates noise. Noise is an INPUT: a register field `noise`,
+   filled before a pass by the runner from a seeded generator exactly as the frame and the anchor are filled; the
+   selection is the boundary operator's `Quantise` over the SUM of the `util` and `noise` fields (§21.5). The gain of
+   the noise is a typed constant; how it would be priced is NOT DESIGNED.
+5. *One tied attention layer as the core.* Heads in one layer run in parallel; gather → match → pool → compare needs
+   three attention layers plus one MLP (e28.py needed two `Attn` for gather then lookup). The compiler orders layers
+   from the circuits' declared `reads`/`writes` (§21.4 step 3); the core is as many `Block`s as that order needs.
+6. *The GCML flatness claim* ("one pass per step, calls flat in the goal's distance"). Not claimed. Winner-take-all
+   over `W(s* − s)` is a one-step chooser; the imagined rollout still costs one pass per imagined step. B3 measures.
+7. *A goal fed from outside the block* as a fact of the design. The GOAL register is FILLED by the goal model
+   (ZipLearn's counted win keys, E19) or by the harness for a test that says so; the blueprint never initialises it.
+8. *The factored product-key reader* as an argmax over sub-key maxima. Corrected to what Lample et al. 2019 do: the
+   sub-key scores select a CANDIDATE set (top-k per half), the candidates that are stored keys are rescored exactly.
+9. *The purity invariant* "zero non-one-hot codes after every layer". E28 measured 1,434 and 1,475 ties on windows the
+   table never saw; ties are between equally near entries and are independent of M. Verify checks purity on the
+   per-instruction unit tests (where every query has a unique target) and REPORTS the tie count on the blueprint tests.
+10. *Text memory as ~1.25M order-8 contexts attended by every character on CPU in three minutes* — off by three orders
+    of magnitude. The generality test's text arm is sized by its MAC count (§21.9 B1), with the count printed.
+
+### 21.2 The module split — files and APIs
+
+The library is a package, `experiments/ziplearn/ziplib/`, one file per concept, each a MOVE of an existing component
+with the old location deleted in the same commit (`feedback_decisive_full_cutover`). The regression numbers that must
+not move: E18 1.000, E28 530/530 and 509/509, E24's masks [3, 3, 3, 2] on LockPath, E6 1.000 retention and 3 blocks,
+E33 1.873 frozen at 2.7M characters, E35 strict 0.946 / 0.880 / 0.800.
+
+| file | holds | moved from |
+|---|---|---|
+| `ziplib/price.py` | `flag_bits`, `pay`, `precision_bits`; `entropy`, `table_price` (the two-part code of a merged table); `kt_bits` (the per-context KT code), `prequential_bits` (the blended-backoff code the predictor pays) | `ziplearner.py` (`flag_bits`, `pay`, `precision_bits`), `arcgames.py` (`entropy`, `LocalRule._price`), `textlm.py` (`ContextLM._bits`, `_prequential`) |
+| `ziplib/store.py` | `Store`: ONE count table over masked windows — `full` (evidence), `mask`, `table`, `majority`, `stats`, `observe`, `predict` (hash), `sleep(strict)`, `chain()` (E33's backoff chain), `price()`, `entries()`; window extraction `windows_grid(frame, field)` and `windows_seq(seq, back)`; the three tensor forms `as_tokens(layout, codec)`, `as_bank(layout, codec)`, `as_rows(layout)`; the offline readers `nearest(keys, M)` and `candidates(keys, k)`; `consolidate(n0, eps0, price)` | `arcgames.py` (`LocalRule`, `ActionModel`'s radius competition, `GoalModel`'s key tables), `textlm.py` (`ContextLM._contexts`, `_keys`, `_chain_of`, `_level_counts`), `e35.py` (`NearestRule._keys_array`, `predict_nearest`) |
+| `ziplib/layout.py` | `Layout.allocate(subspaces, d)` → slices, sequentially, as `WrittenSim` does with `base`; symbolic widths bound from `Arch.dims`; a free-list of spare dims; the head-channel allocator `channels(head, needs)` (content in the lowest rotary pairs, position in the highest — E18's lesson as a rule); error when the layout exceeds d | `e28.py` lines 75–87 |
+| `ziplib/codec.py` | `Codec.encode(cls, **fields) → vector` and `decode(vector) → {subspace: value}` generated from the token classes; coordinate codes `onehot` (E28: `ROW`/`COL` one-hot; exact, small grids) and `rope2d` (row phases in one half of a head's rotary pairs, column phases in the other; a sequence is the row-0 case, which is E18's RoPE); memory-token construction from `Store.entries()` with an all-zero subspace where the mask dropped a cell (a wildcard) | `e28.py` `encode` and lines 134–156; `e18.py` lines 45–48 |
+| `ziplib/instructions.py` | the instruction set (§21.3): `Gather`, `Match`, `Pool`, `Broadcast`, `Row`, `Compare`, `Branch`, `Readout`, and the boundary parameters `Keep`, `Clear`, `Quantise`, `Commit`, `Anchor`, `Halt`; each with `needs`, `emit` (a list of `Write = (tensor_name, index, value)`), `test` | `e28.py` lines 89–132, `e18.py` `write`, `e5.py`'s gate templates |
+| `ziplib/blueprint.py` | `Blueprint` and `Arch` dataclasses, `load`/`save`/`validate` (every circuit's `instr` is a key of `INSTRUCTIONS`; every `reads`/`writes` names a declared subspace; ≥ 1 test; no circuit parameter names a content value) | new |
+| `ziplib/brain.py` | `Brain`: the model (`norm="none"`), the resolved `Layout` + `Codec`, the loop spec, `BoundaryOp`, the stores (empty), the registers, `verified=False`; `run(tokens, anchors, max_passes)`, `think(tokens, n_or_until_halt)`, `banks[name]`, `rows.write(key, value)`, `param_groups()`, `save`/`load` (state_dict + blueprint + layout JSON + the stores' evidence as npz) | `e28.py` `rollout` (the loop), `h1_lid.py` `forward_embedded` (reused) |
+| `experiments/transformers/h1_lid.py` | the substrate, five flag-edits (§21.4); the gradient arm's tasks and training loop stay | — |
+| `experiments/ziplearn/brainbuilder.py` | `compile(blueprint, arch) → Brain`, `verify(brain) → Report`, `anatomy(brain)` (every nonzero traced to its circuit name), `ablate(blueprint, circuit)`, the CLI, the blueprint experiments B0–B8 (§21.9) | new; the compiler generalises `WrittenSim.__init__` and `e18.write` |
+| `experiments/ziplearn/ziplearn.py` | the learner over a VERIFIED brain: `observe`, `sleep`, `write` (Store → tokens / bank / rows in place), `count_inverse` (GCML's W), `mix` (the per-context grid posterior at the coda), `lift` (the decompiler, §21.8), `ledger`, the harnesses `play(env, brain)` and `read(corpus, brain)`, the knowledge experiments Z1–Z4 | `ziplearner.py` (`Layer`, `TwoLayer`, `ContinualLayer`, `WordLibrary`, `consolidate`, `enforce_capacity`), `arcgames.py` (`Player.observe`, `Player.sleep`, `play`, `crop_box`), `textlm.py` (`ContextLM.fit`, `bits_per_char`, `bits_per_char_online`), `research/expA_exponent_grid.py` (`GridPosterior`) |
+| `experiments/ziplearn/blueprints/*.json` | `gridworld.json` (the worked example, §21.2.2), `induction.json` (E18) | new |
+
+`arcgames.py` keeps only the environment adapter and the exploring `Player` (E27's price of ignorance, the only chooser);
+`textlm.py`, `e28.py`, `e34.py`, `e35.py` become callers of `ziplearn.py` or are deleted. APIs, one line each:
+
+```
+ziplib.price:   flag_bits(is_exc, n_right, n_wrong) -> bits; pay(s, right); precision_bits(n, span, sigma) -> bits;
+                table_price(merged) -> bits; kt_bits(ctx_keys, nxt, V) -> bits; prequential_bits(ctx, nxt, mask, V, limit) -> bits
+ziplib.store:   Store(field|back, V).observe(keys, y) / predict(keys) -> (y | None) / sleep(strict=True) -> (before, after, cells)
+                / chain() -> [mask] / price() -> bits / entries() -> [(key, counts, stats)]
+                / as_tokens(layout, codec) -> Tensor[N, d] / as_bank(layout, codec) -> (keys[N, d], values[N, d])
+                / as_rows(layout, code="onehot"|"sparse", k=None) -> [(key_row, threshold, value_row)]
+                / nearest(keys, M) -> y / candidates(keys, k) -> [entry ids] / consolidate(n0, eps0, price) -> moved
+ziplib.layout:  Layout.allocate(subspaces, d); Layout[name] -> slice; Layout.free(n) -> slice; Layout.channels(head, needs)
+ziplib.codec:   Codec.encode(cls, **fields) -> Tensor[d]; Codec.decode(v) -> dict; Codec.coords(tokens) -> LongTensor[T, 2]
+ziplib.instructions: Instruction.needs(params, layout, arch) -> Needs(heads, hd_min, content_dims, position_pairs, rows)
+                     Instruction.emit(params, layout, arch, slot, M) -> [Write]; Instruction.test(params, layout, brain, n) -> Report
+ziplib.blueprint: Blueprint.load(path) / save(path) / validate() -> [error]; Arch.load(path); Arch.auto(dims)
+ziplib.brain:   Brain.run(tokens, anchors=None, max_passes=8) -> (tokens, passes); Brain.think(tokens, n=None) -> tokens
+                Brain.banks[name]; Brain.rows.write(key, value); Brain.param_groups() -> {"structure": [...], "state": [...]}
+                Brain.save(dir) / Brain.load(dir); Brain.to(device)
+brainbuilder:   compile(blueprint, arch) -> Brain; verify(brain) -> Report; anatomy(brain) -> table; ablate(bp, name) -> Blueprint
+ziplearn:       ZipLearn(brain).observe(before, action, after, outcome); .sleep() -> report; .write() -> bits
+                .count_inverse(transitions); .mix(stream) -> table; .lift() -> {store: Store}; .ledger() -> {circuit: bits}
+                .play(env, budget, max_levels, seed) -> results; .read(train_seqs, test_seq) -> (bpc_frozen, bpc_online)
+```
+
+### 21.2.1 The blueprint as data — the schema
+
+A blueprint is one JSON object. Widths may be symbols bound from `Arch.dims` (`H`, `W`, `C`, `V`, `nA`, `L`).
+Names are the only cross-references; the compiler turns them into offsets, heads, layers and rows.
+
+```
+Blueprint = {
+  "name": str,
+  "field":     {"kind": "lattice", "r": int},                       # the born receptive field: every offset with |di|,|dj| <= r
+  "subspaces": [{"name": str, "width": int|symbol, "kind": "onehot"|"flag"|"scalar"|"dist"}],
+  "tokens":    [{"class": str, "flag": subspace, "fields": {subspace: "input"|"coord.row"|"coord.col"|"const:<v>"|"store"|"runner"}}],
+  "circuits":  [{"name": str, "instr": key of INSTRUCTIONS, "params": {...}, "per": "offset"|null,
+                 "place": {"layer": int|"auto", "head": int|"auto"}, "reads": [subspace], "writes": [subspace],
+                 "prunable": bool}],
+  "stores":    [{"name": str, "class": token class, "key": [subspace], "value": subspace, "form": "tokens"|"bank"|"rows",
+                 "capacity": int, "nulls": [token class]}],
+  "registers": [{"name": str, "slots": int, "holds": [subspace], "filled_by": "core"|"store"|"runner"}],
+  "loop":      {"core": "auto"|[layer], "tied": true,
+                "boundary": {"keep": [subspace], "clear": [subspace], "quantise": [{"read": [subspace], "write": subspace}],
+                             "commit": [[from, to]], "anchor": {"sub": subspace, "from": register|"runner"}, "halt": flag},
+                "sequence": {"feedback": [[from, to]]} | null},
+  "routes":    [{"mixer": layer, "table": {flag: source}}],
+  "tests":     [{"name": str, "generator": str, "oracle": str, "criterion": {"exact": true} | {"min": float}}]
+}
+Arch = {"d_model": int|"auto", "n_head": int|"auto"|[int per layer], "head_dim": int|"auto", "n_layer": int|"auto",
+        "pos": "onehot"|"rope2d", "max_len": int, "p_star": 0.99, "dims": {symbol: int}}
+```
+
+`validate` refuses: an `instr` not in `INSTRUCTIONS`; a `params` value that is a content symbol (a colour index, a
+character, an offset list — an offset list is a FIELD, declared once under `field`); a register with an `init`; a
+blueprint with no test. That is the mechanical E29 guard, plus the two rules the judges said a whitelist cannot
+enforce: offsets are a field, goals are filled by the goal model.
+
+### 21.2.2 The worked example — the E28 brain, `blueprints/gridworld.json`
+
+Dims `H = 8, W = 11, C = 17` (16 colours + BORDER), `V = 16`, `nA = 4`; field `r = 1` for the regression, `r = 4`
+for the generality test. Subspaces, in allocation order: `colour(C)`, `nbr[o](C)` for each offset `o` in the field
+(the gathered neighbour), `pred(V, dist)` (the prediction: a distribution over colours, one-hot after `quantise`),
+`action(nA)`, `util(nA, scalar)`, `noise(nA, scalar)`, `goal(C)`, `task(8)`, `conf(1, scalar)`, `row(H)`, `col(W)`,
+`out(V, dist)`, `flags(9)` = cell, entry, register, border, zero, surprise, halt, goal_met, bias. Token classes:
+`cell` (colour from input, row/col from coords), `entry` (colour, nbr[*], action, out, conf from the store),
+`register` (holds by name), `border` (colour = BORDER; the null for gathers), `zero` (empty; the null for entries).
+
+Circuits (the `per: "offset"` entry expands to one circuit per field offset):
+
+```
+gather[o]  Gather(offset=o, src=colour, dst=nbr[o], null=border, cls=cell)         reads row,col,colour  writes nbr[o]   prunable
+lookup     Match(q=[colour, nbr[*], action], k=same, v=out -> pred, key_class=entry, null=zero, weight(action)="auto")
+                                                                                   reads colour,nbr[*],action writes pred
+goal_read  Match(q=[colour, nbr[*]], k=same, v=flags.goal_met -> flags.goal_met, key_class=entry(goal), null=zero)
+                                                                                   reads colour,nbr[*]  writes goal_met
+bcast_act  Broadcast(reg=ACTION, sub=action)                                       reads register       writes action
+bcast_goal Broadcast(reg=GOAL, sub=goal)                                           reads register       writes goal
+surprise   Compare(a=pred, b=colour, flag=surprise)                                reads pred,colour    writes surprise   (MLP rows)
+inverse    Pool(reg=ACTION, key_class=cell, src=goal - colour, W="inverse", dst=util)   reads goal,colour  writes util
+nogo       Pool(reg=ACTION, key_class=cell, src=colour, W="nogo", dst=util, sign=-1)    reads colour       writes util
+task_write Pool(reg=TASK, key_class=cell, src=surprise, gate=surprise)             reads surprise       writes task
+halt_row   Row(key={goal_met: 1}, threshold=0.5, value={halt: 1})                  reads goal_met       writes halt      (MLP row)
+read_act   Readout(register ACTION.action -> the game's controls)
+read_pred  Readout(pred -> vocab)
+```
+
+Stores: `rules` (class entry, key = colour + nbr[*] + action, value = out, form tokens, nulls border + zero),
+`goals` (class entry, key = colour + nbr[*], value = goal_met). Registers: `ACTION` (holds action, util, noise;
+filled by core), `GOAL` (holds goal, row, col; filled by store), `TASK` (holds task; filled by core), `STEP`
+(holds a one-hot pass counter; filled by the boundary). Loop: core "auto", tied; boundary keep = row, col, flags,
+task, goal; clear = nbr[*], util; quantise = [{read: [pred], write: pred}, {read: [util, noise], write: action}];
+commit = [[pred, colour]]; anchor = {sub: action, from: ACTION | runner}; halt = flags.halt. Sequence: null for
+the regression. Tests: `rollout_vs_table` (E28's protocol: 40 random-walk states per level, 300 random plans of
+1–4 actions, oracle = `Store.predict` chained, criterion exact on all-known plans ≥ 0.98) and `induction` for
+`induction.json` (E18's generator, criterion 1.0).
+
+What the compiler makes of it at `Arch.auto`, r = 1: layers ordered by reads/writes into layer 0 = the 8 gathers +
+the 2 broadcasts, layer 1 = lookup + goal_read with the `surprise` rows in layer 1's MLP, layer 2 = the 3 pools with
+`halt_row` in its MLP; `d_layout` = 17 + 8·17 + 16 + 4 + 4 + 4 + 17 + 8 + 1 + 8 + 11 + 16 + 9 = 251; layer 0 has 10
+heads so `hd = max(ceil(251/10), H + W + 2, C) = 26` and `d = 260`; layer 1 and 2 are one-head layers (`hd = d`,
+as `WrittenSim.lookup` is `Attn(d, 1)`); `M = ln((T − 1)·p*/(1 − p*))` with `T = max_len = 2 + 256 + 88 + 4 = 350`
+and `p* = 0.99` gives `M = 10.4` (E28 typed 30). The E28 hand build had d = 128, 4 + 1 heads and no registers; the
+rollouts must agree exactly (B0). At r = 4 the same file gives 80 gathers, `d_layout = 1475`, and under
+`rope2d` `hd = max(ceil(1475/82), 4·pairs + 2)`: 18 with 4 position pairs per axis (`d = 82·18 = 1476`), 34 with 8
+(`d = 2788`) — the profile check of §21.3 item 1 decides how many pairs an offset needs.
+
+### 21.3 The instruction set
+
+Each instruction is a class in `ziplib/instructions.py` with `needs` (heads, minimum head width, content dims,
+position pairs, MLP rows), `emit` (the writes, addressed as `blocks.{L}.attn.qkv.weight[Q|K|V + h·hd + c, slice]`,
+`blocks.{L}.attn.proj.weight[slice, h·hd + c]`, `blocks.{L}.mlp.0.weight/bias[r]`, `blocks.{L}.mlp.2.weight[:, r]`,
+`emb.weight`, `head.weight` — the addresses e28.py lines 96–132 and e18.py lines 54–77 write today) and `test`
+(the unit test §21.4 runs). The set:
+
+1. `Gather(offset, src, dst, null, cls)` — one head. Under `onehot`: query = own `row`/`col` code permuted by the
+   offset (`W[Q + h0 + r + di, row.start + r] = M`), key = own code, value/proj copy `src` into `dst`; the `null`
+   token's key scores `1.5·M` against the class flag and catches an off-grid neighbour (E28 lines 97–115). Under
+   `rope2d`: q and k from the `bias` flag in the position pairs, the key's phases `cos(di·θ_c), sin(di·θ_c)` on the
+   row-axis pairs and `cos(dj·θ_c), sin(dj·θ_c)` on the column-axis pairs (E18 lines 56–59, per axis); the compiler
+   computes the score profile over every (Δi, Δj) within `max_extent` and raises the number of pairs per axis until
+   the gap between the target offset and every other is ≥ 1 (in units of M); a profile that cannot reach the gap is
+   a compile error naming the head. `hd_min` = H + W + 2 (`onehot`) or 2·pairs·2 + 2 (`rope2d`).
+2. `Match(q, k, v, dst, key_class, null, weights, mode)` — one head. Query and key = the named subspaces at weight M
+   per dim (E28 lines 117–120); the attended token's `v` is written into `dst` (`mode = replace` writes v − dst, E28's
+   `OUT − T`; `mode = add` adds). `weights` are per-subspace multipliers; `"auto"` for a subspace means "one match on
+   it outweighs a full match on all the others" and the compiler sets it to `(number of other key dims) + 2` (E28's
+   `g = nO + 2`, derived from the layout instead of typed). The `null` token catches queries of other classes. An
+   unseen query lands on the NEAREST stored key (E28: better than "unchanged" on all four splits); attention has no
+   "no entry". E18's induction head is `Match(q=tok, k=prev, v=tok, dst=out)` with content dims in the lowest rotary
+   pairs (the compiler checks `max_len·θ_c < 0.1` for the pairs it uses).
+3. `Pool(reg, key_class, src, W, dst, gate, sign)` — one head. The register token's query is the class flag (plus
+   `M·gate` when a gate flag is named); the value is `W · src` of every token of the class; the head writes their
+   mean into the register's `dst`. `W` is a value matrix in `Brain.banks` (identity by default; COUNTED by ZipLearn
+   when named — GCML's inverse model, §21.5). Without the gate flag the query lands on the `zero` token: a no-op.
+4. `Broadcast(reg, sub, dst)` — one head. Every token attends to the register (class-flag key, constant query) and
+   copies its `sub` into `dst`. E28's per-pass `x[0, n:, self.A] = 1` done by a head.
+5. `Row(key, threshold, value)` — one MLP hidden unit: `mlp.0.weight[r] = M·key`, `mlp.0.bias[r] = −M·threshold`,
+   `mlp.2.weight[:, r] = value / (M·margin)` so a full match contributes exactly `value`; at scale M, GELU is a threshold. The slot ZipLearn writes a consolidated entry into
+   (Geva et al. 2021's key-value memory reading), and the halting row.
+6. `Compare(a, b, flag)` — C rows: unit c = `GELU(M·(a_c + b_c) − 1.5·M)` (fires only when both codes have dim c),
+   each summed with weight `−2/M` into `flag`, plus one row with key = bias and value `+1` on `flag`: the flag is 1 iff
+   the two one-hot codes differ. E5's written gates.
+7. `Branch(mixer, table)` — an `AttnRes` mixer whose query `w` carries M on the flag dims named in `table`; the
+   source whose flag is set takes the softmax mass (§15: a hard per-token route; the RMSNorm on keys bounds the
+   scale). Absent, the residual is the plain sum (E28, E18).
+8. `Readout(sub → vocab, M_out)` — `head.weight[v, sub.start + v] = M_out` (E18 line 77). Two are written: the ACTION
+   register's `action` → the game's controls, and `pred` → the character vocabulary; which one the harness reads is
+   the harness's business, not the brain's.
+9. The boundary parameters — not heads; written tensors of `BoundaryOp` (§21.4): `Keep` (a diagonal mask), `Clear`
+   (its complement on the named subspaces), `Quantise(read, write)` (a read matrix summing the `read` subspaces into
+   one group, argmax, a one-hot written into `write`), `Commit(from, to)` (copy after quantise; E28's `pred → colour`
+   is the simulator advancing one step), `Anchor(sub, from)` (the register or runner slot copied into every cell
+   token's `sub`), `Halt(flag)` (the flag the runner reads; the loop also stops when every kept register subspace is
+   unchanged between two passes — exact, because registers are one-hot after `quantise`).
+
+Sinks are not an instruction: `border` and `zero` are token classes that `Gather`, `Match` and `Pool` name as their
+`null` (Xiao et al. 2023's attention sink, E28's two null tokens). NOT in the set, and not designed: a noise
+generator (noise is an input, §21.1 item 4), superposed subspaces (more features than dims), a learned-exponent
+mixer (E34's irreducible gradient, §20), a new KIND minted from data (§19: a new kind is a program).
+
+### 21.4 The compiler (`brainbuilder.compile`) and the substrate edits
+
+Steps, in order:
+
+1. *Bind dims* from `Arch.dims`; expand `per: "offset"` circuits over the field; every width > 0.
+2. *Allocate the layout* (`Layout.allocate`): sequential offsets in declaration order; spare dims on a free-list
+   ZipLearn may claim (`Brain.rows.write` uses MLP rows, not dims; the free-list serves a later store's subspace).
+   `d_model = "auto"` → the smallest `hd · n_head` that fits; explicit and too narrow → error naming the dims
+   needed. Superposition is refused: a narrower brain is a different blueprint.
+3. *Order the layers.* A circuit that reads a subspace another circuit writes sits in a later layer of the same
+   pass (attention before the MLP within a `Block`), or in the same layer of a later pass if the loop `keep`s that
+   subspace. Topological sort → the minimal layer per circuit; `place.layer` pins override; a cycle no loop breaks is
+   an error naming both circuits. The core is the resulting layer list, tied across passes.
+4. *Allocate heads and channels.* First-fit per layer; a layer holding one `Match` whose query is the whole window
+   is a one-head layer (`hd = d`), as e28.py builds `lookup` as `Attn(d, 1)`; `n_head` is therefore a per-layer
+   list (edit 3 below). Within a head, `Layout.channels` puts content dims in the lowest rotary pairs and position
+   dims in the highest; a conflict is an error naming the head.
+5. *Set the sharpness* `M = ln((max_len − 1)·p*/(1 − p*))`: with the intended key ahead of every rival by one match
+   (a score gap of M), the softmax mass on the target over T tokens is ≥ 1/(1 + (T − 1)e^{−M}); `p* = 0.99` gives
+   M = 10.4 at T = 350 and 13.0 at T = 4,400 (a 64×64 frame plus memory); `p* = 0.999` adds 2.3. The leak `1 − p*` is
+   absorbed by `quantise`. This is the number Tracr-style compilation gets wrong by saturating (§21.8 obligation 1).
+6. *Emit.* Collect every circuit's `Write` list; two writes to one address with different values → error naming
+   both circuits; scatter with one `index_put_` per tensor into a zeroed state_dict (no per-element Python: S5's
+   bound is ≤ 10 s at 10⁶ bank entries). Emit the null tokens and register tokens through the codec.
+7. *Materialise.* `LoopedModel(core_layers=L, boundary=BoundaryOp, norm="none")` with the arch's `pos`; load;
+   wrap as `Brain(..., verified=False)`. `Brain.save` writes `state.safetensors` (the tensor names `h1_lid.Block`
+   already uses, so `.to("cuda")` and `torch.compile` need nothing), `blueprint.json`, `layout.json`, and one
+   `<store>.npz` per store (keys int16, values, counts, stats — the evidence the tensors are regenerated from).
+
+*The scaling contract.* The number of NONZEROS written is the sum of the instructions' sizes (E28: ~550 nonzeros
+in two `Attn` modules of 131,072 parameters), independent of d; the tensors are whatever the arch says; running
+them is ordinary dense torch. An explicit `Arch(d_model=1024, n_head=16, n_layer=24)` holds the same circuits in
+its first layers, the rest zero, and must give identical rollouts (B0's invariance check). Under `rope2d` a
+gather head's parameters are 2 numbers per pair, independent of H, W and L — the scaling path; `onehot` is the
+exact CPU check.
+
+*Both recurrence axes (§18).* Depth: `Brain.run` applies the core, then `BoundaryOp`, once per anchor (a plan of n
+actions = n passes; E28's rollout) or until the halt flag / register convergence, at most `max_passes`. Sequence:
+`Brain.think` appends a thought position whose embedding is `BoundaryOp(final residual of the last position)` through
+the loop's `feedback` map, using `Model.forward_embedded(h, caches, start)` (built for E31); the thought count is the
+same halt rule. ONE `BoundaryOp` serves both axes (§15's decision). Depth is WRITTEN (E28); sequence is DESIGNED and
+tested in B6.
+
+*Verification* (`brainbuilder.verify`; ZipLearn refuses a brain whose `verified` is False): (1) per-instruction unit
+tests — random tokens from the codec, the head's attention row read through a recording hook (as `AttnRes.record`
+does); pass iff the argmax is the intended target on 100% of queries AND the smallest target-minus-runner-up logit
+gap is ≥ M, AND the written subspace equals the codec's expected value to 1e−3; (2) purity on those tests: every
+`onehot` subspace one-hot to 1e−3 after every layer; (3) the blueprint's own tests against an oracle that is not
+the brain, with the tie count reported. A report goes to `runs/brainbuilder/<name>.json`.
+
+*Substrate edits in `h1_lid.py`* — flags on the existing classes, defaults unchanged, no copies:
+(1) `Block(norm="layer"|"none")`: `n1, n2 = nn.Identity()` when "none" (E28 bypassed `Block` because LayerNorm
+rescales one-hot codes; E18 survived it by margin); (2) `LoopedModel(core_layers=L, boundary=None|BoundaryOp)`: a
+core of L `Block`s per pass and the written operator in place of `rms_norm(x) + α·anchor` (which stays as the
+default); (3) `Model`/`LoopedModel` accept `n_head` as a per-layer list; (4) `Attn.forward(x, cache, start,
+coords=None)`: with `coords` (T × 2 integers) the first half of the rotary pairs rotates by `coords[:, 0]·θ` and
+the second by `coords[:, 1]·θ` — `rope2d`; `coords = None` is today's RoPE; (5) `BoundaryOp(keep, quantise, commit,
+anchor, halt)`, a module whose tensors are written: `forward(x, anchor_vec) -> (x, halted)`.
+
+### 21.5 The executive — what trained models develop, and what BrainBuilder writes
+
+What interpretability finds in trained transformers (from memory of the papers; not re-checked here): task or
+function vectors — a few mid-layer heads whose summed output identifies the in-context task and conditions later
+positions (Todd et al. 2023; Hendel et al. 2023); attention sinks — a token that absorbs attention as a no-op
+(Xiao et al. 2023); register tokens — positions repurposed as global scratch, which explicit registers fix (Darcet
+et al. 2023); entropy neurons — final-layer units that scale output confidence through the LayerNorm null space
+(Stolfo et al. 2024); copy-suppression heads — a veto on naive copying (McDougall et al. 2023). None is a
+centralised controller. BrainBuilder writes each as a PLACEMENT of instructions from §21.3, and the PFC / basal
+ganglia / ACC / thalamus division of `src/tbt/ARCHITECTURE.md` §3 becomes a placement too, not a module:
+
+| part | brain region | how it is written | status |
+|---|---|---|---|
+| Register slots (working memory) | PFC persistent activity | tokens of class `register` at the front of the sequence, one one-hot slot id each; their `holds` subspaces are `keep`-ed across passes; `Broadcast` reads them into every token | WRITTEN (the tokens, the heads); what fills GOAL is the goal model's counted keys (COUNTED); the programs the loop runs beyond simulation NOT DESIGNED |
+| Task vector | PFC | the `TASK` register's `Broadcast` puts the task id into every `Match` query, so one block with a different id reads a different store block — E6's `ContinualLayer.select` done by a head | WRITTEN; the ids are minted by ZipLearn on refutation (COUNTED) |
+| Flag-conditioned write gate | thalamic gating | a `Pool` head whose query carries `M·flag`; without the flag it lands on the `zero` token and the register keeps its content; a store accepts a new entry only when `surprise` is set (mint on refutation, §9 rule 2, E21) | WRITTEN; the store append is ZipLearn's `observe` reading the flag (COUNTED) |
+| Surprise head | ACC | `Compare(pred, colour, surprise)`: the prediction of the last pass against the colour the new frame carries — prediction error computed by the block, not by Python | WRITTEN |
+| Selection with noise | basal ganglia | `Pool` heads sum `W·(goal − colour)` (Go, GCML eq. 15) and `−W_nogo·colour` (NoGo, counted from refuted actions) into `util`; the boundary's `Quantise(read=[util, noise], write=action)` is winner-take-all over utility plus input noise (GCML eq. 19) | WRITTEN (heads, quantise); W and W_nogo COUNTED (`ziplearn.count_inverse`, GCML eq. 14); the noise gain and what fills `util` when no goal is held NOT DESIGNED (OPEN-10) |
+| Halting | ACC / the loop's convergence | `halt_row` sets `flags.halt` from `goal_met`; `BoundaryOp` also halts when the kept registers are unchanged between passes; the runner reads the flag and nothing else | WRITTEN |
+| Routes | thalamus | `Branch` on the flags; `border`/`zero` sinks as the default-off channel (a head with nothing to attend to writes zero) | WRITTEN |
+| Confidence calibration | entropy neurons / tonic dopamine | the coda read-out's scale and the per-context mixing (T4's grid posterior, −0.041 bits/char) | COUNTED, applied at the coda; inside the loop NOT DESIGNED |
+
+The planner inside the block (GCML, `src/tbt/notes/gcml_neural_sampling_cognitive_maps.md` §6): `Broadcast(GOAL)` →
+`Pool` utilities → `Quantise` with noise → `Broadcast(ACTION)` as the next pass's anchor → `lookup` advances the
+imagined frame → `halt` on `goal_met` or convergence. WRITTEN for state goals (E9's environment: `s* − s` is a
+per-position one-hot difference); `W` COUNTED; relational goals (E17's 0.51 identification limit; Sokoban chains)
+NOT DESIGNED — GCML's own caveat 7. What is measured, not claimed: passes per goal against the goal's distance (B3).
+
+### 21.6 The capacity answer — 2 bits per parameter, as measurable claims
+
+Allen-Zhu & Li (Physics of Language Models 3.3, arXiv:2404.05405) measure ~2 bits of extractable fact per
+parameter at ~1,000 exposures and ~1 at 100, unchanged at int8, lost at int4. Gardner (1988): a linear-threshold
+unit with n weights holds at most 2n random ±1 associations. So 2 bits per parameter is the CEILING for
+incompressible associations in a dense weight, and gradient descent at 1,000 exposures sits at it — it is both the
+operating point and, for that content, the limit. The question is answered on four axes, each a number:
+
+1. *Per parameter, dense.* A written one-hot memory token holds one entry of ~18 bits (E28: 3 cells × log₂17 +
+   log₂4 + log₂16) in d = 128 floats: 0.14 bits per parameter — BELOW 2. Written storage does not beat gradient
+   descent per dense parameter and the design does not claim it.
+2. *Per storage bit.* The same token has ~6 nonzeros: ~3 bits per nonzero. Sparse associative writing (`Row`s
+   with k-of-d random keys from a fixed `SparseProjection`, many entries superposed on shared hidden units —
+   Willshaw 1969; Kanerva's SDM; Ramsauer et al. 2020's exponential capacity for modern Hopfield = attention)
+   stores, by Willshaw's formula, `P = ln2 · m·n/(k_in·k_out)` pairs in an m × n binary matrix — ~24k pairs at
+   m = n = 2048, k = 11, i.e. ~0.47 bits per binary synapse at k ≈ log₂ n, falling to ~0.10 at k = 40 (so the
+   sparsity is a blueprint parameter set near log₂ d). Against int8 gradient storage (2 bits per 8-bit weight =
+   0.25 per stored bit) that is a 2–4× factor, not a new regime. Pre-registered in B4; the cliff beyond P is
+   the interference the consolidation price must see (B5).
+3. *Per exposure.* A written store holds the whole fact after ONE observation (E1 after one demonstration; E28's
+   entry after one transition): ~18 bits per exposure against 18/1000. The only axis where the gap is 100–1000×;
+   tabled beside the others so it is not mistaken for the answer to the per-parameter question.
+4. *Hierarchy.* `R_h = K_flat / B_written`: the two-part price of the flat full-window table (`ziplib.price.table_price`,
+   the analogue of Allen-Zhu & Li's knowledge bits) over the bits actually written after sleep, templates, words
+   and consolidation. Already on disk: E24 LockPath 9,192 → 660 bits (13.9×); E3 31 → 8.7 bits per task (3.6×); E8
+   161 → 121 (1.33×); E12 1,190 → 8.9 (134×). Bits of flat knowledge per written parameter = `R_h × 0.14` (tokens)
+   or `R_h × 0.47` (sparse rows): above 2 iff `R_h ≥ 14` (tokens) or `R_h ≥ 4.3` (rows). On Allen-Zhu & Li's random
+   tuples `R_h = 1` by construction — the pre-registered control. Hierarchy stores shared structure ONCE; that,
+   and only that, takes bits-of-knowledge per parameter past 2.
+
+The cost side, also counted: memory tokens cost T² attention per pass (a 64×64 frame against 2M bank entries is
+~2·10¹² MACs per pass: ~20 ms on an RTX 5090, ~200 s on this CPU — the bank's K/V is computed once through
+`Attn.forward(cache=)`); rows cost d per row and interfere; consolidation (sleep) is where the interference is paid,
+in exceptions, by `Store.consolidate` (§21.7).
+
+### 21.7 The Store's three forms and the consolidation price
+
+`Store` is the one table (`LocalRule`'s `full`/`table`/`majority`/`stats`; `ContextLM`'s per-mask tables; `GoalModel`'s
+keys). Three tensor forms of one entry, all written by `ziplearn.write` from the evidence and regenerated on demand:
+- *tokens* — a row of the sequence (E28); read competitively by softmax; nearest-key default; costs d floats and a
+  key per query;
+- *bank* — the same row as a (key, value) pair in `Brain.banks[name]`, attended through the k/v cache rather than
+  placed in the sequence: identical arithmetic, positions free, the GD-compatible form (§21.8);
+- *rows* — a `Row` in the MLP: key row = the entry's one-hot key (or its k-sparse projection), bias = −(k_in − ½),
+  value row = the entry's value; read by threshold; no nearest-key default; superposed when keys are sparse.
+
+Consolidation (`Store.consolidate(n0, eps0, price)`, run by `ziplearn.sleep`): an entry moves from tokens/bank to
+rows when its evidence is settled (`stats` give n ≥ n0 and exception rate ≤ eps0) AND the interference exceptions
+the row form produces on the evidence — `full` replayed through the written rows, computable offline — cost fewer
+bits than the token's storage saves. Young or contested entries stay tokens: complementary learning systems as a
+price. This is the token-vs-row price two of the designs left open; it is DESIGNED here and measured in B5. What
+it does not price: what the nearest-key default GAINS on unseen windows (E28's open point; E35's collapse of every
+denoising block to the identity; F2's leave-one-out term is the candidate) — NOT DESIGNED, and B5 could therefore
+consolidate the neighbours the kernel needs. The sleep pass on an overproduced field zeroes a `Gather` head when no
+entry's mask keeps its offset (E24's masks give the heads).
+
+### 21.8 GRADIENT-DESCENT COMPATIBILITY (the user's clause, 2026-09-22)
+
+A brain written by BrainBuilder must be pretrainable with gradient descent on new knowledge so that the result is
+more or less the same efficient, compressed, ACCESSIBLE knowledge ZipLearn would write (if less efficiently), as the
+natural consequence of the structure; and a brain built by BrainBuilder + ZipLearn must be post-trainable normally
+(SFT, RL, OPSD) with good results. The mechanism:
+
+*Two parameter classes in every built brain* (`Brain.param_groups()` returns them; a trainer sets the learning rate
+of the first to 0 or small, and any adapter — a low-rank delta per head — sits on top of it):
+- STRUCTURE — the instruction set as written: every head's `qkv`/`proj` rows, the `Compare` and `halt` rows, the
+  `Branch` queries, the `BoundaryOp` tensors, the codec's embedding rows, the `Readout` rows. Written once by
+  BrainBuilder; frozen or slow.
+- STATE — the stores' entries in bank or row form (`Brain.banks[name]` keys and values; the `Row` triples), the
+  `Pool` value matrices `W`, the register tokens' initial contents (program tokens), the read-out's calibration
+  table. ZipLearn writes these by counting; gradient descent writes them by backprop IN THE SAME FORMAT.
+
+*The knowledge store is an explicit sparse addressable key-value memory.* The bank form is a product-key memory
+layer (Lample et al. 2019) with our layout as the key space and a dense softmax as the reader at N ≤ 10⁵; Memory
+Layers at Scale (Berges et al. 2024) train the same object by backprop and keep it sparse with a top-k reader; ROME
+and MEMIT edit the same object without gradients. The product-key candidate reader (top-k per key half, exact
+rescoring of the candidates that are stored keys) is the sparse reader at N > 10⁵ — its substrate hook (a top-k
+inside `Attn` over the bank) is NOT DESIGNED; the dense reader is what runs today. E28's memory tokens and the MLP
+rows are the two forms this store already has.
+
+*The compiler's four obligations:*
+1. *Temperature.* Write the instruction set at the smallest M that meets the exactness criterion (§21.4 step 5,
+   `p* = 0.99`): softmax mass 0.99 on the target leaves a gradient of order `1 − p*` on the logits, so gradients
+   reach STATE through every head; E28's M = 30 saturates them to ~10⁻¹³. Tracr-compiled weights (Lindner et al.
+   2023) are the warning: written at saturation they are brittle and untrainable. `verify` reports, per head, the
+   exactness AND the mean `|∂loss/∂logits|` on the unit-test batch; both must be nonzero.
+2. *Headroom.* An explicit `Arch` wider or deeper than the layout leaves free residual dims (the free-list), zero
+   heads and zero MLP rows; the bank's `capacity` reserves rows. Synaptogenesis then pruning: gradient descent may
+   claim them; ZipLearn's sleep zeroes what nothing reads. The invariance check (B0) says the free capacity does
+   not change what the written circuits compute.
+3. *Post-training hooks, written.* (a) `Readout(ACTION.action → controls)` is a softmax over the game's controls —
+   a policy head, RL-ready (REINFORCE or GRPO on the level outcome); (b) the halting rule: the hard `halt_row` is the
+   written form, and a sigmoid over the same row's pre-activation is its PonderNet-differentiable form (the same
+   tensor, two read-outs); (c) the GOAL slot is a register token, so a goal is a prompt; (d) OPSD (`notes/
+   opsd_and_learning_from_experience.md`) is the gradient form of the hindsight loop: the teacher is the same brain
+   with the GOAL/outcome register filled with the privileged answer, the student the brain with it empty, and the
+   loss is the KL between their read-outs on the student's own trajectories — the register slot is the whole hook.
+4. *A DECOMPILER.* `ziplearn.lift(brain) -> {store: Store}` reads GD-written STATE back into tables: for each bank
+   row or MLP row, decode by the layout (argmax per one-hot subspace → a window key; the value row → a count
+   distribution), keep the row only if every key subspace is one-hot to a tolerance τ (reported), and rebuild the
+   `Store` with `stats` from the value's sharpness. The sleep pass then consolidates the lifted table like any
+   other. Possible only because the store is explicit; a row that does not decode is reported as unliftable, and
+   the fraction is a number the tests print.
+
+*Tests* (G1–G3 in the programme, after the generality test): (G1) gradient-pretrain a built brain on facts with
+STRUCTURE frozen, `lift`, compare bits per fact and exactness with the ZipLearn-written version; (G2) ZipLearn-build
+on the games, then SFT/RL on new levels: no regression on the built levels, gains on the new; (G3) the round trip
+write → GD → lift → rewrite is a fixed point.
+
+### 21.8a Randomness — how much a built brain has, and where (the user's question, 2026-09-22)
+
+The organising rule: **randomness is an input to the model, never something the model generates.** A deterministic
+network cannot manufacture entropy (asked for a random number it returns the most number-like number); it must read
+entropy from a channel, as it reads a pixel. Three kinds, treated differently:
+
+1. *Structural randomness — fixed at birth, seeded, then pruned.* (a) ADDRESSES: the keys of the Store — the codes for
+   symbols, contexts, entries — are sparse random codes, k active of n (HTM's ~2%: 40 of 2048), neither designed nor
+   learned: near-orthogonal, exponential capacity, a computable collision rate; the dentate gyrus and the fly's
+   mushroom body do exactly this (random sparse expansion for pattern separation). A NEW thing gets a fresh random code —
+   the TBT line's "a fresh random grid phase is the object's origin and identity" — which is how novelty is minted without
+   collisions. The amount is the code's entropy, ~k·log₂(n/k) bits per address. (b) HEADROOM: the overproduced heads,
+   rows and free residual dimensions (§21.4, §21.8) are initialised SMALL AND RANDOM, as gradient descent initialises,
+   because symmetry breaking is the one thing gradient descent cannot do without noise — identical weights receive
+   identical gradients; the written structure needs none of this, the headroom needs all of it, or §21.8 fails at its
+   first step. Biology's overproduction is roughly 1.5–2× the adult synapse count before pruning (from memory): build with
+   ~2× the heads and rows the blueprint uses, and let the sleep pass prune. (c) SEEDS RECORDED: a blueprint plus a seed is
+   a deterministic genome; different seeds are different individuals with one brain — and the variance across seeds
+   measures what the blueprint does NOT determine, which is a research instrument.
+2. *Computational randomness — read at run time from a NOISE REGISTER.* One register (a subspace of the residual or a
+   register token) is refilled from an external source each pass, and exactly three things read it: SELECTION — the
+   action read-out samples instead of taking the argmax: Thompson sampling where a posterior exists (the grid posteriors
+   of the mixing research are posteriors: draw a hypothesis and act on it), GCML's ε on the utilities where none does,
+   stochastic tie-breaking in the winner-take-all; the LOOP'S INITIAL STATE — Geiping et al. start the recurrence from
+   noise so the fixed point is path-independent, and E35 generates from it; EXPLORATION STEP LENGTHS — Lévy-distributed
+   when nothing local is informative, as foraging animals do. How much: the posterior's own width — Thompson injects
+   exactly the model's uncertainty and no more, so a sharp posterior makes the brain deterministic and a flat one makes it
+   explore; where no posterior exists the scale is a temperature, PRICED in bits, never typed (E29's pseudo-count was the
+   wrong kind of object). Safety: GCML's homing term — "even a bad noisy step is compensated because the next step again
+   points at the goal" — is the reason noise on selection is safe when a goal direction exists.
+3. *Training randomness — the trainer's, not the brain's.* Minibatch noise, dropout, Geiping's random iteration counts,
+   DiffusionBlocks' noise levels, E35's corruption schedule shape what a trainer sees; BrainBuilder only leaves room for
+   them (the headroom again).
+
+*What has none:* the instruction set — heads, routes, boundary operator, halting threshold — is exact or it is a bug
+(E28's 530/530 came from exactness). Randomness inside an instruction is not stochastic computing; it is noise in the
+interpreter. Blueprint entry: deterministic circuits; seeded random sparse addressing; seeded small random headroom at
+~2× use; one noise register wired to selection, loop initialisation and exploration, its scale bound to uncertainty.
+
+### 21.9 The blueprint research programme — experiments in order, each with a pass and a refute
+
+B0 is verification, run first but not an experiment: the compiled `induction.json` at `Arch(d=64, heads=2,
+layers=2, rope, max_len=128)` equals `e18.write`'s state_dict tensor for tensor and scores 1.000; the compiled
+`gridworld.json` at r = 1, `Arch.auto`, `onehot` reproduces E28's rollouts (300/300 and 230/230 seed 0; 277/277 and
+232/232 seed 1) and its tie counts (1,434; 1,475); the same blueprint at `Arch(d=1024, n_head=16, n_layer=24)` and
+at `rope2d` gives identical rollouts (width/depth/codec invariance); `verify` passes every unit test with logit gap
+≥ M. Any miss is a compiler bug, not a result.
+
+**B1 — Generality: one brain, the games AND Latin, nothing changed** (`brainbuilder.py` + `ziplearn.py`; CPU, ≤ 10
+min). ONE blueprint (`gridworld.json`, field r = 4, 80 gather heads, `rope2d`), ONE `Arch`, ONE compiled STRUCTURE
+state_dict — byte-identical between the two arms; the arms differ only in what the codec is given (a frame's cells
+with (row, col) coordinates; a text's characters with (0, position)) and in which `Readout` the harness reads.
+Games arm: E28's protocol on LockPath levels 0–1 with sleep (300 random plans of 1–4 actions per level, snapshot/
+restore truth). Text arm: the E33 corpus, 826,605 training characters, the first 20,000 characters of *De Bello
+Civili* held out; ZipLearn writes the order-≤ 4 contexts (the field's four back positions) as bank entries with
+wildcards for the shorter orders and the entry's next-character distribution as `out`; the coda reads `pred` at the
+derived M; the bank size N and the MAC count are printed before the run. Pass: written = planner ≥ 0.98 on
+all-known plans (E28: 1.000) AND the sleep pass zeroes 76 of the 80 heads, leaving the four neighbours (E24's
+union) AND text ≤ 2.27 bits/char (xz online at that size is 2.324; the blended order-4 n-gram frozen is 2.113 — the
+gap to it is reported as the softmax-vs-KT cost). Refute: games < 0.9, or text > 2.324 (worse than a generic
+compressor), or any head that the masks kept zeroed. Inconclusive between. The prelude and coda differ as the
+retina differs from the cochlea; if the user reads "nothing changed" as one codec too, the test is re-specified,
+not fudged.
+
+**G1 — Gradient pretraining lands in the same store** (CPU, ≤ 5 min; a GPU run at larger N is the same script).
+N = 1,000 random (key → value) tuples (a 6-tuple over V = 16 → one of 16; Allen-Zhu & Li's incompressible facts in
+miniature). Arm Z: ZipLearn writes them into the bank (one exposure each). Arm G: a freshly built brain with an
+empty bank of 1,200 rows (keys small-random), STRUCTURE frozen, trained by Adam on the `pred` read-out's
+cross-entropy for 100 epochs; then `lift`. Measured: exact recall (Z, G), liftable fraction (G), bits per fact of
+the lifted table under `table_price` against Z's, and the gradient norm reaching STRUCTURE at `p* ∈ {0.9, 0.99,
+0.999}`. Pass: G recall ≥ 0.9 and liftable ≥ 0.9 at `p* = 0.99`, lifted bits per fact within 2× of Z's. Refute:
+liftable < 0.5 (the store is not the same object under GD) or G recall < 0.5 at every `p*` (the written structure
+is Tracr-brittle).
+
+**G2 — Post-training does not break the built brain** (CPU, ≤ 10 min). ZipLearn builds on LockPath levels 0–1
+(B1's games arm); then (a) SFT on hindsight traces of level 2 (the explorer's successful paths, E27) and (b)
+REINFORCE on the action read-out with the level outcome as reward, 200 episodes, STRUCTURE frozen, STATE and the
+read-out trainable. Pass: written = planner on levels 0–1 stays ≥ 0.98 after training AND level 2 is solved in fewer
+actions than the explorer alone (E24: LockPath L2 unsolved). Refute: levels 0–1 regress below 0.93, or no gain on
+level 2 after both.
+
+**G3 — The round trip is a fixed point** (CPU, ≤ 3 min). Write (B1's bank) → 20 Adam steps on the same
+transitions, STRUCTURE frozen → `lift` → `write` again. Pass: ≥ 0.99 of entries identical after the round trip and
+`table_price` within 1 bit. Refute: > 5% of entries drift or become unliftable.
+
+**B2 — The executive does E6 inside the block** (CPU, ≤ 2 min). E6's stream (shift 3, shift 5, affine 2x + 1,
+shift 3 again; V = 11; 40 pairs each; 20 streams) as (x, y) tokens: `surprise` (Compare of `pred` vs the observed y)
+gates the store append and the minting of a TASK id; the TASK `Broadcast` selects the block every `Match` reads.
+`ContinualLayer.select` is deleted from the path. Pass: retention 1.000 on every earlier rule after every stretch
+and exactly 3 ids; the flag fires within 2 observations of each change. Refute: retention < 0.95 or a 4th id on
+A's return.
+
+**B3 — The planner is the loop** (CPU, ≤ 3 min). E9's environment (7 actions, 200 goals within 3 actions);
+`count_inverse` fills W from k = 3 observations per action; the loop plans (GOAL broadcast → pool → quantise with
+noise 0.1 → lookup advances → halt on `goal_met` or 8 passes), then the plan runs. Then E29's rooms (LockPath
+level 0; empty rooms of side 12, 20, 40) with W counted from each room's transitions. Measured: goals reached, plan
+length vs the oracle's, passes per real step against the room's side. Pass: ≥ 0.8 of goals at k = 3 (E9's search:
+1.000); refute: < 0.5. Passes-per-step growth is REPORTED (E29's 293/89/165 is the comparison, not a claim);
+relational goals excluded by pre-registration (E17).
+
+**B4 — Capacity on four axes** (CPU, ≤ 5 min). Random tuples (G1's set) at N = 10³, 10⁴, 2·10⁴, 5·10⁴ written as
+(a) one-hot tokens, (b) sparse `Row`s at d = 2048, k ∈ {11, 40}; measured: exact recall vs N; bits per parameter and
+per storage bit at the largest N with recall ≥ 0.99; bits per exposure tabled beside Allen-Zhu & Li's 2/1000.
+Then R_h recomputed on E24, E3, E8, E12 and on the random set. Pass: (b) ≥ 0.3 bits per storage bit at k = 11 and
+recall ≥ 0.99 from one exposure; R_h = 1.00 ± 0.02 on the random set; R_h > 4 on every structured set. Refute:
+(b) < 0.1, or recall < 0.9 below Willshaw's P, or R_h > 1.2 on the random set (the price leaks).
+
+**B5 — Consolidation under the interference-aware price** (CPU, ≤ 5 min). E35's strict blocks 4 (28,811 entries)
+and 8 (30,629): `consolidate(n0=8, eps0=0.1)`; measured: entries moved, storage bits before/after, replayed false
+positives, repair at t = 0.25/0.5/0.75 against E35 strict (0.946/0.880/0.800). Pass: ≥ 5× fewer storage bits with
+repair within 0.01 at t = 0.5. Refute: repair drops > 0.05 (interference mispriced) or < 10% of entries qualify.
+
+**B6 — The sequence axis** (CPU, ≤ 3 min). E28's rollout as Coconut thought positions — one appended position per
+action through `BoundaryOp` + `forward_embedded` caches — must equal the depth-loop rollout on the same 300 plans;
+the cost per step of both axes reported. Refute: any disagreement.
+
+**B7 — The ablation ladder: which circuits general intelligence needs** (CPU, ≤ 15 min total). `ablate` one
+circuit at a time — the registers, `surprise` (writes ungated), noise = 0, `Branch` → plain sum, tokens → rows
+only, `nogo` — and rerun B1, B2, B3. Pre-registered: removing the gate breaks B2 (ids multiply); noise = 0 lowers
+B3 on the rooms (no escape from a utility tie); rows-only lowers B1's unknown-window agreement (E28: 246/300 toward
+the planner's 222/300); the route ablation changes nothing in B1 (one pass per action never reads earlier passes)
+and shows, if anywhere, in B3's multi-pass imagination. Pass: the table exists with every cell filled; a failed
+prediction is recorded as such.
+
+**B8 — Compile cost at scale** (CPU, ≤ 5 min). `gridworld.json` at (H, W) = (8, 11), (32, 32), (64, 64) under
+`onehot` and `rope2d`; banks of 121, 10⁴, 10⁶ entries; compile seconds and peak bytes. Pass: compile time linear in
+N and ≤ 10 s at 10⁶; the `rope2d` gather's parameter count independent of H, W; `rope2d` = `onehot` on all-known
+plans ≥ 0.99. Refute: a per-element Python loop surviving (> 60 s at 10⁶).
+
+### 21.10 Not designed, by name
+
+The price of the nearest-key default's generalisation (E28's open point; E35's collapse; F2's leave-one-out is the
+candidate); what LEARNS the register contents — the programs the loop runs beyond simulation, repair and one-step
+selection (§18's open question; OPEN-10's value when no plan exists); relational goals (E17); the sparse top-k
+reader inside `Attn` for banks above 10⁵ entries; the KT escape as a written read-out (the text arm uses the
+softmax's geometric blend and a counted calibration at the coda); the pricing of the blueprint's constants
+(`p*`, the noise gain, `max_passes`, `n0`, `eps0`) rather than typing them; the minting of a new instruction (a
+new kind is a program, §19); superposition of subspaces; a schedule for compositions that are not refinements
+(§20's second level); confidence calibration inside the loop.

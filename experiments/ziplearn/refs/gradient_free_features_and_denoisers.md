@@ -65,8 +65,10 @@ degradation in comparison to state-of-the-art".
 necessarily lead to further improvement", and the stated bottleneck is that "the dimension of the resulted feature
 would increase exponentially with the number of stages" (L1·L2·… maps, each hashed). Variability: for ImageNet-scale
 pose/scale variation "PCANet might not be sufficient", and "some preprocessing of pose alignment and scale
-normalization might be needed". RandNet's near-parity (random Gaussian filters, same hashing + histograms) says most of
-the work is done by the DISCRETE CODE + COUNTING, not by the filters.
+normalization might be needed". RandNet's near-parity (random Gaussian filters, same hashing + histograms) holds only
+at 60k training examples (MNIST: RandNet-2 0.63 vs PCANet-2 0.66); at 10k (MNIST basic) RandNet-2 is 1.25 vs
+PCANet-2 1.06, 18% relatively worse (their own Table 10). So "the discrete code + counting do the work" is a
+60k-example statement; at E35's 30k-window scale the fitted projections are expected to matter (corrected 2026-09-22).
 
 **Reading for us.** PCANet is literally "features → discrete code → count table": a linear projection fitted in closed
 form (an eigendecomposition of a 49×49 covariance), a sign quantiser, and histograms (counts) that a linear reader
@@ -255,14 +257,24 @@ grouping").
 DnCNN: 17–20 conv layers, residual learning (the net predicts the NOISE), batch norm, trained by SGD on 400 images.
 Their Table II, average PSNR on BSD68: σ = 15: BM3D 31.07, DnCNN-S 31.73; σ = 25: 28.57 vs 29.23; σ = 50: 25.62 vs
 26.23 — "our DnCNN-S model outperforms BM3D by 0.6dB on all the three noise levels", against the folklore they cite
-that "few methods can outperform BM3D by more than 0.3dB on average". Set12 σ = 25: BM3D 29.969 vs DnCNN-S 30.436. So
-the whole learned-vs-non-learned gap in Gaussian denoising, after a decade, is ~0.6 dB — and part of that is the
-receptive field (DnCNN sees 35–41 pixels; BM3D matches 8×8 blocks within a 39×39 window).
+that "few methods can outperform BM3D by more than 0.3dB on average". Set12 σ = 25: BM3D 29.969 vs DnCNN-S 30.436.
+DnCNN is not the ceiling (corrected 2026-09-22): DRUNet — Zhang, Li, Zuo, Zhang, Van Gool, Timofte, "Plug-and-Play
+Image Restoration with Deep Denoiser Prior", IEEE TPAMI 2021, arXiv:2008.13751, Table 1 (read) — reaches on BSD68
+σ = 15 / 25 / 50: 31.91 / 29.48 / 26.59 vs BM3D 31.08 / 28.57 / 25.60 and DnCNN 31.73 / 29.23 / 26.23, i.e.
++0.83 / +0.91 / +0.99 dB over BM3D (Set12: 33.25 / 30.94 / 27.90 vs BM3D 32.37 / 29.97 / 26.72). So the
+learned-vs-fixed gap in Gaussian denoising is about 1 dB (DnCNN 2017 +0.6, DRUNet 2021 +0.9), not 0.6. That part of
+the gap is the receptive field (DnCNN sees 35–41 pixels; BM3D matches 8×8 blocks within a 39×39 window; DRUNet's
+U-Net sees more) is this note's own conjecture, not a result of either paper.
 
 ### 2.4 The bound that says why lookup runs out — Levin & Nadler, "Natural Image Denoising: Optimality and Inherent Bounds", CVPR 2011
 
 They represent the natural-image prior non-parametrically by 10¹⁰ clean patches and compute the Bayesian MMSE for a
-denoiser that sees a k×k window — exactly a huge lookup table with a Gaussian kernel. Findings (their §3–4): for small
+denoiser that sees a k×k window — exactly a huge lookup table with a Gaussian kernel: their optimum (eqs. 10–12) is
+the KERNEL average over the database, μ̂(y) = Σ_i p(y | x_i) x_i / Σ_i p(y | x_i), non-local means with bandwidth σ,
+NOT a nearest-neighbour rule; and their neighbour-density statement below is about when this lower bound is TIGHT
+(enough neighbours within the kernel's reach), not about the accuracy of a hard nearest estimator (clarified
+2026-09-22 — the synthesis note's F1 had read it as a density limit on E35's hard rule, which its own F2 refutes: the
+soft kernel over the same stored windows beats the hard rule by 0.05–0.10). Findings (their §3–4): for small
 windows "state of the art denoising algorithms are approaching optimality and cannot be further improved beyond
 ∼0.1dB"; BM3D is within 0.1 dB of the k-window optimum for small k. The neighbour density is the limit: at σ = 18, "for
 3×3 patches, 99% of the examples had more than 2,000 neighbors. In contrast, for a 9×9 patch size, 13% of the examples
@@ -312,15 +324,15 @@ right — whereas E34's 18 text contexts are nested and overlapping.
 | Rahimi–Recht | random draws from the kernel's spectrum | ridge regression (closed form) | nothing at fixed kernel; the kernel itself |
 | K-SVD | alternating OMP + rank-1 SVD (closed-form steps, iterated) | the sparse code | ~1 dB vs BM3D in denoising |
 | SoftHebb / Krotov–Hopfield | a local Hebbian rule with a learning rate (fixed point = soft k-means) | linear layer by SGD | 3.7 points on CIFAR-10, 4.3 on ImageNette; ~4.5 on CIFAR-10 fully connected |
-| NLM / BM3D | nothing (patch distance; fixed transforms) | — | 0.6 dB (DnCNN) |
+| NLM / BM3D | nothing (patch distance; fixed transforms) | — | ~1 dB (DnCNN 2017 +0.6, DRUNet 2021 +0.9 over BM3D on BSD68) |
 | E35 memory block | stored windows (counting) | the nearest window's majority | not measured; a soft kernel already gives +0.05–0.10 |
 
 Two regularities. First, in every "gradient-free features" paper the readout is still SOLVED — by least squares, a
 convex SVM, or SGD on a linear layer; the analogue in ZipLearn is the count table keyed on the feature code (PCANet's
 histogram is that table). Second, the residual gap to backprop is the same shape everywhere: roughly 4–10 points on
 natural-image classification (features the data-independent or unsupervised method cannot invent: the target never
-shapes them), and ~0.6 dB on denoising (a larger receptive field). Neither gap is "the feature", it is "the feature
-chosen for the target".
+shapes them), and ~1 dB on denoising (DnCNN +0.6, DRUNet +0.9; that the receptive field is the cause is this note's
+conjecture). In classification the gap is not "the feature", it is "the feature chosen for the target".
 
 ---
 
@@ -349,7 +361,8 @@ is written here.
    vector (153 dims); the L leading eigenvectors of its covariance (from the same 30k windows, one 153×153
    eigendecomposition); the sign bits of the L projections as the table key (2^L keys, L = 8 → 256, L = 12 → 4096)
    instead of the raw 9-cell key; counts of the centre colour per key. Two windows differing in a noise cell share a
-   key when the projections agree. RandNet says random projections would do nearly as well — the cheapest test of
+   key when the projections agree. RandNet says random projections would do nearly as well at 60k examples (not at
+   10k, §1.1 — at E35's 30k windows the PCA fit is expected to matter) — the cheapest test of
    whether a shared discrete code beats the raw key. Refuted if the key's table at t = 0.5 is below the soft kernel's
    0.900 — then the code loses more than it shares.
 4. **k-modes centroids + a soft assignment (Coates on categorical data).** K centroids over the 9-cell windows by
@@ -358,7 +371,8 @@ is written here.
    result that random exemplars ≈ trained centroids says the memory block's stored windows ARE the dictionary
    already; what k-modes adds is fewer, more general keys — the sleep pass's goal by another route, and priced the
    same way (bits of the pairs under the merged table).
-5. **The receptive field, not the block.** DnCNN's 0.6 dB over BM3D and Levin & Nadler's support-size argument both say
+5. **The receptive field, not the block.** The learned denoisers' ~1 dB over BM3D (DnCNN 0.6, DRUNet 0.9; the receptive-field
+   attribution is this note's conjecture) and Levin & Nadler's support-size argument both say
    the next gain is context; a radius-2 window (25 cells) makes the raw key hopeless (16^25) but is exactly where
    features 2–4 keep generalising and the soft kernel degrades (the Hamming distance at 25 cells is dominated by noise
    cells). Test the crossover: radius 2 with candidates 2–4 against radius 1 with candidate 1.
