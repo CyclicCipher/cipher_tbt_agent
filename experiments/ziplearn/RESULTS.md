@@ -970,7 +970,13 @@ numbers: apparatus check: the chain reproduces E33 exactly — 1.8225 online / 1
          (d) COUNTING THE PREVIOUS WORD IS WORSE THAN THE CHAIN (expL/expK): a KT-smoothed p(first character |
          previous word) costs 5.043 bits against the chain's 4.518 (headroom −0.525). Its deficit does shrink with
          data — +0.644 / +0.574 / +0.425 / +0.259 bits at 100k / 289k / 769k / 2.73M characters, about −0.13 per
-         tripling — which extrapolates to a crossover near 10^8 characters, i.e. enwik8 scale.
+         tripling. CORRECTED 2026-09-27: a least-squares fit against log10(characters) gives −0.28 to −0.32 per
+         decade and a crossover at 10^7.2–10^7.4 = **17–26M characters**, not the 10^8 first written (that averaged
+         the deltas instead of fitting them, and the deficit is closing faster as data grows). 20M characters is
+         REACHABLE — all surviving classical Latin is ~7.36M words ≈ 45–50M characters — so this is a testable
+         prediction. Heaps' law on the same four sizes gives types ∝ n^0.70, so tokens per type would still be only
+         ~12 at 27M and ~18 at 108M: a bigger corpus moves the bigram past the chain but does NOT make the metric
+         work.
          (e) THE COUNTED METRIC IS DATA-STARVED (expK/expO): tokens per word type reaches only **5.2** at the full
          2.7M-character corpus (2.0 / 2.6 / 3.5 / 5.2 across the four sizes; 69,629 types). PPMI + rank-64 SVD over
          12,000 types gives nearest neighbours that share a 4-character stem 0.7% of the time against a 0.065%

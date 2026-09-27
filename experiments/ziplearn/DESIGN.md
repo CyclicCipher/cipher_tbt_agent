@@ -1561,10 +1561,22 @@ characters of words never seen in training: 1.786 bits when the 4-character stem
 positions and 32.1% of the code length (4.518 bits each, against 1.482 for word-interior). And the obvious counted
 fix does not work either — a KT-smoothed p(first character | previous word) costs 5.043 bits, WORSE than the chain's
 4.518, because 69,629 word types over 2.7M characters is too sparse to count. Its deficit does close with data
-(+0.644 / +0.574 / +0.425 / +0.259 at 100k / 289k / 769k / 2.73M, about −0.13 per tripling), which extrapolates to a
-crossover near 10⁸ characters — enwik8 scale, and exactly where the literature says neural language models begin to
-win. That convergence is the most useful thing this measurement produced: the semantic landscape is not a different
-mechanism from counting, it is the same counting at a data scale this corpus does not reach.
+(+0.644 / +0.574 / +0.425 / +0.259 at 100k / 289k / 769k / 2.73M). The semantic landscape is not a different
+mechanism from counting; it is the same counting at a data scale this corpus does not reach.
+
+**Crossover, refitted 2026-09-27 (E36 addendum).** The figure of "near 10⁸ characters" was a bad extrapolation —
+it averaged the deltas instead of fitting them, and the deficit is closing FASTER as data grows (−0.070, −0.149,
+−0.166 per tripling). A least-squares fit of the deficit against log₁₀(characters) gives a slope of −0.28 to −0.32
+per decade and a crossover at **10^7.2–10^7.4, i.e. 17–26 million characters**, centred near 20M. That is five times
+sooner than stated and, unlike 10⁸, it is REACHABLE: the whole surviving classical Latin corpus is about 7.36M words
+(PHI Latin Texts) ≈ 45–50M characters, and `cltk/lat_text_latin_library` is ~110 MB of Latin of all periods. So the
+word-level context overtaking the character chain at boundaries is a testable prediction, not a thought experiment.
+What a bigger corpus does NOT fix is the metric: Heaps' law fitted on our own four sizes gives types ∝ n^0.70, so
+tokens per word type reaches only ~12 at 27M characters and ~18 at 108M, still an order of magnitude below what
+distributional semantics needs. Latin's inflection is what multiplies the type count, which makes MDL morphology
+induction (a two-part code over stems + suffixes — Goldsmith's Linguistica 2001, Creutz & Lagus's Morfessor; our own
+principle applied to word structure, gradient-free and not a hand-written lexicon) the lever that a bigger download
+is not. NOT DESIGNED.
 
 ### 24.5 Decompilation as an MDL problem
 
