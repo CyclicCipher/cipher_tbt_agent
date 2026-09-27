@@ -1,0 +1,144 @@
+{
+ "n_train_chars": 768908,
+ "n_test_chars": 240588,
+ "V": 70,
+ "bits_per_char_online": 1.8900763530488043,
+ "train_word_types": 30524,
+ "train_stems": 5907,
+ "concentration": {
+  "top_1pct_share": 0.06836215122693033,
+  "top_5pct_share": 0.20997232265211244,
+  "top_10pct_share": 0.33787625882926087,
+  "top_25pct_share": 0.6134515407864587,
+  "top_50pct_share": 0.8751809439542724
+ },
+ "by_word_offset": {
+  "-1": {
+   "n": 39360,
+   "mean_bits": 1.1836155632606415
+  },
+  "0": {
+   "n": 32336,
+   "mean_bits": 4.5183975049643115
+  },
+  "1": {
+   "n": 31967,
+   "mean_bits": 2.2064631669214028
+  },
+  "2": {
+   "n": 28088,
+   "mean_bits": 2.005951767101081
+  },
+  "3": {
+   "n": 25444,
+   "mean_bits": 1.3393244359182228
+  },
+  "4": {
+   "n": 22438,
+   "mean_bits": 1.2105252512468483
+  },
+  "5": {
+   "n": 18460,
+   "mean_bits": 1.1737544974017622
+  },
+  "6": {
+   "n": 14685,
+   "mean_bits": 1.2276806029109422
+  },
+  "7": {
+   "n": 10922,
+   "mean_bits": 1.2280405956240206
+  },
+  "8": {
+   "n": 16888,
+   "mean_bits": 1.2322539347086636
+  }
+ },
+ "by_word_novelty": {
+  "unseen_word_shared_stem": {
+   "n": 40800,
+   "mean_bits": 2.2729930852294347,
+   "share_of_total": 0.20394119845873412
+  },
+  "unseen_word_new_stem": {
+   "n": 6015,
+   "mean_bits": 3.5154914230613645,
+   "share_of_total": 0.04650165008369039
+  },
+  "seen_word": {
+   "n": 138354,
+   "mean_bits": 1.8116937724803919,
+   "share_of_total": 0.551217758407611
+  },
+  "short_word": {
+   "n": 16059,
+   "mean_bits": 2.7152190094364337,
+   "share_of_total": 0.09588927898742894
+  }
+ },
+ "suffix_chars_only": {
+  "unseen_word_shared_stem": {
+   "n": 23564,
+   "mean_bits": 1.7862288261200427
+  },
+  "unseen_word_new_stem": {
+   "n": 2875,
+   "mean_bits": 2.1870409890854488
+  },
+  "seen_word": {
+   "n": 56954,
+   "mean_bits": 0.9253483196213191
+  }
+ },
+ "by_word_frequency": {
+  "unseen": {
+   "n": 46830,
+   "mean_bits": 2.4339057455812156,
+   "share_of_total": 0.25065397898031605
+  },
+  "1-2": {
+   "n": 32733,
+   "mean_bits": 2.040519568186493,
+   "share_of_total": 0.14688358501550922
+  },
+  "3-10": {
+   "n": 39100,
+   "mean_bits": 1.9010982711906137,
+   "share_of_total": 0.16346621762145314
+  },
+  "11-100": {
+   "n": 58536,
+   "mean_bits": 1.7746347836174483,
+   "share_of_total": 0.22844345566917024
+  },
+  "100+": {
+   "n": 24029,
+   "mean_bits": 2.0457565387226304,
+   "share_of_total": 0.10810264865101578
+  },
+  "non_letter": {
+   "n": 39360,
+   "mean_bits": 1.1836155632606415,
+   "share_of_total": 0.10245011406253553
+  }
+ },
+ "word_initial": {
+  "n": 32335,
+  "share_of_all_positions": 0.1343998869436547,
+  "share_of_total_bits": 0.32129552329752065,
+  "ours_mean_bits": 4.518404626186001,
+  "prev_word_bigram_seen": {
+   "n": 17683,
+   "mean_bits": 3.879827771302137
+  },
+  "prev_word_bigram_unseen": {
+   "n": 14652,
+   "mean_bits": 5.289081293187867
+  },
+  "counted_given_prev_word_bits": 5.0434916298556605,
+  "counted_marginal_bits": 4.555827072133078,
+  "headroom_vs_ours": -0.5250870036696593,
+  "headroom_bits_per_char_of_corpus": -0.07057163392878461
+ },
+ "seconds": 32.646817684173584
+}

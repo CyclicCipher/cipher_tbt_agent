@@ -949,3 +949,102 @@ verdict: INCONCLUSIVE on the letter (pre-registered pass ≤ 1.6; better than th
          one corpus, one held-out book.
 changed: the gradient question has a measured answer on text: structure, memory and choice are gradient-free; the
          multiplicative combination of many weak cues is not. Not built: the learned-exponent mixer (a gradient, if allowed).
+
+### 2026-09-27 — E36 — where the code length actually goes on Latin, and what the semantic landscape would cost: the first character of a word is 13.4% of positions and 32.1% of the bits; more character context buys NOTHING; the §24.4 morphology hypothesis is REFUTED; and the counted metric is unusable on this corpus at 5.2 tokens per word type
+command: `python experiments/ziplearn/research/expL_where_the_bits_go.py 900000`; `expK_counted_metric.py 900000`;
+         `expO_context_and_adaptation.py`. CPU, 33 s / 22 s / ~8 min. No network built, run or trained.
+files:   `runs/research/expL.json`, `expK.json`, `expO.json` (+ `.log`); code `research/expL_where_the_bits_go.py`,
+         `expK_counted_metric.py`, `expO_context_and_adaptation.py` (all reuse `e34.Chain`/`Stream` and
+         `textlm.load_corpus`)
+numbers: apparatus check: the chain reproduces E33 exactly — 1.8225 online / 1.8728 frozen at 2.7M characters.
+         (a) WHERE THE BITS ARE (expL, 769k training characters, 240,588 held out, 1.8901 bits/char): word-initial
+         characters are 13.4% of positions and carry **32.1% of the total code length**, at **4.518 bits each**
+         against 1.482 for word-interior characters. The costliest 10% of positions carry 33.8%. By offset within
+         a word: 4.518 (first), 2.21, 2.02, 1.41, then flat at ~1.30.
+         (b) MORE CONTEXT DOES NOT HELP (expO): chain at R = 8 / 12 / 16 / 24 gives 1.8901 / 1.8902 / 1.8902 /
+         1.8903 bits/char, and the word-initial cost gets WORSE (4.518 / 4.614 / 4.630 / 4.634) while the interior
+         improves only 1.482 → 1.464. The window is not the constraint.
+         (c) THE MORPHOLOGY HYPOTHESIS IS REFUTED (expL): suffix characters of words never seen in training cost
+         1.786 bits when the 4-character stem was seen with other forms against 2.187 when it was not — backoff
+         ALREADY shares stems, because the stem IS the left context of the suffix. §24.4 was wrong.
+         (d) COUNTING THE PREVIOUS WORD IS WORSE THAN THE CHAIN (expL/expK): a KT-smoothed p(first character |
+         previous word) costs 5.043 bits against the chain's 4.518 (headroom −0.525). Its deficit does shrink with
+         data — +0.644 / +0.574 / +0.425 / +0.259 bits at 100k / 289k / 769k / 2.73M characters, about −0.13 per
+         tripling — which extrapolates to a crossover near 10^8 characters, i.e. enwik8 scale.
+         (e) THE COUNTED METRIC IS DATA-STARVED (expK/expO): tokens per word type reaches only **5.2** at the full
+         2.7M-character corpus (2.0 / 2.6 / 3.5 / 5.2 across the four sizes; 69,629 types). PPMI + rank-64 SVD over
+         12,000 types gives nearest neighbours that share a 4-character stem 0.7% of the time against a 0.065%
+         random baseline — a 10× enrichment that is absolutely noise, and the examples read as noise (`quod` →
+         `paludamentum, imperatoribus, pontificibus`). As predictors of the first character: kNN-smoothed 4.683;
+         low-rank Σ_qk at rank 8 / 16 / 32 / 64 → 6.046 / 6.722 / 8.142 / 8.727 (WORSE as the rank rises — a PPMI
+         reconstruction is not a density estimator); a linear 50/50 pool with the chain 4.534, i.e. the chain alone
+         (E34's finding again: a linear pool can only choose).
+verdict: The user's judgement that static-vs-contextual is the biggest hurdle is CONFIRMED and localised: a third of
+         our code length is spent on the one position where character context has run out, and neither a longer
+         window (b) nor morphology (c) nor counting the previous word (d) touches it. But §23's remedy CANNOT BE
+         TESTED ON THIS CORPUS: distributional semantics needs 10^2–10^4 tokens per type and Latin gives 5.2 (e).
+         The two facts together are a redirection, not a defeat — the measured crossover (d) lands at the corpus
+         scale where the literature says neural language models start to win, which says the semantic landscape is
+         not a different mechanism but the same counting at a data scale we do not have.
+changed: §24.4 is retracted and replaced by the word-boundary finding; §23.5's S3 is answered on Latin (refuted for
+         a DATA reason, with the number) and re-aimed at the games, where tokens per type is thousands rather than
+         5.2; §24.3 gains the measurement that window length is not the constraint. Not built: the metric on frames.
+
+### 2026-09-27 — E37 — the legibility tax is a PROFILE, not a number, and it is already negative on four axes: under distribution shift a counted model's free per-symbol adaptation is worth 6.04 bits/char, 123× its value in-distribution
+command: `python experiments/ziplearn/research/expP_negative_tax.py`; CPU, ~9 min. No network built, run or trained.
+files:   `runs/research/expP.json`; code `research/expP_negative_tax.py` (one alphabet built jointly over all three
+         corpora so no arm is charged for unseen symbols)
+numbers: a chain (R = 8) trained on all 2,726,046 characters of `corpora/latin books`, then made to code four
+         streams, FROZEN against ONLINE (the online arm updates its counts per symbol at zero cost; a deployed
+         gradient-trained model cannot):
+         | stream | n | frozen | online | gain | relative |
+         |---|---|---|---|---|---|
+         | the held-out Latin book | 240,588 | 1.869 | 1.821 | **+0.049** | 2.6% |
+         | Middle High German (Nibelungenlied) | 501,754 | 8.394 | 2.355 | **+6.040** | 72.0% |
+         | Old High German (Hildebrandslied + Muspilli) | 7,327 | 7.258 | 5.375 | +1.883 | 25.9% |
+         | the Latin book REVERSED | 240,588 | 7.541 | 2.870 | +4.671 | 61.9% |
+         The gain GROWS through the stream on the shifted arms (Middle High German +4.649 over the first tenth,
+         +6.456 over the last) — it is still learning at the end. In-distribution it decays with training data:
+         +0.339 / +0.189 / +0.104 / +0.050 bits at 100k / 289k / 769k / 2.73M characters (expO), halving per
+         tripling.
+verdict: The answer to "what would it take for the legibility tax to be negative" is that **it already is, on four
+         axes, and the one axis we have been using as the scoreboard is the only one where it is positive.**
+         Negative: adaptation under distribution shift (+6.04 bits/char here against +0.05 in-distribution);
+         continual learning (E6 100% retention vs E6b below chance); exact composition (E18/E28 100% vs the trained
+         model's 0/8 held out); storage density on structured content (R_h 13.9 on E24, 134 on E12, against 1.00 by
+         construction on incompressible tuples). Positive: bits per character on a large STATIONARY text corpus
+         (+0.4, §24.1). The discriminating variable is stationarity, not the model class — and a homogeneous
+         held-out book from the training distribution is the one condition a deployed model never enjoys.
+changed: §24.1's legibility tax is restated as a profile with the axis named on each side; §0's tracked number
+         becomes the tax ON THE STATIONARY-TEXT AXIS rather than "the tax". Not built: the same measurement against
+         an actual gradient-trained model, which is the only thing that would turn these into a true tax rather
+         than a frozen-vs-online gap (it needs the gradient arm, which is off).
+
+### 2026-09-27 — S2 — interpretable superposition: a designed codebook's interference is predictable, the usable packing obeys m/d · k ≈ 32, and the coherence guarantee is conservative by about 2×
+command: `python experiments/ziplearn/research/expM_codebook.py`; CPU, 11 s. Pure numpy; no network anywhere.
+files:   `runs/research/expM.json`; code `research/expM_codebook.py`
+numbers: codebooks of m atoms in d dimensions, three families (gaussian; k-sparse ±1 = Kanerva's random sparse
+         addressing; Hadamard rows with per-block column sign flips, standing in for an explicit ETF/Gold
+         construction), 400 bundles per cell, read out by matched filter, scored on EXACT recovery of the whole
+         bundle. At d = 128: coherence μ is 0.31–0.43 for gaussian and sparse and 0.30–0.39 for Hadamard, i.e.
+         **4–6× the Welch bound** (0.063–0.086) — random and near-tight frames are far from optimal, as expected.
+         The guarantee k < ½(1 + 1/μ) gives 1.7–2.2; the measured k at ≥ 99% exact readout is 3–6, so the
+         **guarantee is conservative by roughly 2×** (worst case against average case), with the right shape.
+         Usable packing with the feature count held fixed at m = 1024 and d shrinking: m/d = 16 at k = 2, m/d = 8
+         at k = 4, m/d = 4 at k = 8 — i.e. **m/d · k ≈ 32 across the board**. Readout collapses sharply past that
+         (k = 8 at m/d = 8: 0.395; at m/d = 16: 0.000).
+verdict: §22.2's three claims hold as stated, with one correction and one caveat. Confirmed: coherence is bounded
+         and computable in advance; exact readout holds under a stated sparsity condition; interference is
+         therefore a constant rather than a mystery — superposition CAN be done with a published codebook and stay
+         auditable, which is the answer to the user's question. Correction: §22.5 said the allocation is "an argmin,
+         not a hyperparameter". The argmin is well defined but NOT self-contained — it depends on the
+         reads-per-stored-entry ratio of the workload, an application property rather than a codebook property.
+         With 2,000 stored entries and 10,000 reads the storage term dominates and the price picks maximum packing
+         even where readout is 0.000, which is absurd; the operational answer is the largest packing at ≥ 99%
+         readout, and the price is meaningful only once the workload's read/write ratio is supplied. Caveat: two
+         bugs of mine had to be fixed first — a Hadamard stack that repeated every atom up to a sign (coherence
+         1.000), and a price that compared a one-off dimension saving against a per-read error rate while also
+         varying the feature count.
+changed: §22.2 gains the measured numbers and the 2× conservatism; §22.5 gains the read/write-ratio dependency;
+         §22.6's S2 is answered. Not built: an explicit ETF/Gold construction (the Hadamard stand-in is 4× off the
+         Welch bound), and the codebook applied to a real `Store`.

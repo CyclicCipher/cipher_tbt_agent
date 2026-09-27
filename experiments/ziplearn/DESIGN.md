@@ -33,9 +33,11 @@ Three properties survive that correction, and they are the safety case:
 
 **Cheap training is not a side benefit; it is the load-bearing test.** An interpretable model nobody uses makes
 nothing safe. So the number to track is the **legibility tax**: the bits the constructive route pays over a
-gradient-trained model of equal budget. On the Latin corpus it is currently ≈ 0.4 bits/character (§24). The question
-that decides the programme is not whether the tax reaches zero but whether it is fixed, shrinking or growing with
-scale (§22).
+gradient-trained model of equal budget. It is a PROFILE, not a scalar (§24.1, E37) — already negative on adaptation
+under distribution shift (−6.04 bits/char), continual learning, exact composition and storage density on structured
+content, and positive only on bits per character over stationary bulk text, where it is ≈ 0.4. The question that
+decides the programme is not whether that one number reaches zero but whether it is fixed, shrinking or growing with
+scale (§22), and which axis the target application actually lives on.
 
 **Status words.** **BUILT** — code exists and has been run, numbers in `RESULTS.md`. **DESIGNED** — concrete enough
 to code, no code yet. **OPEN** / **NOT DESIGNED** — I do not know how, and say so instead of using a vague verb.
@@ -295,7 +297,10 @@ One line per experiment in the order run; the full entries (command, files, numb
 | E33 (a) | measured | the discrete machinery on Latin text = a PPM-style blended-backoff model: 1.87 bits/char frozen, 1.82 online at 2.7M chars (xz 2.26); the E24 sleep price is wrong for text, the prequential one keeps every position; transformer/hybrid arms shelved |
 | E35 | REFUTED on the letter | written denoising chain: memory blocks beat one shot by +0.07 at t = 0.75 and generate rooms from noise; the MDL price collapses denoisers to the identity; text ±3: no gain |
 | E34 | INCONCLUSIVE | gradient-free context mixing: 18 experts, Bayesian mixing 1.820 vs the table 1.823; geometric with Bayesian exponents 1.801; the raw product 7.7 — the learned multiplicative mixer is the first irreducible gradient |
-| B0 | PARTIAL | the compiler reproduces the hand-written brains: E18 29/29 tensors equal, score 1.000; `gridworld.json` = `WrittenSim` bit-for-bit (530/530 and 509/509, ties 1434/1475, 900/900 plans) and at d_layout + 64; compile 0.037 s. The `rope2d` invariance cell fails to allocate channels (§22.3) |
+| B0 | PARTIAL | the compiler reproduces the hand-written brains: E18 29/29 tensors equal, score 1.000; `gridworld.json` = `WrittenSim` bit-for-bit (530/530 and 509/509, ties 1434/1475, 900/900 plans) and at d_layout + 64; compile 0.037 s. The `rope2d` cell is UNRUN, not failing — the recorded CompileError is stale, the same call compiles today (§21.9, §22.3) |
+| E36 | measured | where the bits go on Latin: word-initial = 13.4% of positions and 32.1% of the code length (4.52 vs 1.48); R = 8→24 changes nothing; the morphology hypothesis REFUTED (backoff already shares stems); the counted metric unusable at 5.2 tokens/type — §24.4 retracted, §23 re-aimed at the games |
+| E37 | measured | the legibility tax is a PROFILE: adaptation is worth +0.049 bits/char in-distribution and **+6.040** on Middle High German — negative on four axes (adaptation under shift, continual learning, exact composition, R_h), positive only on stationary bulk text |
+| S2 | PASS with a correction | a designed codebook's interference is predictable: coherence 4–6× the Welch bound, the k < ½(1+1/μ) guarantee conservative by ~2×, usable packing m/d · k ≈ 32; but §22.5's argmin needs the workload's read/write ratio — it is not self-contained |
 
 ## 14. Glossary
 
@@ -1110,10 +1115,17 @@ Passing: compiled `induction.json` at `Arch(d=64, heads=2, layers=2, rope, max_l
 state_dict tensor for tensor (29/29) and scores 1.000 with the derived M; compiled `gridworld.json` at r = 1,
 `Arch.auto`, `onehot` reproduces `WrittenSim` bit-for-bit (all-known agreement [530, 530] seed 0 and [509, 509]
 seed 1; ties 1,434/1,434 and 1,475/1,475; 900/900 and 867/867 plans identical) and identically at `d_layout + 64`;
-compile 0.037 s. **Failing: the `rope2d` invariance cell** — `CompileError: layer 1: 159 position-free pairs do not
-fit beside the position pairs of a 465-wide head (232 pairs)`. §22.3 diagnoses it as a channel-allocation problem
-with a known algorithm and names the fix; until then, whole-window `Match` under `rope2d` is NOT DESIGNED and B0
-reports it as such rather than as a pass. Any other miss is a compiler bug, not a result.
+compile 0.037 s. **The `rope2d` invariance cell: status UNRESOLVED, and the recorded failure is stale.** The
+`b0.json` on disk records `CompileError: layer 1: 159 position-free pairs do not fit beside the position pairs of a
+465-wide head (232 pairs)`, and v1.0 of §22.3 built a diagnosis on it. Checked 2026-09-27
+(`research/expN_allocation.py`): the exact call that cell makes —
+`compile(Blueprint.load("blueprints/gridworld.json"), gridworld_arch("rope2d"))` — **compiles**, at d = 320,
+`n_head` [10, 1, 1, 4], `max_len` 350, as do r = 1 and r = 4 under both codecs. So the compile no longer fails; what
+is NOT established is whether the compiled `rope2d` brain's rollouts match the `onehot` brain's, because the full
+`b0_regressions` rerun did not finish — it ran 45 minutes against the 163.8 s the stale report records, which is
+itself a datum: the variant that used to fail instantly now executes 900 rollouts through a much wider brain, and
+that path is slow enough to belong in B8's cost budget rather than B0's. **B0's honest status is therefore: E18 and
+E28 PASS as recorded; the `rope2d` cell is unrun, not failing.** Any other miss is a compiler bug, not a result.
 
 **B1 — Generality: one brain, the games AND Latin, nothing changed** (CPU, ≤ 10 min). ONE blueprint
 (`gridworld.json`, field r = 4, 80 gather heads, `rope2d`), ONE `Arch`, ONE compiled STRUCTURE state_dict —
@@ -1245,13 +1257,20 @@ between two distinct atoms. Three facts make it a design object rather than a ho
    industrial scale — many users' signals superposed in one band, each decoded unambiguously by its published
    spreading code, for decades. Engineered superposition is old, understood, and nothing like a black box.
 
+**Measured (S2, 2026-09-27, `research/expM_codebook.py`; `RESULTS.md`).** All three hold, with the constants:
+coherence comes out 4–6× the Welch bound for gaussian, k-sparse and Hadamard codebooks at d = 128 (random and
+near-tight frames are far from optimal); the `k < ½(1 + 1/μ)` guarantee predicts 1.7–2.2 where the measured k at
+≥ 99% exact readout is 3–6, so it is **conservative by about 2×** with the right shape; and the usable packing obeys
+**m/d · k ≈ 32** (m/d = 16 at k = 2, 8 at k = 4, 4 at k = 8), collapsing sharply past it. That product is the number
+a blueprint needs: it says how sparse the activity must be to buy a given packing.
+
 The neighbouring literatures we already cite are the same object: vector-symbolic architectures / hyperdimensional
 computing (Plate's HRRs, Kanerva, Gayler) superpose key-value bindings in one vector and unbind any one with bounded
 noise, with published capacity formulas; Willshaw/SDM (§21.6 axis 2) is the binary case; Kanerva's sparse random
 codes (§21.8a item 1a) are the cheapest member of the family — a random code sits near the Welch bound with slack,
 which is exactly why "a fresh random grid phase is the object's identity" works.
 
-### 22.3 Rung 1, and the `rope2d` bug — register allocation IS graph colouring
+### 22.3 Rung 1 — register allocation IS graph colouring (and what the `rope2d` cell actually was)
 
 **The observation that makes rung 1 free.** Two features that are never active at the same time can occupy the SAME
 dimensions with *zero* interference — not "almost orthogonal", literally disjoint in time. The number of dimensions
@@ -1261,22 +1280,35 @@ co-activation graph is a COUNTED object — ZipLearn already counts what co-occu
 
 **This is a compiler's register allocation, and it has been graph colouring since Chaitin (1981):** variables are
 features, registers are channels, two variables interfere when simultaneously live, and when the graph will not
-colour with the registers available you SPILL. B0's failing cell is this exact problem, misdiagnosed as a width
-problem: *"layer 1: 159 position-free pairs do not fit beside the position pairs of a 465-wide head (232 pairs)"* —
-`Layout.channels` is first-fit over a fixed split (content in the lowest rotary pairs, position in the highest;
-§21.4 step 4) and first-fit is the wrong algorithm. The fix, in order of effort:
+colour with the registers available you SPILL. The fix, in order of effort: (1) build the interference graph over
+the channel needs of the circuits placed in a head, from their declared `reads`/`writes` and the loop's
+`keep`/`clear` — which is exactly a liveness analysis; (2) colour it; (3) where it still will not colour, SPILL in
+one of the two ways a transformer allows — split the match across two heads whose scores add in the residual (the
+standard compiler spill, paid in heads), or move to rung 2 and pay interference in bits instead of dims.
 
-1. Build the interference graph over the channel needs of the circuits placed in a head, from their declared
-   `reads`/`writes` and the loop's `keep`/`clear` (which is exactly a liveness analysis).
-2. Colour it. Whole-window `Match` at r = 4 has 80 neighbour subspaces that are all live at the query — they
-   genuinely interfere and cannot share — but the position pairs are live only for `Gather`, and the content pairs
-   only for `Match`, and those two are in different layers. A liveness-aware allocator has room where first-fit does
-   not.
-3. Where the graph still will not colour, SPILL in one of the two ways a transformer allows: split the match across
-   two heads whose scores add in the residual (the standard compiler spill, paid in heads), or move to rung 2 and
-   pay interference in bits instead of dims.
+**Correction, 2026-09-27 (`research/expN_allocation.py`).** v1.0 of this section claimed B0's failing `rope2d` cell
+was this problem and that `Layout.channels` was "first-fit and first-fit is the wrong algorithm". Checked against
+the compiler's own arithmetic, that was wrong on both counts and the example is withdrawn:
 
-Until this is built, whole-window `Match` under `rope2d` stays NOT DESIGNED and B0 reports it as such (§21.9).
+- `compile(Blueprint.load("blueprints/gridworld.json"), gridworld_arch("rope2d"))` — the exact call the invariance
+  cell makes — **succeeds today**, at d = 320, `n_head` [10, 1, 1, 4], `max_len` 350. The failure recorded in
+  `runs/brainbuilder/b0.json` is from an earlier state of the compiler; B0's status line (§21.9) is re-derived from
+  a rerun, not from that file.
+- The constraint that produced it is not first-fit but one line of `brainbuilder.py`:
+  `room = P - (P // 2 + col_pairs) if col_pairs else P`. Under `rope2d` the first half of a head's rotary pairs
+  rotates by the row coordinate and the second by the column, so when ANY head in the layer uses a coordinate the
+  whole row half is reserved — a `Match` head needing 159 position-free content pairs then has at most `P/2` and
+  fails however wide the head is. When the layer holds no `Gather` (`col_pairs == 0`) the branch gives it the whole
+  head and it fits. So it IS an over-reservation and liveness IS the cure, but the live quantity is the coordinate
+  AXIS per layer, not a general feature-interference graph, and the existing code already gets the common case
+  right by accident.
+- The 159 is real and worth keeping in view: a whole-window `Match` at r = 1 compares colour(17) + 8 × 17 + action(4)
+  + two class flags = 159 content dims, and at r = 4 it is 1,381. Those are all live at the query simultaneously, so
+  **rung 1 cannot help a `Match` query at all** — they genuinely interfere. Rung 1's saving is between circuits in
+  different layers, not within one comparison.
+
+What survives: rung 1 as a design (it is exact, auditable and counted), the Chaitin framing, and the spill options.
+What does not: the claim that it fixes `rope2d`, and the claim that `rope2d` is broken.
 
 ### 22.4 What superposes and what does not — the design constraint
 
@@ -1302,7 +1334,15 @@ is computable from the same two-part code everything else uses: the bits SAVED b
 minus the bits LOST to the exceptions interference causes on the evidence (`Store.consolidate`'s replay, §21.7,
 generalised from rows to any shared code). So **how superposed should a layer be** is not a hyperparameter — it is
 `argmin over the allocation mode of (storage bits + interference bits)`, the rate–distortion trade of §8 applied to
-the layout. Two consequences worth stating plainly:
+the layout.
+
+**Correction (S2).** The argmin is well defined but it is NOT self-contained: it depends on the
+reads-per-stored-entry ratio of the workload, which is an application property, not a codebook property. Measured
+with 2,000 stored entries against 10,000 reads the storage term dominates and the price picks maximum packing even
+where readout is 0.000 — absurd. Until the workload's read/write ratio is supplied, the operational criterion is the
+largest packing at ≥ 99% readout (m/d · k ≈ 32 above), and the price is a tie-breaker rather than the decision.
+
+Two consequences worth stating plainly:
 
 - The **legibility tax** (§0) stops being a vague worry and becomes a number per layer: the bits rung 0 or 1 costs
   over the rung-2 optimum, and the bits rung 2 costs over rung 3's (unmeasurable, but boundable by a trained model
@@ -1403,7 +1443,18 @@ of §20 are one object seen twice; if it does not, S3 and D1 will say which half
 
 ### 23.5 Pre-registered
 
-**S3 — The counted metric on Latin** (CPU, ≤ 15 min). On the E33 split: (a) build the character/word co-occurrence
+**S3 — The counted metric on Latin — RUN 2026-09-27, REFUTED ON LATIN FOR A DATA REASON (E36, `RESULTS.md`).**
+The metric is unusable on this corpus and the number says why: **5.2 tokens per word type** at the full 2.7M
+characters (69,629 types), where distributional semantics needs 10²–10⁴. PPMI + rank-64 SVD gives neighbours that
+share a stem 0.7% of the time against a 0.065% baseline — a 10× enrichment that is absolutely noise — and as a
+predictor of a word's first character the low-rank Σ_qk costs 6.05 bits at rank 8, rising to 8.73 at rank 64, where
+the character chain costs 4.52. A PPMI reconstruction is not a density estimator, and no rank fixes that.
+**Re-aimed, not abandoned:** the construction needs a domain where tokens per type is large, and the games are that
+domain — 17 colours, 4 actions and thousands of transitions per type against Latin's 5.2. S3 is re-registered on
+frames, with E28's window keys as the query features and the transition's outcome as the key features. The original
+text follows.
+
+*Original pre-registration* (CPU, ≤ 15 min). On the E33 split: (a) build the character/word co-occurrence
 counts over the training text; (b) form PPMI and take truncated SVDs at rank 8, 16, 32, 64, with the rank chosen by
 `precision_bits` against exceptions; (c) use the resulting `Σ_qk` as a `Relate` metric for a soft-match context
 expert — "the character that followed the most SIMILAR earlier context", against E34's match model, which uses
@@ -1424,6 +1475,25 @@ well-tuned neural language model would land nearer **1.3–1.5** — character L
 sit around 1.2–1.4, and Latin is smaller and less regular. So:
 
 > **The legibility tax on this corpus is ≈ 0.4 bits/character, not ≈ 0.8.** (E33: 1.873 frozen, 1.820 online.)
+
+**But the tax is a PROFILE, not a number (E37, 2026-09-27).** Measured or already on record, the constructive route
+is AHEAD on four axes and behind on one:
+
+| axis | tax | evidence |
+|---|---|---|
+| adaptation under distribution shift | **−6.04 bits/char** | E37: a Latin-trained chain on Middle High German, frozen 8.394 vs online 2.355; the gain still growing at the end of the stream |
+| continual learning | −(below chance → 1.000) | E6 100% retention, 3 blocks, vs E6b forgetting to below chance |
+| exact composition, held out | −(0/8 → 8/8) | E18 and E28 at 100% where the trained model solves 0/8 |
+| storage density on structured content | −(R_h 13.9 to 134) | E24 9,192 → 660 bits; E12 1,190 → 8.9; 1.00 by construction on incompressible tuples |
+| **bits/char on stationary bulk text** | **+0.4** | E33/E36, the number above |
+| adaptation in-distribution | −0.05, halving per 3× data | E37/expO: +0.339 / +0.189 / +0.104 / +0.050 at 100k → 2.73M |
+
+The discriminating variable is STATIONARITY, not the model class. A homogeneous held-out book drawn from the
+training distribution is the single condition under which a frozen model is not penalised, and it is the condition
+no deployed model enjoys. So the honest scoreboard names its axis: the number this project tracks is the tax **on
+the stationary-text axis**, and the others are already won. The caveat that keeps this honest: every negative figure
+above is against a FROZEN counted model or an earlier transformer of ours, not against a gradient-trained model run
+under the same shift — that comparison needs the gradient arm, which is off.
 
 And the compression literature's ladder on enwik8 says where that 0.4 is spent. Approximately: PPM ≈ 1.9,
 PAQ-class context mixing ≈ 1.2, a large transformer ≈ 0.95. **The largest single step is PPM → context mixing, not
@@ -1458,7 +1528,16 @@ Not one capability, and the pieces have very different prospects:
    2.88 bits/char solo. The compression literature's own answer to long range is the same thing (PAQ's match model,
    pure counting, one of its strongest components).
 2. **Retrieval by soft match — the §23 route.** Our `Match` does equality on a written subspace; attention does
-   learned bilinear similarity. That is the gap, and `Relate` is the proposed instruction. Unproven, not blocked.
+   learned bilinear similarity. That is the gap, and `Relate` is the proposed instruction. Unproven, not blocked —
+   and, on Latin, not testable (§23.5: 5.2 tokens per type).
+
+   **Measured 2026-09-27 (E36): the constraint is not the window.** Where the missing information sits is now a
+   number. Word-initial characters are 13.4% of positions and 32.1% of the code length, at 4.518 bits against 1.482
+   for word-interior characters — the whole gap is at the boundary, where character context has run out. And
+   lengthening the context does nothing: R = 8 / 12 / 16 / 24 gives 1.8901 / 1.8902 / 1.8902 / 1.8903 bits/char,
+   with the boundary cost getting slightly WORSE (4.518 → 4.634). So explanation (i) — "the model simply runs out of
+   window" — is refuted, and what is needed at a boundary is information of a different kind, which is exactly the
+   user's point that static-vs-contextual is the hurdle.
 3. **Accumulated state that is not a copy of anything** — topic, register, what has been established — is the real
    wall, and the reason is precise: **there is no local target.** For induction the target is defined (copy what
    followed); for a summary nothing says what the intermediate should be, which is exactly the credit-assignment
@@ -1467,14 +1546,25 @@ Not one capability, and the pieces have very different prospects:
    library problem again. So two-thirds of long context is writable or plausibly countable, and one-third reduces to
    the one open problem we already have.
 
-### 24.4 The Latin morphology hypothesis
+### 24.4 The Latin morphology hypothesis — REFUTED 2026-09-27, and what replaced it
 
-Backoff shares statistical strength only along the SUFFIX chain — drop characters from the left. A learned embedding
-shares along whatever axis reduces loss. Latin is close to the worst case for the first: `amabat`, `amabant`,
-`amabamus` and `amabas` share a stem AND a tense morpheme, and our tables treat them as four unrelated contexts,
-each paying its own count sparsity. **Concrete, localisable, and testable with no neural network:** if the surplus
-bits concentrate at word-internal positions after a shared stem, the missing primitive is a factored (stem, suffix)
-context — writable as a `Store` key, or learnable as §23's metric.
+*The hypothesis was:* backoff shares statistical strength only along the SUFFIX chain, so on a heavily inflected
+language our tables treat `amabat`, `amabant` and `amabamus` as unrelated contexts and pay for the stem every time;
+the missing primitive would then be a factored (stem, suffix) context.
+
+**It is wrong, and the error is elementary (E36, `research/expL_where_the_bits_go.py`).** The stem IS the left
+context of the suffix, so a backoff chain over the last 8 characters already shares it. Measured on suffix
+characters of words never seen in training: 1.786 bits when the 4-character stem was seen with other forms against
+2.187 when it was not. The sharing the hypothesis said we lacked is worth 0.40 bits and we already have it.
+
+**What replaced it.** The surplus is not inside words, it is AT THE BOUNDARY: word-initial characters are 13.4% of
+positions and 32.1% of the code length (4.518 bits each, against 1.482 for word-interior). And the obvious counted
+fix does not work either — a KT-smoothed p(first character | previous word) costs 5.043 bits, WORSE than the chain's
+4.518, because 69,629 word types over 2.7M characters is too sparse to count. Its deficit does close with data
+(+0.644 / +0.574 / +0.425 / +0.259 at 100k / 289k / 769k / 2.73M, about −0.13 per tripling), which extrapolates to a
+crossover near 10⁸ characters — enwik8 scale, and exactly where the literature says neural language models begin to
+win. That convergence is the most useful thing this measurement produced: the semantic landscape is not a different
+mechanism from counting, it is the same counting at a data scale this corpus does not reach.
 
 ### 24.5 Decompilation as an MDL problem
 
@@ -1504,8 +1594,13 @@ of it.
 
 ### 24.6 Pre-registered
 
-**D1 — Attribute the gap per symbol** (CPU, ≤ 10 min; needs one small trained model, so it waits on an explicit
-instruction to touch the gradient arm). Bits are additive, unlike accuracy. For every character of the E33 held-out
+**D1 — Attribute the gap per symbol.** *The gradient-free half RAN 2026-09-27 (E36): our own code length,
+attributed. Pass criterion "the top 10% of positions carry ≥ 40% of the total" — measured 33.8%, just below, but the
+structure is unambiguous and nameable, which was the substance of the test: 13.4% of positions carry 32.1% of the
+bits and they are all the same thing (the first character of a word). The half that still needs a trained model is
+the DIFFERENCE `bits_ours − bits_gd`; what ran is `bits_ours` alone against a structural partition.* Original
+pre-registration (CPU, ≤ 10 min; needs one small trained model, so it waits on an explicit instruction to touch the
+gradient arm). Bits are additive, unlike accuracy. For every character of the E33 held-out
 book compute `bits_ours(c) − bits_gd(c)`, sort, and characterise the top few thousand by position-in-word,
 preceding-context length, word frequency and whether the word's stem occurs elsewhere in training. Pass: the surplus
 is CONCENTRATED (the top 10% of positions carry ≥ 40% of the total gap) and the concentration has a nameable

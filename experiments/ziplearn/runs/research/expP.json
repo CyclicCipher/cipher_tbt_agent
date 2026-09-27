@@ -1,0 +1,43 @@
+{
+ "V": 89,
+ "train_chars": 2726046,
+ "streams": {
+  "latin_heldout": {
+   "n_chars": 240588,
+   "bpc_frozen": 1.869229414576538,
+   "bpc_online": 1.8206696722728624,
+   "adaptation_gain_bits": 0.04855974230367566,
+   "relative_gain": 0.02597848178773527,
+   "gain_first_tenth": 0.027547624219087963,
+   "gain_last_tenth": 0.06734542224440254
+  },
+  "mittelhochdeutsch": {
+   "n_chars": 501754,
+   "bpc_frozen": 8.394300504658677,
+   "bpc_online": 2.35457903678494,
+   "adaptation_gain_bits": 6.039721467873736,
+   "relative_gain": 0.7195026511764507,
+   "gain_first_tenth": 4.648906977923519,
+   "gain_last_tenth": 6.4563781934031885
+  },
+  "althochdeutsch": {
+   "n_chars": 7327,
+   "bpc_frozen": 7.258084555342331,
+   "bpc_online": 5.37528485848669,
+   "adaptation_gain_bits": 1.882799696855641,
+   "relative_gain": 0.25940724202087195,
+   "gain_first_tenth": 1.7772793721194695,
+   "gain_last_tenth": 1.727087154469741
+  },
+  "latin_reversed": {
+   "n_chars": 240588,
+   "bpc_frozen": 7.540821743279311,
+   "bpc_online": 2.8702698378955356,
+   "adaptation_gain_bits": 4.670551905383776,
+   "relative_gain": 0.6193690905830472,
+   "gain_first_tenth": 3.114375886098662,
+   "gain_last_tenth": 5.253454733175548
+  }
+ },
+ "seconds": 654.9046845436096
+}

@@ -1,0 +1,91 @@
+  R=8: bpc 1.8901 boundary 4.518
+  R=12: bpc 1.8902 boundary 4.614
+  R=16: bpc 1.8902 boundary 4.630
+  R=24: bpc 1.8903 boundary 4.634
+  n=99990: on 2.0069 fr 2.3463 adapt 0.3394 bigram-chain +0.644
+  n=289123: on 1.9490 fr 2.1378 adapt 0.1888 bigram-chain +0.574
+  n=768908: on 1.8901 fr 1.9945 adapt 0.1044 bigram-chain +0.425
+  n=2726046: on 1.8225 fr 1.8728 adapt 0.0503 bigram-chain +0.259
+{
+ "V": 70,
+ "n_test": 240588,
+ "n_boundaries": 32335,
+ "boundary_share_of_positions": 0.1343998869436547,
+ "context_depth": {
+  "8": {
+   "bpc": 1.8900763530488043,
+   "boundary_bits": 4.518404626186001,
+   "interior_bits": 1.4819814170243952,
+   "boundary_share_of_bits": 0.32129552329752065
+  },
+  "12": {
+   "bpc": 1.890196531812701,
+   "boundary_bits": 4.613735052486951,
+   "interior_bits": 1.4673185033281086,
+   "boundary_share_of_bits": 0.32805343730451153
+  },
+  "16": {
+   "bpc": 1.8902196632632213,
+   "boundary_bits": 4.630408778543221,
+   "interior_bits": 1.4647563323984618,
+   "boundary_share_of_bits": 0.32923497116983147
+  },
+  "24": {
+   "bpc": 1.8903135320878497,
+   "boundary_bits": 4.63449829519269,
+   "interior_bits": 1.4642298054908975,
+   "boundary_share_of_bits": 0.3295093836769459
+  }
+ },
+ "data_curve": [
+  {
+   "train_chars": 99990,
+   "word_types": 6813,
+   "tokens_per_type": 1.9967708792015264,
+   "bpc_online": 2.006908380838605,
+   "bpc_frozen": 2.3463023675281063,
+   "adaptation_gain_bits": 0.3393939866895015,
+   "boundary_bits_chain": 4.52434114884247,
+   "boundary_bits_word_bigram": 5.1678725437928135,
+   "bigram_minus_chain": 0.6435313949503438,
+   "boundary_coverage": 0.6411628266584196
+  },
+  {
+   "train_chars": 289123,
+   "word_types": 15150,
+   "tokens_per_type": 2.636897689768977,
+   "bpc_online": 1.9489811133846673,
+   "bpc_frozen": 2.137754228561897,
+   "adaptation_gain_bits": 0.18877311517722983,
+   "boundary_bits_chain": 4.534383837939295,
+   "boundary_bits_word_bigram": 5.1083538638243935,
+   "bigram_minus_chain": 0.5739700258850986,
+   "boundary_coverage": 1.0
+  },
+  {
+   "train_chars": 768908,
+   "word_types": 30524,
+   "tokens_per_type": 3.4923011400864894,
+   "bpc_online": 1.8900763530488043,
+   "bpc_frozen": 1.9944927774133188,
+   "adaptation_gain_bits": 0.10441642436451448,
+   "boundary_bits_chain": 4.518404626186001,
+   "boundary_bits_word_bigram": 4.943420755182922,
+   "bigram_minus_chain": 0.425016128996921,
+   "boundary_coverage": 1.0
+  },
+  {
+   "train_chars": 2726046,
+   "word_types": 69629,
+   "tokens_per_type": 5.233695730227348,
+   "bpc_online": 1.8225015720119673,
+   "bpc_frozen": 1.872806688168674,
+   "adaptation_gain_bits": 0.05030511615670674,
+   "boundary_bits_chain": 4.469918629685775,
+   "boundary_bits_word_bigram": 4.728851394224841,
+   "bigram_minus_chain": 0.25893276453906555,
+   "boundary_coverage": 1.0
+  }
+ ],
+ "seconds": 413.4683663845062
+}

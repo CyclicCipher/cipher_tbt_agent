@@ -1,0 +1,95 @@
+  chain 0/240588
+  chain 200000/240588
+{
+ "n_train_chars": 768908,
+ "V": 70,
+ "rank_grid": [
+  8,
+  16,
+  32,
+  64
+ ],
+ "word_types_total": 30524,
+ "word_types_kept": 12000,
+ "train_boundaries": 106584,
+ "embedding_rank": 64,
+ "morphology": {
+  "probe_words": 463,
+  "top10_share_stem": 0.007127429805615551,
+  "random_baseline": 0.0006479481641468683,
+  "examples": [
+   {
+    "word": "quod",
+    "nn": [
+     "paludamentum",
+     "imperatoribus",
+     "pontificibus",
+     "galerum",
+     "diadema"
+    ]
+   },
+   {
+    "word": "neque",
+    "nn": [
+     "prompturum",
+     "fingi",
+     "uentris",
+     "editae",
+     "ullam"
+    ]
+   },
+   {
+    "word": "autem",
+    "nn": [
+     "choreis",
+     "armaturas",
+     "invenit",
+     "patronos",
+     "interiectis"
+    ]
+   },
+   {
+    "word": "omnia",
+    "nn": [
+     "peccantis",
+     "eruunt",
+     "antipathes",
+     "aggrediar",
+     "regitur"
+    ]
+   },
+   {
+    "word": "erit",
+    "nn": [
+     "vindemia",
+     "Ubi",
+     "malae",
+     "coeperit",
+     "habebis"
+    ]
+   }
+  ]
+ },
+ "word_initial_prediction": {
+  "n_boundaries": 32335,
+  "marginal": 4.555827072133078,
+  "bigram_kt": 4.943420755182922,
+  "knn_smoothed": 4.6833166625692,
+  "lowrank": {
+   "8": 6.046324729919434,
+   "16": 6.721625328063965,
+   "32": 8.142088890075684,
+   "64": 8.726819038391113
+  },
+  "chain_at_boundaries": 4.518404626186001,
+  "best_rank": 8,
+  "pool_linear_50_50": 4.534339162803374,
+  "pool_geometric_unnormalised": 5.282364675989531,
+  "note_geometric": "unnormalised: a lower bound on the pool's cost, not a valid code (S24.2)",
+  "corpus_bpc_if_boundaries_improved": {
+   "lowrank_best": 0.8126253601257954,
+   "linear_pool": 0.6094146708449593
+  }
+ },
+ "seconds": 21.65383791923523
+}
