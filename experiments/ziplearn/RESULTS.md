@@ -1054,3 +1054,45 @@ verdict: §22.2's three claims hold as stated, with one correction and one cavea
 changed: §22.2 gains the measured numbers and the 2× conservatism; §22.5 gains the read/write-ratio dependency;
          §22.6's S2 is answered. Not built: an explicit ETF/Gold construction (the Hadamard stand-in is 4× off the
          Welch bound), and the codebook applied to a real `Store`.
+
+### 2026-09-27 — S4 — LEVEL-3 NAMING PAYS: a pattern with holes beats exact recurrences by 12% of the description length, and unsupervised MDL recovers Latin's inflectional inventory with no labels — but the evidence multiple is 1.66×, not the 3× pre-registered, because one hole is not enough
+command: `python experiments/ziplearn/research/expQ_morphology.py` (74 s); `expQ_inspect.py 100`. CPU, pure
+         counting; no network built, run or trained.
+files:   `runs/research/expQ.json`, `expQ_inspect.json`, `expQ.log`; code `research/expQ_morphology.py`,
+         `expQ_inspect.py`; corpus `corpora/latin_classical` (35.0M characters, 48 authors)
+numbers: the word-TYPE inventory: 253,808 types over 4,904,700 alphabetic tokens, alphabet 125 (the corpus carries
+         Greek and accented characters; it inflates every arm's literal cost equally, so ratios are unaffected).
+         Three two-part codes for the SAME object:
+         | code | bits | vs literal | inventory |
+         |---|---|---|---|
+         | A literal (no naming, level 1) | 17,765,557 | 1.000 | — |
+         | **B signatures (level 3)** | **11,100,299** | **0.625** | 90,477 stems, 101 suffixes, 5,247 signatures |
+         | C BPE (level 2, exact recurrences) | 12,638,212 | 0.711 | 28,153 units (target 90,578; it SATURATED — no pair recurred twice) |
+         B was run over a grid of candidate-suffix counts (100 / 200 / 400 / 800 / 1600 / 3200 → ratio 0.625 /
+         0.633 / 0.644 / 0.652 / 0.657 / 0.660): description length PICKS THE SMALLEST suffix inventory, 101.
+         B's cost is conservative in two ways: it pays 194,906 bits for a keep/drop bitmap it never needs (the
+         construction admits a suffix only when stem+suffix is an observed word, so spurious = 0 always), and it
+         spells out 58,902 uncovered types literally (3.93M of its 11.1M bits).
+         Evidence: tokens per surface type 19.3 → tokens per STEM 32.0, a multiple of **1.66×**.
+         What the suffixes ARE (`expQ_inspect.json`, the interpretability check): -s, -m, -e, -t, -is, -um, -i,
+         -ur, -nt, -a, -o, -us, -rum, -tur, -es, -em, -bus, -it, -mus, -am, -ntur, -ae, -at, -ibus, -os, -tis,
+         -as, -unt, -ant, -ium … — Latin's actual declension and conjugation endings (genitive -is/-i, accusative
+         -um/-am/-os/-as, dative-ablative plural -ibus/-bus, genitive plural -rum, verb -t/-nt/-mus/-tis/-unt/-ant,
+         passive -tur/-ntur), recovered with no labels, no grammar and no supervision. It also found the ENCLITICS:
+         -que on 20,293 stems (3rd most common) and -ne on 1,917, which are not inflection at all.
+verdict: SPLIT, and both halves are informative. **PASS on description length:** naming a skeleton with an argument
+         slot costs 12.2% fewer bits than naming exact substrings at a matched vocabulary target, while paying a
+         bitmap it does not need. That is §19's central claim — level 3 pays over level 2 — measured for the first
+         time in this line, on a domain where the answer can be checked against something real, and it checks out.
+         **REFUTED on the evidence multiple** (1.66× against the pre-registered ≥ 3×), and the diagnosis is exact:
+         the model makes ONE cut per word. Latin is stem + derivation + inflection + clitic, so a single hole can
+         only catch the OUTERMOST layer — which is why the largest signatures are degenerate pairs ({NULL, -que}
+         on 13,977 stems; {NULL, -s} on 5,675) and why `-sque` and `-mque` appear as atomic suffixes instead of
+         -s + -que and -m + -que. Token evidence barely improves because tokens are dominated by short frequent
+         forms that do not inflect, while the collapse happens in the rare tail.
+changed: §19.1's ladder gains a fourth rung, and the missing operation is now named more precisely: not
+         anti-unification but RECURSIVE anti-unification — a pattern whose arguments are themselves patterns. That
+         is exactly the gap §12's OPEN-5 recorded at the other level ("Remaining: words of words") and exactly what
+         DreamCoder's library is (macros built of macros), so the two levels fail identically and the §19.1
+         unification is strengthened rather than weakened. Not built: the recursive operator; a second cut per
+         word would be the cheapest test of it.

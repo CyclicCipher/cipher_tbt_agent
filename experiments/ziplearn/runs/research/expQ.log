@@ -1,0 +1,17 @@
+{
+ "files": 48,
+ "alphabet": 125,
+ "types": 253808,
+ "tokens": 4904700,
+ "tokens_per_surface_type": 19.324449977936077
+}
+A literal: 2.22 MB (17765557 bits)
+  B K=100     1.39 MB  ratio 0.625  stems   90477 sufs  101 sigs  5247 missing   58902 spurious       0
+  B K=200     1.41 MB  ratio 0.633  stems   86860 sufs  201 sigs  5565 missing   65121 spurious       0
+  B K=400     1.43 MB  ratio 0.644  stems   84589 sufs  371 sigs  5650 missing   70317 spurious       0
+  B K=800     1.45 MB  ratio 0.652  stems   81822 sufs  597 sigs  5349 missing   75698 spurious       0
+  B K=1600    1.46 MB  ratio 0.657  stems   80261 sufs  836 sigs  5073 missing   78894 spurious       0
+  B K=3200    1.46 MB  ratio 0.660  stems   79258 sufs  837 sigs  4808 missing   80903 spurious       0
+C bpe  (vocab 28153): 1.58 MB  ratio 0.711
+
+tokens/surface type 19.3 -> tokens/stem 32.0 (1.66x); verdict {'B_beats_C': True, 'evidence_multiple_ge_3': False}; 74s

@@ -302,6 +302,7 @@ One line per experiment in the order run; the full entries (command, files, numb
 | E36 | measured | where the bits go on Latin: word-initial = 13.4% of positions and 32.1% of the code length (4.52 vs 1.48); R = 8→24 changes nothing; the morphology hypothesis REFUTED (backoff already shares stems); the counted metric unusable at 5.2 tokens/type — §24.4 retracted, §23 re-aimed at the games |
 | E37 | measured | the legibility tax is a PROFILE: adaptation is worth +0.049 bits/char in-distribution and **+6.040** on Middle High German — negative on four axes (adaptation under shift, continual learning, exact composition, R_h), positive only on stationary bulk text |
 | S2 | PASS with a correction | a designed codebook's interference is predictable: coherence 4–6× the Welch bound, the k < ½(1+1/μ) guarantee conservative by ~2×, usable packing m/d · k ≈ 32; but §22.5's argmin needs the workload's read/write ratio — it is not self-contained |
+| S4 | SPLIT: PASS on bits, REFUTED on evidence | level-3 naming pays: signatures 0.625 of the literal code vs BPE's 0.711 at matched vocabulary, and unsupervised MDL recovers Latin's real inflectional endings (+ the enclitic -que); but tokens/unit only 1.66× (pre-reg ≥ 3×) because ONE cut per word catches only the outermost layer — the operation needed is RECURSIVE anti-unification |
 
 ## 14. Glossary
 
@@ -602,8 +603,27 @@ BrainBuilder writes those — but that they are a SOURCE OF SOLVED TRACES, which
 and which we have none of for language. Searchformer and Stream of Search (§18) both show the second stage —
 compress your own successful traces — beating the teacher.
 
-NOT DESIGNED: the anti-unification operator itself, its price, and where it sits (a sleep-pass pass over the Store,
-or a `ziplearn` method). Pre-registered as S4 below.
+**S4 RAN 2026-09-27 (`RESULTS.md`): the ladder needs a fourth rung.** Level 3 pays — signatures cost 0.625 of the
+literal code against BPE's 0.711 at a matched vocabulary target, while paying a correction bitmap they never need —
+and the suffixes MDL selects are Latin's real inflectional endings (-is, -um, -rum, -ibus, -tur, -ntur, -mus, -unt
+…) plus the enclitic -que on 20,293 stems, with no labels or grammar anywhere. But the evidence multiple is 1.66×,
+not the 3× pre-registered, and the reason is that the model makes ONE cut per word. Latin is stem + derivation +
+inflection + clitic, so a single hole catches only the outermost layer: the biggest signatures are degenerate pairs
+({NULL, -que}, {NULL, -s}) and `-sque` appears as an atomic suffix rather than -s + -que.
+
+So the missing operation is not anti-unification but **recursive anti-unification — a pattern whose arguments are
+themselves patterns.** That is the same gap OPEN-5 recorded at the other level ("Remaining: words of words") and it
+is what DreamCoder's library is (macros built of macros). The two levels fail in the same way, which strengthens
+this section rather than weakening it: one operator is missing, at both heights.
+
+| level | what is named | have we got it? |
+|---|---|---|
+| 3. a pattern with ONE hole | a skeleton, its argument filled from a list | **yes, as of S4 — and it pays 12%** |
+| 4. a pattern whose arguments are patterns | recursive composition of skeletons | no, at either height |
+
+NOT DESIGNED: the recursive operator, its price, and where it sits (a sleep pass over the Store, or a `ziplearn`
+method). The cheapest test is a SECOND cut per word (stem + derivation + inflection), which S4's code is three
+lines from supporting.
 
 **S4 — Level 3 on morphology** (CPU, ≤ 20 min, no network). On `corpora/latin_classical`: induce stems and suffixes
 by two-part code (a lexicon of stems + a set of signatures + the cost of expressing each word type), against two
@@ -1273,6 +1293,27 @@ level); confidence calibration inside the loop; whole-window `Match` under `rope
 *Removed from this list 2026-09-27:* superposition of subspaces — designed in §22 as a layout mode, not an
 instruction; the similarity predicate — designed in §23 as `Relate`. Both are DESIGNED and NOT BUILT.
 
+### 24.7 E38 — the crossover, on a corpus big enough to reach it (pre-registered 2026-09-27)
+
+E36 measured the word-bigram's deficit against the character chain at word boundaries shrinking with data
+(+0.644 / +0.574 / +0.425 / +0.259 at 100k / 289k / 769k / 2.73M characters) and the refit put the crossover at
+**17–26M characters**. `corpora/latin_classical` is 35.0M characters, so the prediction is now testable rather than
+extrapolated — which is the whole reason to have fetched it.
+
+**Measured**, at training sizes 2.73M (the old corpus, as the tie-back), and as many larger sizes as memory allows
+up to 35M: bits/char online and frozen; the chain's bits at word-initial positions; the counted word bigram's bits
+at the same positions; word types, tokens per type, and boundary coverage. **Pass:** the bigram's deficit reaches
+zero at or below 26M characters. **Refute:** still positive at 35M, i.e. the refit was optimistic too and the
+crossover is genuinely out of reach for Latin. Either way the curve is the deliverable.
+
+**The apparatus limit to watch, and it is real.** `e34.Chain` keeps nine Python dicts keyed by character tuples; at
+2.73M characters the order-8 table already holds ~2.7M near-unique contexts. Extrapolating to 35M is ~30M contexts
+at roughly 200 bytes each per order — several GB, past what this machine should be asked for. The run therefore
+probes memory first and reports the largest size that fits, and a size that does not fit is reported as an
+apparatus limit, never as a result. This is the first time the text line has been compute-bound rather than
+data-bound, and the fix (packed integer keys, count cutoffs at the deep orders — standard PPM practice) is
+NOT DESIGNED.
+
 ---
 
 ## 22. Legibility at scale — superposition with a codebook (DESIGNED 2026-09-27; the user's question)
@@ -1698,3 +1739,28 @@ random head permutation and a random rotation within one subspace, then recover 
 `price(B) + price(W − compile(B))` over the blueprint's own circuit set. Pass: the original blueprint is recovered
 up to the symmetry, with residual price ≈ 0. Refute: not recovered — in which case the symmetry quotient, not the
 search, is the binding constraint, and that is worth knowing before any general decompiler is attempted.
+
+---
+
+## 25. The order of work (set 2026-09-27)
+
+Everything below is CPU, gradient-free, and runs against code and corpora that exist. The ordering is by what each
+one would settle, not by effort.
+
+1. **S4 — level-3 naming on morphology (§19.1).** The only experiment that tests the operation the whole library
+   problem turns on: naming a pattern with holes. Cheap (it works on a word-type inventory, not a character
+   stream), has controls (no segmentation; BPE = level 2 only), and a clean refutation (if signatures do not beat
+   BPE, the holes buy nothing and level 2 is the whole story). **First.**
+2. **E38 — the crossover on 35M characters (§24.7).** Tests a prediction this line made and can now reach, and
+   produces the data-efficiency curve the project has wanted since E33. Compute-bound, so it goes second and
+   reports its own apparatus limit.
+3. **S3 on frames (§23.5).** The counted metric where tokens per type is thousands rather than 5.2. Needs the games
+   harness rather than the text one; no new machinery.
+4. **ziplearn.py + the cutover (§21.2).** The unbuilt second script and the deletions. Not research, but everything
+   in §21.9 is blocked behind it.
+5. **B-programme (§21.9)** in its own order, once (4) exists.
+
+Not scheduled, and why: **S1** (the liveness allocator) lost its motivating example when `rope2d` turned out to
+compile (§22.3) — it is a real design but nothing is blocked on it; **D1's second half, D2, D3, G1–G3** all need the
+gradient arm, which is off by standing instruction; **the anti-unification operator itself** (§19.1) is NOT DESIGNED
+and S4 is the experiment that would tell us what it must do.

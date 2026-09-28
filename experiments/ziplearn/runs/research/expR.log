@@ -1,0 +1,10 @@
+{
+ "corpus": "latin_classical",
+ "heldout": "caesar.txt",
+ "V": 89,
+ "train_chars_available": 34152745,
+ "test_chars": 848622,
+ "n_boundaries": 113421,
+ "mem_cap_gb": 6.0
+}
+  n=2,729,975 rss  2.2GB  bpc 1.8613  chain@bnd 4.481  bigram 5.127  DEFICIT +0.646  types  67,182 tok/type 5.8
