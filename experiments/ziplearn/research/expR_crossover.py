@@ -118,7 +118,12 @@ def main():
            "n_boundaries": int(len(at)), "mem_cap_gb": MEM_CAP_GB, "sizes": []}
     print(json.dumps({k: out[k] for k in list(out)[:7]}, indent=1), flush=True)
 
-    sizes = [int(x) for x in (2.73e6, 5e6, 1e7, 2e7, 3.4e7) if x <= total_train]
+    if "--sizes" in sys.argv:
+        sizes = [int(float(x)) for x in sys.argv[sys.argv.index("--sizes") + 1].split(",")]
+    else:
+        sizes = [int(x) for x in (2.73e6, 5e6, 1e7, 2e7, 3.4e7)]
+    sizes = [s for s in sizes if s <= total_train]
+    out["out_name"] = sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv else "expR"
     for n in sizes:
         seqs = slice_to(train, n)
         n_chars = sum(len(s) for s in seqs)
@@ -183,7 +188,7 @@ def main():
                       "crossed": bool(y[-1] <= 0)}
     out["seconds"] = time.time() - t0
     p = HERE.parent / "runs" / "research"; p.mkdir(parents=True, exist_ok=True)
-    (p / "expR.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+    (p / f"{out['out_name']}.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
     print("\n" + json.dumps({k: out[k] for k in ("fit", "apparatus_limit", "seconds") if k in out}, indent=1))
 
 

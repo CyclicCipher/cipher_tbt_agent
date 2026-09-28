@@ -8,3 +8,17 @@
  "mem_cap_gb": 6.0
 }
   n=2,729,975 rss  2.2GB  bpc 1.8613  chain@bnd 4.481  bigram 5.127  DEFICIT +0.646  types  67,182 tok/type 5.8
+  n=4,999,976 rss  3.0GB  bpc 1.8477  chain@bnd 4.477  bigram 5.036  DEFICIT +0.559  types  97,206 tok/type 7.3
+  n=9,999,979 rss  4.2GB  bpc 1.8271  chain@bnd 4.452  bigram 4.922  DEFICIT +0.470  types 143,580 tok/type 9.8
+  n=19,999,975 rss  6.4GB  bpc 1.8085  chain@bnd 4.422  bigram 4.811  DEFICIT +0.390  types 209,507 tok/type 13.4
+  stopped after 19999975 characters: resident memory 6.4 GB exceeded MEM_CAP_GB=6.0; larger sizes are an apparatus limit, not a result
+
+{
+ "fit": {
+  "slope_per_decade": -0.29583854337684307,
+  "crossover_chars": 401684382.97130024,
+  "crossed": false
+ },
+ "apparatus_limit": "stopped after 19999975 characters: resident memory 6.4 GB exceeded MEM_CAP_GB=6.0; larger sizes are an apparatus limit, not a result",
+ "seconds": 1011.8383107185364
+}

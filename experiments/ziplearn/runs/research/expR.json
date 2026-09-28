@@ -1,0 +1,66 @@
+{
+ "corpus": "latin_classical",
+ "heldout": "caesar.txt",
+ "V": 89,
+ "train_chars_available": 34152745,
+ "test_chars": 848622,
+ "n_boundaries": 113421,
+ "mem_cap_gb": 6.0,
+ "sizes": [
+  {
+   "train_chars": 2729975,
+   "rss_gb_after_training": 2.18,
+   "bpc_online": 1.8612582234573785,
+   "boundary_bits_chain": 4.48051659808014,
+   "boundary_bits_word_bigram": 5.1265257222928495,
+   "bigram_minus_chain": 0.6460091242127097,
+   "word_types": 67182,
+   "tokens_per_type": 5.7624214819445685,
+   "boundary_coverage": 0.8800222181077578,
+   "boundary_share_of_bits": 0.32173673225420124
+  },
+  {
+   "train_chars": 4999976,
+   "rss_gb_after_training": 3.02,
+   "bpc_online": 1.8477412089750858,
+   "boundary_bits_chain": 4.47654400127134,
+   "boundary_bits_word_bigram": 5.0355484405096025,
+   "bigram_minus_chain": 0.5590044392382625,
+   "word_types": 97206,
+   "tokens_per_type": 7.279859267946423,
+   "boundary_coverage": 0.9141957838495517,
+   "boundary_share_of_bits": 0.3238030227010658
+  },
+  {
+   "train_chars": 9999979,
+   "rss_gb_after_training": 4.25,
+   "bpc_online": 1.8270881679169908,
+   "boundary_bits_chain": 4.451619967544968,
+   "boundary_bits_word_bigram": 4.921659971796343,
+   "bigram_minus_chain": 0.47004000425137527,
+   "word_types": 143580,
+   "tokens_per_type": 9.814347402145145,
+   "boundary_coverage": 0.9435995097909559,
+   "boundary_share_of_bits": 0.3256400121057811
+  },
+  {
+   "train_chars": 19999975,
+   "rss_gb_after_training": 6.44,
+   "bpc_online": 1.8085304716395556,
+   "boundary_bits_chain": 4.4217454125886615,
+   "boundary_bits_word_bigram": 4.811462835861838,
+   "bigram_minus_chain": 0.3897174232731766,
+   "word_types": 209507,
+   "tokens_per_type": 13.420143479692802,
+   "boundary_coverage": 0.9615855970234789,
+   "boundary_share_of_bits": 0.3267736950708251
+  }
+ ],
+ "apparatus_limit": "stopped after 19999975 characters: resident memory 6.4 GB exceeded MEM_CAP_GB=6.0; larger sizes are an apparatus limit, not a result",
+ "fit": {
+  "slope_per_decade": -0.29583854337684307,
+  "crossover_chars": 401684382.97130024,
+  "crossed": false
+ },
+ "seconds": 1011.8383107185364
+}

@@ -1,0 +1,62 @@
+{
+ "V": 89,
+ "train_chars": 1999980,
+ "test_chars": 848622,
+ "R": 8,
+ "heldout": "caesar.txt",
+ "rows": [
+  {
+   "budget_fraction": 0.5,
+   "contexts": 1328023,
+   "reduction": 2.0000007529990067,
+   "bpc": 1.9524170267728824,
+   "delta_bpc": 0.08886981792030824
+  },
+  {
+   "budget_fraction": 0.25,
+   "contexts": 664011,
+   "reduction": 4.000004517997443,
+   "bpc": 1.9558725863147837,
+   "delta_bpc": 0.09232537746220948
+  },
+  {
+   "budget_fraction": 0.1,
+   "contexts": 265604,
+   "reduction": 10.000026355024774,
+   "bpc": 1.96854713456587,
+   "delta_bpc": 0.10499992571329586
+  },
+  {
+   "budget_fraction": 0.05,
+   "contexts": 132802,
+   "reduction": 20.000052710049548,
+   "bpc": 1.992398181475391,
+   "delta_bpc": 0.12885097262281686
+  },
+  {
+   "budget_fraction": 0.02,
+   "contexts": 53120,
+   "reduction": 50.00088478915663,
+   "bpc": 2.0426370606194877,
+   "delta_bpc": 0.1790898517669135
+  },
+  {
+   "budget_fraction": 0.01,
+   "contexts": 26560,
+   "reduction": 100.00176957831326,
+   "bpc": 2.1023521429634227,
+   "delta_bpc": 0.23880493411084847
+  }
+ ],
+ "unpruned": {
+  "bpc": 1.8635472088525742,
+  "contexts": 2656047
+ },
+ "contexts_available": 2656047,
+ "verdict": {
+  "pass": false,
+  "best": null,
+  "any_setting_costs_over_0.05": true
+ },
+ "seconds": 168.67321729660034
+}

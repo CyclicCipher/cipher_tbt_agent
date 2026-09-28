@@ -303,6 +303,8 @@ One line per experiment in the order run; the full entries (command, files, numb
 | E37 | measured | the legibility tax is a PROFILE: adaptation is worth +0.049 bits/char in-distribution and **+6.040** on Middle High German — negative on four axes (adaptation under shift, continual learning, exact composition, R_h), positive only on stationary bulk text |
 | S2 | PASS with a correction | a designed codebook's interference is predictable: coherence 4–6× the Welch bound, the k < ½(1+1/μ) guarantee conservative by ~2×, usable packing m/d · k ≈ 32; but §22.5's argmin needs the workload's read/write ratio — it is not self-contained |
 | S4 | SPLIT: PASS on bits, REFUTED on evidence | level-3 naming pays: signatures 0.625 of the literal code vs BPE's 0.711 at matched vocabulary, and unsupervised MDL recovers Latin's real inflectional endings (+ the enclitic -que); but tokens/unit only 1.66× (pre-reg ≥ 3×) because ONE cut per word catches only the outermost layer — the operation needed is RECURSIVE anti-unification |
+| E38 | REFUTED | the crossover on 35M: deficit +0.646/+0.559/+0.470/+0.390 at 2.7/5/10/20M, slope −0.296 per decade = E36's, but the INTERCEPT is setup-dependent — extrapolated crossover 4×10⁸ characters. Homogeneity of train/test sets it, not volume. Plus `ziplib/chain.py`: same model, verified to 3.6e−15 bits, 35M in 449 s |
+| E39 | REFUTED on the letter | §9 rule 3 on the text store: a threshold destroys the model (134× fewer contexts, +0.195), a RANKED capacity budget gives a clean curve (10× fewer for +0.105) — but a +0.089-bit floor at 50% shows the price scores worth on seen data only. Third sighting, with E28 and E35, of one defect |
 
 ## 14. Glossary
 
@@ -1305,6 +1307,15 @@ up to 35M: bits/char online and frozen; the chain's bits at word-initial positio
 at the same positions; word types, tokens per type, and boundary coverage. **Pass:** the bigram's deficit reaches
 zero at or below 26M characters. **Refute:** still positive at 35M, i.e. the refit was optimistic too and the
 crossover is genuinely out of reach for Latin. Either way the curve is the deliverable.
+
+**RAN 2026-09-27 — REFUTED, and the apparatus rebuilt (`RESULTS.md`).** Deficits +0.646 / +0.559 / +0.470 / +0.390
+at 2.73 / 5 / 10 / 20M characters; slope −0.296 per decade, which is E36's slope; extrapolated crossover 4 × 10⁸
+characters. What moved is the INTERCEPT, and the cause is the split: E36 trained on 15 homogeneous books and held
+out a 16th, E38 trains on 47 authors across a millennium and holds out Caesar. **The crossover is set by how alike
+training and test are, not by volume** — E37's "stationarity is the discriminating variable", arriving again by a
+different route. `ziplib/chain.py` now holds the vectorised chain (verified against `e34.Chain` to 3.6 × 10⁻¹⁵
+bits; 35M characters in 449 s against the dict chain's 1012 s for 20M), and E39 adds the capacity budget, so text
+is no longer memory-bound.
 
 **The apparatus limit to watch, and it is real.** `e34.Chain` keeps nine Python dicts keyed by character tuples; at
 2.73M characters the order-8 table already holds ~2.7M near-unique contexts. Extrapolating to 35M is ~30M contexts

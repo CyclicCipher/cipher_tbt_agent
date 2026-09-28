@@ -1096,3 +1096,73 @@ changed: §19.1's ladder gains a fourth rung, and the missing operation is now n
          DreamCoder's library is (macros built of macros), so the two levels fail identically and the §19.1
          unification is strengthened rather than weakened. Not built: the recursive operator; a second cut per
          word would be the cheapest test of it.
+
+### 2026-09-27 — E38 — the crossover, on 35M characters: REFUTED, and the reason is not data volume but how alike training and test are. Plus `ziplib/chain.py`, which makes the chain 60× faster and bounded
+command: `python experiments/ziplearn/research/expR_crossover.py`; CPU, 1012 s. No network built, run or trained.
+files:   `runs/research/expR.json`, `expR.log`; code `research/expR_crossover.py`, `ziplib/chain.py`;
+         corpus `corpora/latin_classical` (35.0M characters, 48 authors; held out `caesar.txt`, 848,622 characters)
+numbers: | train chars | rss | bpc online | chain @ boundary | word bigram | DEFICIT | types | tok/type |
+         |---|---|---|---|---|---|---|---|
+         | 2,729,975 | 2.2 GB | 1.8613 | 4.481 | 5.127 | **+0.646** | 67,182 | 5.8 |
+         | 4,999,976 | 3.0 GB | 1.8477 | 4.477 | 5.036 | **+0.559** | 97,206 | 7.3 |
+         | 9,999,979 | 4.2 GB | 1.8271 | 4.452 | 4.922 | **+0.470** | 143,580 | 9.8 |
+         | 19,999,975 | 6.4 GB | 1.8085 | 4.422 | 4.811 | **+0.390** | 209,507 | 13.4 |
+         Fitted slope −0.296 bits per decade; extrapolated crossover **4.0 × 10⁸ characters**; not crossed at 20M.
+         Stopped at 20M by the pre-declared memory cap, which is an apparatus limit and is recorded as one.
+verdict: REFUTED on the pre-registered letter (crossover at or below 26M). The instructive part is WHY, and it is
+         not that the refit's slope was wrong: the slope here is −0.296 against E36's −0.28 to −0.32, the same
+         number. What moved is the INTERCEPT — the deficit at 2.73M characters is +0.646 here against E36's +0.259
+         at the same training size. The setups differ in exactly one way that matters: E36 trained on 15 fairly
+         homogeneous Latin books and held out a 16th, while E38 trains on 47 authors spanning archaic to late
+         antiquity and holds out Caesar. A counted word bigram transfers badly across authors; a character chain
+         backs off and does not care. So **the crossover is set by how alike training and test are, not by data
+         volume alone** — which is E37's conclusion (stationarity is the discriminating variable) arriving a second
+         time by a different route. The tie-back number for any future run: on THIS split the crossover needs
+         ~4 × 10⁸ characters, an order of magnitude more classical Latin than survives.
+changed: `ziplib/chain.py` — the blended-backoff chain vectorised. `e34.Chain` builds nine tuple keys per character
+         and one inner dict per context; the same model is two within-group occurrence RANKS per order, which a
+         stable argsort computes for a whole corpus at once with no hash table and no Python loop. Verified against
+         `e34.Chain` per character: max absolute error **3.6 × 10⁻¹⁵ bits** on a 50k slice — the same model, not an
+         approximation. The full 35M corpus codes in **449 s**; the dict chain needed 1012 s to reach 20M and would
+         not fit 35M on this machine at all. `e34.Chain` stays as the reference implementation that
+         `verify_against_reference` checks against.
+
+### 2026-09-27 — E39 — §9 rule 3 on the text store (the user's suggestion: use the continual-learning machinery instead of a faster hash table): a capacity budget gives a clean rate–distortion curve — 10× fewer contexts for +0.105 bits/char — but there is a +0.089-bit floor that should not exist, and it is the THIRD sighting of the same defect in our price
+command: `python experiments/ziplearn/research/expS_pruned_chain.py 2000000`; CPU, 169–264 s per variant.
+files:   `runs/research/expS.json`; code `research/expS_pruned_chain.py`, `ziplib/chain.py`
+         (`keep_mask`, `keep_mask_loo`, `context_worth`, `keep_top`, `online_bits_pruned`)
+numbers: 2.0M training characters, held-out `caesar.txt`; unpruned 1.8635 bits/char over 2,656,047 contexts.
+         **Attempt 1, a per-context THRESHOLD on standalone worth** (keep a context when its own distribution beats
+         its parent's on its own observations): prunes almost everything and costs a fortune — at λ = 0.25 it keeps
+         19,811 contexts (134× fewer) for +0.195 bits/char. The criterion is simply wrong: a context seen once has
+         a KT estimate of 1/(1 + V/2) ≈ 1/45, which looks terrible beside a populated parent, but the model never
+         uses it as a REPLACEMENT — it interpolates it.
+         **Attempt 2, the same threshold on true leave-one-out worth** (the difference in coded bits, over a
+         context's own observations, between the blend with its order and without it): worse — 24,827 contexts for
+         +0.343. Almost no individual context saves more than one bit.
+         **Attempt 3, §9 rule 3 AS WRITTEN — a capacity budget by RANK, not a threshold:**
+         | budget | contexts | reduction | bits/char | Δ |
+         |---|---|---|---|---|
+         | 50% | 1,328,023 | 2.0× | 1.9524 | +0.0889 |
+         | 25% | 664,011 | 4.0× | 1.9559 | +0.0923 |
+         | 10% | 265,604 | 10.0× | 1.9685 | +0.1050 |
+         | 5% | 132,802 | 20.0× | 1.9924 | +0.1289 |
+         | 2% | 53,120 | 50.0× | 2.0426 | +0.1791 |
+         | 1% | 26,560 | 100.0× | 2.1024 | +0.2388 |
+verdict: REFUTED on the letter (pre-registered ≥ 5× fewer contexts at ≤ +0.02 bits/char; measured 10× at +0.105).
+         Three things worth keeping. (1) **Ranking is right and thresholding is wrong** — §9 rule 3 says *drop the
+         block with the least (evidence × bits saved)* until the budget is met, and read as a threshold it destroys
+         the model while read as a ranking it produces a usable curve. I implemented the threshold first; that was
+         a misreading of our own design. (2) **10× fewer contexts for +0.105 bits/char is a usable engineering
+         trade** even though it fails the criterion, and it is what makes an unbounded stream tractable. (3) **The
+         +0.089-bit floor is the real finding.** Dropping the worst-ranked HALF of the contexts should cost almost
+         nothing and costs 0.089 bits, because worth is scored on training data while the contexts that pay off on
+         held-out text are different ones. That is the same defect as E28's open point ("a free generalisation the
+         price does not account for") and E35's collapse of every denoising block to the identity — **three
+         independent sightings of one thing: our two-part price systematically undervalues an item whose worth is
+         realised on data it has not seen.** It is no longer three accidents; it is a property of the price.
+changed: the chain can now be run under a capacity budget, so text is no longer memory-bound. §9's rule 3 is
+         confirmed as a RANKING rule and its threshold reading is withdrawn. Not designed, and now the sharpest
+         open question in the line: a price that charges an item for the exceptions it will avoid on UNSEEN data
+         rather than only for the ones it avoids on seen data (§21.10's first entry; round 2's leave-one-out term
+         is the candidate, and E39 shows a plain training-set leave-one-out is not enough).
