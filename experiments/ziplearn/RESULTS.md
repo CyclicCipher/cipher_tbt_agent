@@ -1166,3 +1166,50 @@ changed: the chain can now be run under a capacity budget, so text is no longer 
          open question in the line: a price that charges an item for the exceptions it will avoid on UNSEEN data
          rather than only for the ones it avoids on seen data (§21.10's first entry; round 2's leave-one-out term
          is the candidate, and E39 shows a plain training-set leave-one-out is not enough).
+
+### 2026-09-27 — E40 — why bits/char sits at 1.8: the model is CONTEXT-bound, not data-bound. It already matches its deepest context at 91.7% of positions and still pays 1.78 bits there — 1.8 IS the conditional entropy of Latin given eight characters, and no count-based model can reach past it
+command: `python experiments/ziplearn/research/expT_why_18.py` (three training sizes), then the depth-coverage
+         sweep over orders 4–24 at 34M characters. CPU. No network built, run or trained.
+files:   `runs/research/expT.json`, `expT_depth.json`; code `research/expT_why_18.py`, `ziplib/chain.py`
+numbers: held-out `caesar.txt`, 848,622 characters; R = 8 unless stated.
+         **Is it sparsity or context?** The distribution of the DEEPEST order whose context had been seen before:
+         | train | bpc | word-initial | interior | mean depth | reach depth 8 | bits at depth 8 |
+         |---|---|---|---|---|---|---|
+         | 2.73M | 1.8613 | 4.481 | 1.457 | 7.56 | 75.3% | 1.85 |
+         | 10.0M | 1.8271 | 4.452 | 1.422 | 7.75 | 85.1% | 1.82 |
+         | 34.0M | **1.7919** | 4.390 | 1.391 | 7.87 | **91.7%** | **1.78** |
+         At 34M the positions that reach full depth are 91.7% of the text and carry 91.3% of the code length, at
+         1.78 bits each. Everything shallower is a rounding error: depth 7 is 4.9% of positions, depth ≤ 5 is 1.2%.
+         **Why more context does not rescue it** — coverage and evidence against order, at 34M characters:
+         | order | context seen before | median evidence | singletons |
+         |---|---|---|---|
+         | 4 | 99.9% | 4,775 | 0.1% |
+         | 6 | 98.8% | 347 | 0.8% |
+         | 8 | 91.7% | 40 | 5.1% |
+         | 10 | 71.9% | 8 | 15.2% |
+         | 12 | 46.5% | 3 | 27.8% |
+         | 16 | 12.3% | 2 | 49.0% |
+         | 24 | 1.3% | 4 | 38.6% |
+verdict: measured, and it answers the question this line has been circling since E33. **The chain is context-bound,
+         not data-bound.** It is not failing to find its context — it matches the full eight characters at 91.7% of
+         positions, with a median of 40 prior observations — and it still pays 1.78 bits there. That number is
+         converging, not stuck: 1.85 → 1.82 → 1.78 across 12.5× data, i.e. the estimate is approaching the true
+         H(next character | previous 8) for Latin, which is somewhere just under 1.75. **1.8 is not a defect of
+         our estimator; it is the entropy of the question we are asking.**
+         And the reason a count-based model cannot ask a better one is the second table. At the depths where
+         evidence exists (≤ 8) the context does not contain the missing information — proved by paying 1.78 bits
+         with the context fully matched. At the depths where more information could live (≥ 12) the evidence is
+         gone: 46.5% coverage and a median of 3 observations at order 12, 12.3% and 2 at order 16. **There is no
+         window in which a counting model has both the context and the evidence**, because the context space grows
+         as V^R while the data grows linearly. That is the n-gram trap, measured on our own corpus rather than
+         cited, and it is why expO found R = 8 → 24 changes nothing (1.8901 → 1.8903).
+         The corollary decides where effort goes: the remaining ~0.6–0.9 bits (the gap to a transformer's ~0.95 on
+         enwik8-scale text) is not recoverable by more Latin, a bigger table, or a deeper window. It needs
+         something that GENERALISES across contexts instead of counting them — which is §23's metric (unaffordable
+         here, §23.5) or §24.2's multiplicative mixing (E34's irreducible gradient, and the larger half of the gap
+         by the literature's ladder).
+changed: `ziplib/chain._codes` had a real bug: exact base-(V+1) packing overflows int64 past order 9, so any use
+         with R > 9 raised. Fixed — exact packing while it fits, a 64-bit multiplicative rolling hash beyond
+         (collision rate ~7 × 10⁻⁵ at 3.5 × 10⁷ keys, far below anything measured with it). Every order the model
+         actually uses stays exact. §24.1's "legibility tax" gains its explanation: the +0.4 on stationary text is
+         the distance between H(c | 8 chars) and what a model with unbounded, generalising context achieves.

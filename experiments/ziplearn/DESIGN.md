@@ -305,6 +305,7 @@ One line per experiment in the order run; the full entries (command, files, numb
 | S4 | SPLIT: PASS on bits, REFUTED on evidence | level-3 naming pays: signatures 0.625 of the literal code vs BPE's 0.711 at matched vocabulary, and unsupervised MDL recovers Latin's real inflectional endings (+ the enclitic -que); but tokens/unit only 1.66× (pre-reg ≥ 3×) because ONE cut per word catches only the outermost layer — the operation needed is RECURSIVE anti-unification |
 | E38 | REFUTED | the crossover on 35M: deficit +0.646/+0.559/+0.470/+0.390 at 2.7/5/10/20M, slope −0.296 per decade = E36's, but the INTERCEPT is setup-dependent — extrapolated crossover 4×10⁸ characters. Homogeneity of train/test sets it, not volume. Plus `ziplib/chain.py`: same model, verified to 3.6e−15 bits, 35M in 449 s |
 | E39 | REFUTED on the letter | §9 rule 3 on the text store: a threshold destroys the model (134× fewer contexts, +0.195), a RANKED capacity budget gives a clean curve (10× fewer for +0.105) — but a +0.089-bit floor at 50% shows the price scores worth on seen data only. Third sighting, with E28 and E35, of one defect |
+| E40 | measured | why 1.8: the chain is CONTEXT-bound, not data-bound — it matches its full 8-character context at 91.7% of positions and still pays 1.78 bits there, converging to H(c | 8 chars) ≈ 1.75. Beyond depth 8 the evidence vanishes (order 12: 46.5% coverage, median 3 observations), so no counting model has both context and evidence. The n-gram trap, measured |
 
 ## 14. Glossary
 
@@ -1584,6 +1585,16 @@ by ≥ 0.1 bits/char AND the top-rated pairs are recognisably stem-sharing. Refu
 ## 24. The gap to a neural language model, decomposed (2026-09-27)
 
 ### 24.1 The corrected target
+
+**Why the floor is 1.8, measured (E40, 2026-09-27).** The chain is CONTEXT-bound, not data-bound: at 34M
+characters it matches its full eight-character context at 91.7% of positions, with a median of 40 prior
+observations, and still pays 1.78 bits there — converging (1.85 → 1.82 → 1.78 over 12.5× data) to
+H(next character | previous 8) for Latin, just under 1.75. And no deeper window rescues it, because the evidence
+disappears exactly where the information would start: coverage and median evidence fall 99.9%/4,775 at order 4 to
+91.7%/40 at order 8, 46.5%/3 at order 12 and 12.3%/2 at order 16. **There is no depth at which a counting model
+has both the context and the evidence** — the context space grows as V^R while the data grows linearly. So the
+remaining 0.6–0.9 bits are not reachable by more Latin, a bigger table or a longer window; they need something
+that GENERALISES across contexts instead of counting them.
 
 1.0 bits/character is a fact about corpora of enwik8's scale (10⁸ characters). On 2.7M characters of Latin a
 well-tuned neural language model would land nearer **1.3–1.5** — character LSTMs on Penn Treebank (~5M characters)

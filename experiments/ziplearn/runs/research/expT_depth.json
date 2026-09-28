@@ -1,0 +1,17 @@
+{
+ "12": {
+  "coverage": 0.46543572992451293,
+  "median_evidence": 3.0,
+  "frac_singleton": 0.27826795854969505
+ },
+ "16": {
+  "coverage": 0.12334349097713705,
+  "median_evidence": 2.0,
+  "frac_singleton": 0.48963428615102417
+ },
+ "24": {
+  "coverage": 0.01289384437358447,
+  "median_evidence": 4.0,
+  "frac_singleton": 0.3864924145494425
+ }
+}

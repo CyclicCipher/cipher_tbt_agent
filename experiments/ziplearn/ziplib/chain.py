@@ -38,10 +38,19 @@ def _codes(seq: np.ndarray, V: int, r: int) -> np.ndarray:
         return np.zeros(n, dtype=np.int64)
     B = V + 1
     padded = np.concatenate([np.full(r, V, dtype=np.int64), seq.astype(np.int64)])
-    out = np.zeros(n, dtype=np.int64)
-    for j in range(1, r + 1):                                          # back(j) = padded[i + r - j]
-        out += padded[r - j: r - j + n] * (B ** (j - 1))
-    return out
+    if B ** r < 2 ** 62:                                               # exact base-(V+1) packing while it fits
+        out = np.zeros(n, dtype=np.int64)
+        for j in range(1, r + 1):                                      # back(j) = padded[i + r - j]
+            out += padded[r - j: r - j + n] * (B ** (j - 1))
+        return out
+    # deeper than int64 can hold exactly (r > 9 at V = 89): a 64-bit multiplicative rolling hash. Distinct
+    # contexts can collide, but at ~3.5e7 keys the birthday rate is ~7e-5, which is far below any effect we
+    # measure with it; exactness is kept wherever it is affordable, which is every order the model actually uses.
+    MUL = np.uint64(0x9E3779B97F4A7C15)
+    acc = np.zeros(n, dtype=np.uint64)
+    for j in range(1, r + 1):
+        acc = acc * MUL + padded[r - j: r - j + n].astype(np.uint64)
+    return (acc >> np.uint64(1)).astype(np.int64)                      # keep it non-negative
 
 
 def _rank_within_group(keys: np.ndarray) -> np.ndarray:
