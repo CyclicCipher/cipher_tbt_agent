@@ -225,8 +225,9 @@ else. E0–E35's pre-registrations were written in this section and have all run
 the index.
 
 **Live pre-registrations, not yet run:** §21.9 (B0–B8, G1–G3 — the blueprint and gradient-compatibility programme),
-§22.6 (S1–S2 — superposition with a codebook), §23.5 (S3 — the counted metric), §24.6 (D1–D3 — the gap, the
-projection test and decompilation). Nothing else is outstanding.
+§22.6 (S1–S2 — superposition with a codebook; S2 RUN), §23.5 (S3 — the counted metric; RUN and refuted on Latin for
+a data reason), §24.6 (D1–D3 — the gap, the projection test and decompilation; D1's gradient-free half RUN),
+§19.1 (S4 — level-3 naming tested on morphology). Nothing else is outstanding.
 
 ## 12. Open questions
 
@@ -550,6 +551,68 @@ recurring sub-programs into new primitives; Stitch and LILO are the successors),
 grows KINDS by compression. Completeness comes from the instruction set (Giannou et al.: a one-instruction computer
 suffices); the cost is the search, exponential in the length of what is new and tamed only by the ladder of macros.
 E29's rule applies to the instruction set itself: it must be the substrate's own primitives, not features I like.
+
+### 19.1 The three levels of naming — what the library problem shares with the missing word inventory (2026-09-27)
+
+E36 found that the text learner has no word-level unit: the `Store` indexes contexts (the last R characters) and
+never abstracts a chunk, so `amabat` exists in the model only as a set of values spread over many contexts, never as
+an object. The first reaction was that this is the library problem one level down. **That was too strong**, and the
+correction is the useful part — there are THREE levels of naming, and we sit at different heights in different
+places:
+
+| level | what is named | have we got it? | where it lives in compression |
+|---|---|---|---|
+| 1. **values in a fixed address space** | an outcome per pre-declared index | yes, everywhere | PPM, CTW, our chain, every count table |
+| 2. **an exact recurrence** | a recurring composite gets a name, paid once, so its uses become cheap | yes ON MATRICES (§7 step 3: E3's 17 named permutations, E8's 3 generators, 161 → 121 bits), no on TEXT | the ZIP/LZ78/LZW dictionary; BPE; Sequitur |
+| 3. **a pattern with holes** | a recurring SKELETON is named and the differences become arguments | **nowhere** | DreamCoder's abstraction; Goldsmith's signature; Morfessor's morph paradigm |
+
+**The shared failure, stated exactly.** At level 1 the learner can only move within a pre-declared address space:
+nothing in the price ever creates a new address. §7 step 3 is the operation that creates one — but it tests
+EQUALITY, so it can only name things that recur *identically*, which means every name it mints is another INSTANCE.
+That is precisely why the library has never minted a KIND (§19) and it is a different thing from why text has no
+words. Text is missing level 2 **by omission**: we picked the context family of compressors when the dictionary
+family is the one that mints units, and E3/E8 prove we can already do level 2 on matrices. The library is missing
+level 3 **by absence**: no anti-unification exists anywhere in the codebase.
+
+**What level 3 requires, concretely.** Anti-unification: given several observed objects, find their most specific
+common generalisation, name the skeleton, and let the positions where they differ become argument slots. Our price
+already knows how to charge for this — a name costs its definition once and its uses log₂(library size) — so the
+missing piece is the operation, not the currency.
+
+**Why this also explains three results we already have.** E17's relational goals failed at 0.51 because a relation
+IS a pattern with holes ("the output is the reverse of the input" has an argument slot) and there was no object to
+identify it into; identify-then-plan asked for a level-3 name from level-2 machinery. R_h is enormous where
+structure recurs exactly (E12's abelian group, 134×) and nearly nothing where it recurs only up to arguments (E8,
+1.33×). And §20's diffusion route works precisely because the SCHEDULE supplies the holes: the intermediate targets
+are given, so no abstraction has to be found.
+
+**The cheapest test of level 3 is morphology, and we now have the corpus for it.** A Goldsmith signature — a set of
+stems crossed with a set of suffixes, chosen by description length (Goldsmith 2001, *Unsupervised Learning of the
+Morphology of a Natural Language*; Creutz & Lagus's Morfessor) — is an anti-unification with two argument slots. It
+is DreamCoder's abstraction step on a domain that is cheap, countable, has a 25-year literature of baselines, and
+directly attacks the sparsity E36 measured (Latin's inflection is what explodes the type count to 69,629 at 2.7M
+characters). So building it is not a detour from the library problem: **it is the library problem's missing
+operation, tested where it is cheapest.** `corpora/latin_classical` (35.0M characters, 48 authors) exists for this.
+
+**And the connection to §18's open question.** §19 lacks the OPERATION (abstraction with holes); §18 lacks the
+DATA (successful traces to compress into programs — "what compressing behaviour writes into the block"). They are
+one bottleneck seen from two ends, because anti-unification needs several instances of a solved thing before it can
+find their skeleton. That is the honest argument for a puzzle curriculum: not that puzzles teach representations —
+BrainBuilder writes those — but that they are a SOURCE OF SOLVED TRACES, which is the raw material level 3 consumes
+and which we have none of for language. Searchformer and Stream of Search (§18) both show the second stage —
+compress your own successful traces — beating the teacher.
+
+NOT DESIGNED: the anti-unification operator itself, its price, and where it sits (a sleep-pass pass over the Store,
+or a `ziplearn` method). Pre-registered as S4 below.
+
+**S4 — Level 3 on morphology** (CPU, ≤ 20 min, no network). On `corpora/latin_classical`: induce stems and suffixes
+by two-part code (a lexicon of stems + a set of signatures + the cost of expressing each word type), against two
+controls — no segmentation (the E36 baseline) and BPE at a matched vocabulary size (level 2, exact recurrences
+only). Measured: total description length of the word types under each; tokens per *stem* against the 5.2 tokens
+per surface form; and bits/char of a context model over the induced units against the character chain's 1.8225.
+Pass: the signature model beats BPE on description length of the type inventory AND raises tokens per unit by ≥ 3×;
+bits/char is reported, not required to win. Refute: no better than BPE — which would say the holes buy nothing and
+level 2 is the whole story.
 
 **The continuous thesis.** Transformers trained by gradient descent are the one design that has compressed a messy,
 high-dimensional world, and they keep improving. So the substrate is a continuous transformer and ZipLearner is the
