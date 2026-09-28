@@ -1325,3 +1325,47 @@ context scored 0.000 — so the block holds no world model and everything it kno
 interpreter-frame result and it is unaffected. The "fourth sighting" claim (that the price destroys what the
 nearest-key default generalises from) is downgraded to three sightings — E28's open point, E35, E39 — until E41's
 comparison is redone on changed windows.
+
+### 2026-09-27 — E43 — how much of the board should the RULE see? Widening the window makes four of five games WORSE, because evidence per window collapses ~4× per radius step — E40's n-gram trap in two dimensions. The exception is the one game whose rule is genuinely non-local, and it more than doubles
+command: `python experiments/ziplearn/research/expW_receptive_field.py`; CPU, 47 s. No network trained or fitted.
+files:   `runs/research/expW.json`; code `research/expW_receptive_field.py`
+numbers: five games, 3 levels each at budget 400, `ActionModel` patched to let radii (1, 2, 3) compete instead of
+         (1, 2). K = 512 raw demonstrations per action in context; accuracy on windows where the centre cell
+         CHANGES (E42's standing rule — the aggregate is worthless against a ~0.92 constant).
+         | game | r=1 | r=2 | r=3 | obs per window, r=1→3 | price picks | best |
+         |---|---|---|---|---|---|---|
+         | LockPath | **0.833** (48) | 0.564 (117) | 0.537 (134) | 31.7 → 7.0 → 3.7 | r=1 | r=1 ✓ |
+         | CollectAll | **0.788** (33) | 0.525 (80) | 0.611 (90) | 15.0 → 3.5 → 1.9 | r=1 | r=1 ✓ |
+         | MultiKey | **0.667** (15) | 0.593 (27) | 0.500 (32) | 8.3 → 3.2 → 2.1 | r=1 | r=1 ✓ |
+         | Sokoban | **0.722** (36) | 0.600 (70) | 0.623 (61) | 29.1 → 8.8 → 5.1 | r=1 | r=1 ✓ |
+         | Toggle | 0.375 (16) | 0.765 (17) | **0.792** (24) | 6.5 → 3.0 → 2.0 | r=2 | r=3 ✗ |
+         Cost: 9 → 25 → 49 cells, 8 → 24 → 48 gather heads, d = 200 → 504 → 1008.
+verdict: measured, and it answers the question directly. **The board is not the problem — it is already fully
+         visible**, every cell a token in the block's sequence. What is local is the RULE, a window → centre-colour
+         table, and widening it costs more than it buys on four of five games.
+         **Why: the same trap E40 measured on text, now in two dimensions.** Observations per distinct window fall
+         about 4× per radius step, to under 2 at r=3 on three of the five games — every window becomes nearly
+         unique, so there is nothing to count. More context, exponentially less evidence for it, and no radius at
+         which a counting rule has both. The price knows this and picks r=1 on four games, agreeing with what
+         actually predicts best.
+         **The exception is the whole point.** Toggle goes 0.375 → 0.765 → 0.792: its rule changes cells far from
+         the one acted on, so a radius-1 window cannot express it at any amount of evidence, and the wider window
+         pays for itself despite the collapse. This is the diagnosis E42 flagged (Toggle 0.227) confirmed by
+         intervention. The price picks r=2 where r=3 scores higher — mildly conservative, consistent with E39,
+         but on 17 against 24 items that gap is not worth defending.
+         **The conclusion for the design, and it is not "use a bigger window".** What Toggle needs is not more
+         cells but a different KIND of read: "the switch, wherever it is" is content-addressed, not
+         position-addressed. `Match` (read by content) and `Pool` (aggregate over a class) are already in the
+         instruction set (§21.3) and the block can already read the whole frame with them — it is the learned
+         RULE LANGUAGE that cannot express anything but offsets. That is §19's kind problem at the level of
+         predicates: "the cell at offset (di, dj)" is an instance of `Gather`; "the nearest cell of colour c" is a
+         different KIND, and nothing in this line has ever minted one. Offering the substrate's own primitives as
+         competing predicate kinds and letting the price choose stays on the right side of §19's rule (the set
+         must be the substrate's primitives, not features I like); offering "the switch" or "the door" would not.
+changed: `ActionModel`'s radii are a parameter worth revisiting per game rather than a fixed (1, 2) — but the
+         measurement says the gain is in predicate KINDS, not in radius, so the next build is a non-local
+         predicate (content-match / directional ray / global presence) competing on price against `Gather`.
+         NOT DESIGNED. Caveats held: changed-window counts are 15–134, better than E42's 21–34 but still small
+         enough that ±0.05 means nothing; the test sets are not identical across radii (a wider window splits the
+         same transitions into more distinct windows, so LockPath has 48 changed windows at r=1 and 134 at r=3),
+         so this compares each model on its own natural test set rather than strictly like for like; one seed.
