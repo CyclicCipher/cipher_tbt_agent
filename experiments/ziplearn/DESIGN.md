@@ -307,6 +307,8 @@ One line per experiment in the order run; the full entries (command, files, numb
 | E39 | REFUTED on the letter | §9 rule 3 on the text store: a threshold destroys the model (134× fewer contexts, +0.195), a RANKED capacity budget gives a clean curve (10× fewer for +0.105) — but a +0.089-bit floor at 50% shows the price scores worth on seen data only. Third sighting, with E28 and E35, of one defect |
 | E40 | measured | why 1.8: the chain is CONTEXT-bound, not data-bound — it matches its full 8-character context at 91.7% of positions and still pays 1.78 bits there, converging to H(c | 8 chars) ≈ 1.75. Beyond depth 8 the evidence vanishes (order 12: 46.5% coverage, median 3 observations), so no counting model has both context and evidence. The n-gram trap, measured |
 | E41 | PASS (one clause missed) | in-context learning in a WRITTEN block: byte-identical weights, world model entirely in the context (empty = 0.000); one demonstration per action = 0.570, eight = 0.743 matching the counted store's 0.732 at a quarter the tokens, 128 = 0.830 (+0.098 over it). All 358 test items are unseen windows, so it is all nearest-key generalisation. Fourth sighting that the price destroys what memorised examples retain |
+| E42 | REFUTED | in-context transfer over 5 games, one set of weights: the UNCHANGED baseline scores 0.87–0.95 and beats every arm on aggregate, which retracts E41's headline. On changed windows (where the constant scores 0.000) the block reaches 0.23–0.86 from context alone — but on 21–34 items per game, too few to conclude. Toggle 0.227 = the r=1 field cannot express its rule; cross-game > native twice = the action channel is doing little |
+| E41 | headline WITHDRAWN | the mechanism stands (byte-identical weights; empty context 0.000, so the world model is in the context) but the performance claim does not: E42 shows a constant predictor scores 0.922 on the metric E41 used |
 
 ## 14. Glossary
 
@@ -588,9 +590,14 @@ a quarter of the tokens; 128 reach **0.830, beating the store by +0.098**. All 3
 appear nowhere in the context, so the entire result is the nearest-key default generalising. Missed: monotonicity
 (a dip at k = 2). Withdrawn as a test: the substitution arm — LockPath's four actions are movement in four
 directions and agree too much for it to discriminate; `empty` at 0.000 is the control that carries the claim.
-**The consequence for the programme:** raw demonstrations beat the counted, majority-voted, sleep-swept store, so
-the fourth NOT-DESIGNED entry of §21.10 (the price of the nearest-key default) is now the central open problem —
-E28, E35, E39 and E41 all turn on it.
+**RETRACTED THE SAME DAY by E42.** A constant "the cell keeps its colour" predictor scores **0.922** on the metric
+E41 used, above both of its numbers, and E41 did not measure it. So "raw demonstrations beat the counted store" is
+withdrawn, and the price-destroys-generalisation claim is back to three sightings (E28, E35, E39) until the
+comparison is redone on windows where the cell actually changes. What survives is the mechanism: byte-identical
+weights and 0.000 on an empty context, so the world model is in the context and not in the weights.
+**The standing rule this produced:** no experiment in this line reports an aggregate cell accuracy without the
+unchanged baseline beside it, and the metric of record is accuracy on CHANGED cells, where the constant scores
+zero and a world model has to earn its keep (E25: the failures are the missed changes).
 
 ---
 

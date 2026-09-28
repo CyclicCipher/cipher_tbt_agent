@@ -1266,3 +1266,62 @@ changed: §18.1's E41 answered; the interpreter frame has its first direct demon
          530/530 is a different quantity and nothing here regresses it); one game, one seed; and the
          demonstrations come from the same levels as the test windows, so this is generalisation across
          WINDOWS, not across levels or games.
+
+### 2026-09-27 — E42 — in-context transfer across five games: REFUTED, and it retracts E41's headline. The "predict unchanged" baseline scores 0.92 on the metric E41 used, so E41's 0.830 was never evidence of anything. On the metric that matters — windows where the cell actually changes — the block goes 0.000 → 0.23–0.86, but on 21–34 items per game, which is too few to conclude from
+command: `python experiments/ziplearn/research/expV_icl_transfer.py`; CPU, 29 s. No network trained or fitted.
+files:   `runs/research/expV.json`; code `research/expV_icl_transfer.py` (reuses `expU_icl_block`'s
+         `tokens_from`, `raw_rule`, `all_ones_rule`); games `src/tasks/games/{lockpath,collectall,multikey,
+         sokoban,toggle}.py`
+numbers: ONE `WrittenSim`, d = 200, 8 offsets, six generic action slots, compiled once; `weights_unchanged`
+         asserted true across every arm and every game. Demonstrations K = 128 per slot, raw whole windows.
+         Accuracy on held-out whole-window observations, and — the column that decides anything — accuracy
+         restricted to windows where the centre cell ACTUALLY CHANGES, on which a constant "unchanged" predictor
+         scores 0.000 by construction:
+         | game | unchanged baseline (all) | native (all) | native CHANGED | n changed | cross-level CHANGED | cross-game from LockPath CHANGED |
+         |---|---|---|---|---|---|---|
+         | LockPath | 0.922 | 0.668 | 0.536 | 28 | 0.571 | — |
+         | CollectAll | 0.917 | 0.750 | 0.613 | 31 | 0.667 | 0.645 |
+         | MultiKey | 0.939 | 0.655 | 0.857 | 21 | 0.500 | **0.905** |
+         | Sokoban | 0.867 | 0.871 | 0.647 | 34 | 1.000 | 0.618 |
+         | Toggle | 0.928 | 0.382 | **0.227** | 22 | 0.417 | **0.682** |
+         Empty context: 0.000 everywhere, on both metrics. Changed windows are 4.9–15.7% of the held-out set.
+verdict: REFUTED on both pre-registered criteria (native ≥ 0.7 on every game: no, minimum 0.382 aggregate and
+         0.227 on changed windows; cross-level ≥ 0.9 × native: passes, but on 12–63 items, which is not a result).
+         Three things it establishes, in descending order of how much I trust them.
+         **(1) The metric E41 used is worthless, and E41's headline is retracted.** On these grids ~92% of
+         windows do not change, so a constant "the cell keeps its colour" predictor scores 0.867–0.951 — higher
+         than any arm of E41 or E42 on the aggregate. E41 reported icl 0.830 against the store's 0.732 and called
+         it in-context learning beating the compressed store; **neither number beats a constant, and I did not
+         measure the constant.** Worse, E41's own write-up noted that the substitution arm was uninformative for
+         exactly this reason and I still did not add the baseline to the main arms. What SURVIVES from E41 is the
+         mechanism, not the performance: weights byte-identical across arms and 0.000 with an empty context, so
+         the world model is in the context and not in the weights. That claim stands. "In-context learning beats
+         the counted store" does not, and the fourth-sighting claim about the price destroying generalisation
+         must be re-tested on the changed-window metric before it is repeated.
+         **(2) On the metric that matters the block is doing something real but unmeasured.** Predicting a CHANGE
+         is where a world model earns its keep (E25: the failures are the missed changes), the constant predictor
+         scores 0.000 there, and the block scores 0.23–0.86 from context alone with untouched weights. But 21–34
+         changed windows per game means one item is worth 3–5 points, so no comparison between arms in this table
+         is trustworthy, including Sokoban's 1.000 on 27.
+         **(3) Two diagnostics worth keeping.** Toggle's native 0.227 is the lowest and its cross-game 0.682 the
+         opposite of expected: a radius-1 window cannot express a rule that changes distant cells, which is a
+         fact about the RECEPTIVE FIELD rather than about learning (E13 recorded per-game failures of the same
+         kind). And cross-game beating native on MultiKey (0.905 vs 0.857) and Toggle is a red flag, not a
+         success: it suggests the action channel is contributing little and the match is running on window
+         content alone, even at the action weight g = nO + 2.
+changed: the evaluator now reports changed/unchanged/balanced accuracy and the unchanged baseline, and no future
+         experiment in this line reports an aggregate cell accuracy without it. Next, and required before any
+         in-context claim is repeated: an evaluation with enough changed windows to measure (collect transitions
+         until there are thousands, not tens), and a rollout-level measure, which is what E28's 530/530 actually
+         was and is the quantity a planner needs.
+
+### 2026-09-27 — E41 CORRECTION (issued with E42, same day)
+The headline of the E41 entry above — "raw demonstrations beat the compressed store, 0.830 against 0.732" — is
+WITHDRAWN. E42 measured the baseline E41 omitted: on LockPath's held-out windows a constant "the cell keeps its
+colour" predictor scores **0.922**, above both of E41's numbers. The comparison between the icl and store arms may
+still hold on a metric that excludes no-change windows, but it was not measured that way and must not be cited
+until it is. The claims from E41 that DO survive: the weights were byte-identical across every arm, and an empty
+context scored 0.000 — so the block holds no world model and everything it knows is in the context. That is the
+interpreter-frame result and it is unaffected. The "fourth sighting" claim (that the price destroys what the
+nearest-key default generalises from) is downgraded to three sightings — E28's open point, E35, E39 — until E41's
+comparison is redone on changed windows.
