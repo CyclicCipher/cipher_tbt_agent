@@ -1213,3 +1213,56 @@ changed: `ziplib/chain._codes` had a real bug: exact base-(V+1) packing overflow
          (collision rate ~7 × 10⁻⁵ at 3.5 × 10⁷ keys, far below anything measured with it). Every order the model
          actually uses stays exact. §24.1's "legibility tax" gains its explanation: the +0.4 on stationary text is
          the distance between H(c | 8 chars) and what a model with unbounded, generalising context achieves.
+
+### 2026-09-27 — E41 — IN-CONTEXT LEARNING IN A WRITTEN BLOCK: the same weights, byte for byte, learn a world model from raw demonstrations alone — one-shot at 0.570, matching the counted store at 8 demonstrations per action with a quarter of the tokens, and beating it by +0.098 at 128. Every prediction is on a window never seen
+command: `python experiments/ziplearn/research/expU_icl_block.py`; CPU, 3 s. **No network trained, none fitted;
+         no gradient anywhere. The only thing that differs between arms is what is in the context.**
+files:   `runs/research/expU.json`; code `research/expU_icl_block.py`; block `e28.WrittenSim`; rules from
+         `brainbuilder.play_rules(seed=0, play_levels=2, budget=150, sleep=True)` on LockPath
+numbers: one `WrittenSim` compiled over the full radius-1 neighbourhood (8 offsets, d = 208), so the layout and
+         every weight are fixed; `weights_unchanged` asserted true across all arms. Evidence split per action by
+         whole-window key, 70/30: 830 training windows, 358 held out. The evaluator uses the block's own scoring
+         (the action dim at weight g = nO + 2, so one action match outweighs a full match on every cell).
+         | arm | tokens | accuracy on held-out windows |
+         |---|---|---|
+         | **empty** (no entry tokens) | 0 | **0.000** |
+         | icl, k = 1 per action | 4 | 0.570 |
+         | icl, k = 2 | 8 | 0.545 |
+         | icl, k = 4 | 16 | 0.617 |
+         | **icl, k = 8** | **32** | **0.743** |
+         | icl, k = 16 | 64 | 0.763 |
+         | icl, k = 32 | 128 | 0.788 |
+         | icl, k = 64 | 256 | 0.791 |
+         | **icl, k = 128** | 511 | **0.830** |
+         | icl, k = 256 | 655 | 0.830 |
+         | **store** (counted + majority + sleep-swept) | 128 | **0.732** |
+         | substitution (another action's counted rules) | 128 | 0.628 |
+         **Every one of the 358 held-out items is a window that appears nowhere in the context** (`verbatim` n = 0
+         in every arm, by construction of the split), so the whole of every number above is the nearest-key
+         default generalising to an unseen window.
+verdict: PASS on the substantive criteria, FAIL on one clause. (1) **In-context learning works in a written
+         block.** The weights are byte-identical across every arm and with an empty context the block scores
+         0.000 — it contains no world model at all. Everything it knows is in the context, which is §18's
+         interpreter frame demonstrated rather than argued. (2) **One demonstration per action is worth 0.570**,
+         and 8 per action (32 tokens) matches the counted store's 0.732 using a QUARTER of the tokens. (3) The
+         pre-registered "accuracy monotone in k" fails on a dip at k = 2 (0.545 against 0.570 at k = 1) — small
+         and probably sampling, but it is recorded as a miss, not smoothed. (4) The substitution arm is NOT a
+         clean test and should not be read as one: LockPath's four actions are movement in four directions, so
+         their rules largely agree and "mostly unchanged" is a strong baseline; 0.628 says the tokens matter,
+         not much more. The decisive control is `empty` at 0.000.
+         **The finding that matters beyond the pass:** raw demonstrations BEAT the compressed store — 0.830
+         against 0.732, +0.098 — and match it at a quarter of the size. The store was counted, majority-voted
+         and sleep-swept down to 2–4 of 9 cells; the demonstrations keep the whole window and nothing else. So
+         on this task the compression destroyed accuracy that memorised examples retain. That is now the FOURTH
+         independent sighting of one thing: E28's open point ("a free generalisation the price does not account
+         for"), E35 (memory blocks beat every price-compressed denoiser; the price collapsed them to the
+         identity), E39 (a +0.089-bit floor when the worst-ranked half of contexts is dropped), and now E41. The
+         price systematically destroys what the nearest-key default would have generalised from, and it is no
+         longer arguable that these are separate accidents.
+changed: §18.1's E41 answered; the interpreter frame has its first direct demonstration outside a rollout.
+         §21.10's first NOT-DESIGNED entry — the price of the nearest-key default — is promoted from an open
+         point to the line's central open problem, because four experiments now turn on it. Caveats kept in
+         view: this measures LOOKUP accuracy on whole-window evidence, not rollouts or levels solved (E28's
+         530/530 is a different quantity and nothing here regresses it); one game, one seed; and the
+         demonstrations come from the same levels as the test windows, so this is generalisation across
+         WINDOWS, not across levels or games.

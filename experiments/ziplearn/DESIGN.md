@@ -306,6 +306,7 @@ One line per experiment in the order run; the full entries (command, files, numb
 | E38 | REFUTED | the crossover on 35M: deficit +0.646/+0.559/+0.470/+0.390 at 2.7/5/10/20M, slope −0.296 per decade = E36's, but the INTERCEPT is setup-dependent — extrapolated crossover 4×10⁸ characters. Homogeneity of train/test sets it, not volume. Plus `ziplib/chain.py`: same model, verified to 3.6e−15 bits, 35M in 449 s |
 | E39 | REFUTED on the letter | §9 rule 3 on the text store: a threshold destroys the model (134× fewer contexts, +0.195), a RANKED capacity budget gives a clean curve (10× fewer for +0.105) — but a +0.089-bit floor at 50% shows the price scores worth on seen data only. Third sighting, with E28 and E35, of one defect |
 | E40 | measured | why 1.8: the chain is CONTEXT-bound, not data-bound — it matches its full 8-character context at 91.7% of positions and still pays 1.78 bits there, converging to H(c | 8 chars) ≈ 1.75. Beyond depth 8 the evidence vanishes (order 12: 46.5% coverage, median 3 observations), so no counting model has both context and evidence. The n-gram trap, measured |
+| E41 | PASS (one clause missed) | in-context learning in a WRITTEN block: byte-identical weights, world model entirely in the context (empty = 0.000); one demonstration per action = 0.570, eight = 0.743 matching the counted store's 0.732 at a quarter the tokens, 128 = 0.830 (+0.098 over it). All 358 test items are unseen windows, so it is all nearest-key generalisation. Fourth sighting that the price destroys what memorised examples retain |
 
 ## 14. Glossary
 
@@ -533,6 +534,63 @@ stayed flat under a strategy; the block, looped, must show that flatness with no
 `looped_transformers_programmable_computers_2301.13196.md`, `value_iteration_networks_1602.02867.md`,
 `universal_transformers_1807.03819.md`, `adaptive_computation_time_1603.08983.md`, `searchformer_2402.14083.md`,
 `stream_of_search_2404.03683.md`, `thinker_2307.14993.md` (recorded as what we will NOT build).
+
+### 18.1 The course correction of 2026-09-27, and E41 — in-context learning in a written block
+
+**The drift, named.** E33 was pre-registered with three arms: (a) the discrete machinery on text, (b) a gradient
+transformer, (c) the hybrid — the hybrid being the thesis. Arms (b) and (c) were shelved under "no gradient arm"
+and arm (a) then expanded to fill the space: E34, E36, E38, E39 and E40 are all refinements of a character n-gram
+model. That was never the goal. §19 states it: *the substrate is a continuous transformer whose representations
+are learned by gradient descent, and ZipLearner is the COMPRESSION THAT ACTS ON IT*, and §19's "Where to start"
+names E32 — does "look for a name" work on a continuous representation — as the crux. The no-gradient-arm
+instruction was about the COMPARISON arm; E32 is not a comparison, it is the subject, and applied literally the
+instruction removed the substrate the plan depends on.
+What those five experiments are worth is the case for leaving the discrete route, not a language model: E40 proves
+counting converges to H(c | 8 characters) ≈ 1.75 and cannot obtain the partition; E36 localises the missing
+information at word boundaries; E37 names the one axis where counting wins.
+
+**Order set by the user 2026-09-27: (2) then (1).** (2) Move the line to the games, where the interpreter can be
+WRITTEN (E28), the store COUNTED, and in-context learning tested with no transformer trained anywhere. (3) Then
+unshelve E32 on a small trained net, informed by what (2) finds.
+
+**Why in-context learning is the right target and not a detour.** ICL is learning without weight changes:
+pretraining builds the partition, the prompt selects a cell. That is §18's interpreter frame in the field's
+vocabulary — *the block is an interpreter; knowledge and behaviour are programs in the context*. And the
+distributional properties the literature finds behind emergent ICL (burstiness; a Zipfian long tail — and the
+robotics reviews of 2026 now hypothesise the same for physical observation/action streams) are **exactly the
+regime in which counting fails**: our own corpus has 5.2 tokens per word type and a median of 3 observations per
+order-12 context (E36, E40). The property that breaks the count table is the property that makes ICL emerge.
+E28 already contains a latent result here that was never framed as one: the rules live in MEMORY TOKENS, so
+swapping the tokens changes the world model with the weights untouched.
+
+**E41 — in-context learning in a written block (pre-registered 2026-09-27; §18 rules 2–4).** One `WrittenSim`
+compiled ONCE over the full radius-1 neighbourhood, so the layout and every weight are fixed; only the memory
+tokens differ between arms. Four arms on LockPath, held-out transitions:
+- **store** — tokens from the counted, sleep-swept `LocalRule` table (E28's baseline; dropped cells are wildcards);
+- **substitution** — the same weights with ANOTHER game's counted rules as tokens, to show the weights are not
+  the world model;
+- **icl(k)** — tokens built from k RAW observed transitions: whole windows, no counting, no majority vote, no
+  sleep pass, no write to any store. This is the in-context arm: the only thing that changed is what is in the
+  context;
+- **empty** — no entry tokens, so the block has nothing to read.
+Measured: cell accuracy on held-out transitions against k; the k at which icl reaches the counted store's
+accuracy; and, separately, accuracy on windows that appear VERBATIM among the demonstrations against windows that
+do not — the second is where the nearest-key default has to do the generalising, which is §21.10's first
+NOT-DESIGNED item and the thing E28 flagged as "a free generalisation the price does not account for".
+**Pass:** accuracy rises monotonically with k and icl reaches ≥ 0.9 of the store arm's accuracy at some k ≤ the
+store's entry count, AND substitution is exact. **Refute:** icl flat in k (the block cannot read demonstrations),
+or substitution wrong (the weights encode the game).
+
+**RAN 2026-09-27 — PASS, one clause missed (`RESULTS.md`).** Weights byte-identical across every arm; with an
+empty context the block scores **0.000**, so it holds no world model and everything it knows is in the context.
+One demonstration per action is worth 0.570; eight (32 tokens) reach 0.743, matching the counted store's 0.732 at
+a quarter of the tokens; 128 reach **0.830, beating the store by +0.098**. All 358 held-out items are windows that
+appear nowhere in the context, so the entire result is the nearest-key default generalising. Missed: monotonicity
+(a dip at k = 2). Withdrawn as a test: the substitution arm — LockPath's four actions are movement in four
+directions and agree too much for it to discriminate; `empty` at 0.000 is the control that carries the claim.
+**The consequence for the programme:** raw demonstrations beat the counted, majority-voted, sleep-swept store, so
+the fourth NOT-DESIGNED entry of §21.10 (the price of the nearest-key default) is now the central open problem —
+E28, E35, E39 and E41 all turn on it.
 
 ---
 
@@ -1768,6 +1826,16 @@ search, is the binding constraint, and that is worth knowing before any general 
 
 Everything below is CPU, gradient-free, and runs against code and corpora that exist. The ordering is by what each
 one would settle, not by effort.
+
+**REVISED 2026-09-27 after the course correction of §18.1; the user chose (2) then (1).**
+0. **E41 — in-context learning in a written block (§18.1).** The line's actual subject: can a written interpreter
+   acquire a world model from CONTEXT alone, with the weights untouched? Nothing new needs building — E28's block
+   and the counted rules exist. **First.**
+0b. **E32 — "look for a name" on a continuous representation (§19).** The crux of the continuous thesis, shelved
+   since 2026-09-21. Needs one small trained net AS THE SUBJECT, not as a comparison arm. After E41.
+
+The text-line items below are kept but demoted; E40 is the reason (counting converges to H(c | 8) and cannot get
+the partition, so none of them can reach the target by themselves).
 
 1. **S4 — level-3 naming on morphology (§19.1).** The only experiment that tests the operation the whole library
    problem turns on: naming a pattern with holes. Cheap (it works on a word-type inventory, not a character

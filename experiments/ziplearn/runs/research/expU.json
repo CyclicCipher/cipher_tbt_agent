@@ -1,0 +1,253 @@
+{
+ "experiment": "E41",
+ "seed": 0,
+ "play": [
+  [
+   0,
+   93
+  ],
+  [
+   1,
+   40
+  ]
+ ],
+ "actions": [
+  "ACTION1",
+  "ACTION2",
+  "ACTION3",
+  "ACTION4"
+ ],
+ "arms": {
+  "store": {
+   "tokens": 128,
+   "n": 358,
+   "accuracy": 0.7318435754189944,
+   "verbatim": {
+    "n": 0,
+    "accuracy": 0.0
+   },
+   "novel": {
+    "n": 358,
+    "accuracy": 0.7318435754189944
+   }
+  },
+  "empty": {
+   "tokens": 0,
+   "n": 358,
+   "accuracy": 0.0,
+   "verbatim": {
+    "n": 0,
+    "accuracy": 0.0
+   },
+   "novel": {
+    "n": 358,
+    "accuracy": 0.0
+   }
+  },
+  "substitution": {
+   "tokens": 128,
+   "n": 358,
+   "accuracy": 0.6284916201117319,
+   "verbatim": {
+    "n": 0,
+    "accuracy": 0.0
+   },
+   "novel": {
+    "n": 358,
+    "accuracy": 0.6284916201117319
+   }
+  },
+  "icl": [
+   {
+    "k_per_action": 1,
+    "tokens": 4,
+    "n": 358,
+    "accuracy": 0.5698324022346368,
+    "verbatim": {
+     "n": 0,
+     "accuracy": 0.0
+    },
+    "novel": {
+     "n": 358,
+     "accuracy": 0.5698324022346368
+    }
+   },
+   {
+    "k_per_action": 2,
+    "tokens": 8,
+    "n": 358,
+    "accuracy": 0.5446927374301676,
+    "verbatim": {
+     "n": 0,
+     "accuracy": 0.0
+    },
+    "novel": {
+     "n": 358,
+     "accuracy": 0.5446927374301676
+    }
+   },
+   {
+    "k_per_action": 4,
+    "tokens": 16,
+    "n": 358,
+    "accuracy": 0.61731843575419,
+    "verbatim": {
+     "n": 0,
+     "accuracy": 0.0
+    },
+    "novel": {
+     "n": 358,
+     "accuracy": 0.61731843575419
+    }
+   },
+   {
+    "k_per_action": 8,
+    "tokens": 32,
+    "n": 358,
+    "accuracy": 0.7430167597765364,
+    "verbatim": {
+     "n": 0,
+     "accuracy": 0.0
+    },
+    "novel": {
+     "n": 358,
+     "accuracy": 0.7430167597765364
+    }
+   },
+   {
+    "k_per_action": 16,
+    "tokens": 64,
+    "n": 358,
+    "accuracy": 0.7625698324022346,
+    "verbatim": {
+     "n": 0,
+     "accuracy": 0.0
+    },
+    "novel": {
+     "n": 358,
+     "accuracy": 0.7625698324022346
+    }
+   },
+   {
+    "k_per_action": 32,
+    "tokens": 128,
+    "n": 358,
+    "accuracy": 0.7877094972067039,
+    "verbatim": {
+     "n": 0,
+     "accuracy": 0.0
+    },
+    "novel": {
+     "n": 358,
+     "accuracy": 0.7877094972067039
+    }
+   },
+   {
+    "k_per_action": 64,
+    "tokens": 256,
+    "n": 358,
+    "accuracy": 0.7905027932960894,
+    "verbatim": {
+     "n": 0,
+     "accuracy": 0.0
+    },
+    "novel": {
+     "n": 358,
+     "accuracy": 0.7905027932960894
+    }
+   },
+   {
+    "k_per_action": 128,
+    "tokens": 511,
+    "n": 358,
+    "accuracy": 0.8296089385474861,
+    "verbatim": {
+     "n": 0,
+     "accuracy": 0.0
+    },
+    "novel": {
+     "n": 358,
+     "accuracy": 0.8296089385474861
+    }
+   },
+   {
+    "k_per_action": 256,
+    "tokens": 655,
+    "n": 358,
+    "accuracy": 0.8296089385474861,
+    "verbatim": {
+     "n": 0,
+     "accuracy": 0.0
+    },
+    "novel": {
+     "n": 358,
+     "accuracy": 0.8296089385474861
+    }
+   }
+  ]
+ },
+ "offsets": [
+  [
+   "-1",
+   "-1"
+  ],
+  [
+   "-1",
+   "0"
+  ],
+  [
+   "-1",
+   "1"
+  ],
+  [
+   "0",
+   "-1"
+  ],
+  [
+   "0",
+   "1"
+  ],
+  [
+   "1",
+   "-1"
+  ],
+  [
+   "1",
+   "0"
+  ],
+  [
+   "1",
+   "1"
+  ]
+ ],
+ "d": 200,
+ "evidence": {
+  "ACTION1": {
+   "train": 140,
+   "test": 61
+  },
+  "ACTION2": {
+   "train": 431,
+   "test": 185
+  },
+  "ACTION3": {
+   "train": 127,
+   "test": 55
+  },
+  "ACTION4": {
+   "train": 132,
+   "test": 57
+  }
+ },
+ "weights_unchanged": true,
+ "verdict": {
+  "weights_unchanged": true,
+  "store_accuracy": 0.7318435754189944,
+  "best_icl": 0.8296089385474861,
+  "icl_reaches_90pct_of_store": true,
+  "k_at_90pct": 8,
+  "store_entries": 128,
+  "monotone_in_k": false
+ },
+ "seconds": 2.7691009044647217
+}
