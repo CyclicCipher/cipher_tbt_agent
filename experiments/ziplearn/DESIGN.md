@@ -309,6 +309,7 @@ One line per experiment in the order run; the full entries (command, files, numb
 | E41 | PASS (one clause missed) | in-context learning in a WRITTEN block: byte-identical weights, world model entirely in the context (empty = 0.000); one demonstration per action = 0.570, eight = 0.743 matching the counted store's 0.732 at a quarter the tokens, 128 = 0.830 (+0.098 over it). All 358 test items are unseen windows, so it is all nearest-key generalisation. Fourth sighting that the price destroys what memorised examples retain |
 | E42 | REFUTED | in-context transfer over 5 games, one set of weights: the UNCHANGED baseline scores 0.87–0.95 and beats every arm on aggregate, which retracts E41's headline. On changed windows (where the constant scores 0.000) the block reaches 0.23–0.86 from context alone — but on 21–34 items per game, too few to conclude. Toggle 0.227 = the r=1 field cannot express its rule; cross-game > native twice = the action channel is doing little |
 | E43 | measured | how much of the board the RULE should see: widening the window makes 4 of 5 games WORSE (LockPath 0.833→0.537) because observations per window collapse ~4× per radius step — E40's trap in 2-D. Toggle is the exception and doubles (0.375→0.792) because its rule is genuinely non-local. The fix is not a bigger window but a non-local predicate KIND (content-match, not offset) — §19's kind problem again |
+| E44 | PASS | the evidence collapse IS a factorization issue: unfactored, LockPath falls 31.7→3.7 obs/key with radius; MASKED it holds 184→214→185 keeping 3 cells of 49 (×49.5). Corrects E43 — the trap belongs to the unfactorized reader the in-context arms use, not to the task. Sokoban is the exception (mask keeps every cell, ×1.0). Colour equivalence is a second axis worth ×1.2–2.3/cell, unbuilt. Explains the text line too: E33's mask was a no-op because language is DENSE in relevance where grids are sparse |
 | E41 | headline WITHDRAWN | the mechanism stands (byte-identical weights; empty context 0.000, so the world model is in the context) but the performance claim does not: E42 shows a constant predictor scores 0.922 on the metric E41 used |
 
 ## 14. Glossary
@@ -1651,6 +1652,13 @@ by ≥ 0.1 bits/char AND the top-rated pairs are recognisably stem-sharing. Refu
 ## 24. The gap to a neural language model, decomposed (2026-09-27)
 
 ### 24.1 The corrected target
+
+**And why text cannot escape it the way the games do (E44).** On the grid games the sleep pass keeps about three
+cells out of forty-nine, and that subset selection removes the evidence collapse entirely — LockPath holds 185
+observations per key at radius 3 where the unfactored window has 3.7. On text E33 found the same pass is a
+**no-op**: the prequential price keeps all eight context positions. That is the difference between the two lines
+in one number — **grid dynamics are SPARSE in relevance and factorize; language is DENSE and does not** — so the
+collapse is a factorization problem in one case and a real information limit in the other.
 
 **Why the floor is 1.8, measured (E40, 2026-09-27).** The chain is CONTEXT-bound, not data-bound: at 34M
 characters it matches its full eight-character context at 91.7% of positions, with a median of 40 prior

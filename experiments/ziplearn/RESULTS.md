@@ -1369,3 +1369,49 @@ changed: `ActionModel`'s radii are a parameter worth revisiting per game rather 
          enough that ±0.05 means nothing; the test sets are not identical across radii (a wider window splits the
          same transitions into more distinct windows, so LockPath has 48 changed windows at r=1 and 134 at r=3),
          so this compares each model on its own natural test set rather than strictly like for like; one seed.
+
+### 2026-09-27 — E44 — YES, it is a factorization issue, and we already had the fix: the mask makes the evidence collapse VANISH. Unfactored, LockPath falls 31.7 → 3.7 observations per key as the radius grows; masked, it holds 184 → 214 → 185 while keeping three cells out of forty-nine
+command: `python experiments/ziplearn/research/expX_factorization.py`; CPU, ~50 s. No network trained or fitted.
+files:   `runs/research/expX.json`; code `research/expX_factorization.py`
+numbers: five games, 3 levels at budget 400, radii (1, 2, 3) competing. Observations per distinct key, for the
+         UNFACTORED whole-window evidence (`LocalRule.full`, which is what every in-context arm feeds on) against
+         the MASKED table (`LocalRule.table`, the sleep pass's factored form):
+         | game | cells kept (r=1/2/3) | unfactored obs/key | masked obs/key | gain at r=3 |
+         |---|---|---|---|---|
+         | LockPath | 3.0 / 2.8 / 3.0 | 31.7 → 7.0 → 3.7 | **183.5 → 214.3 → 185.1** | ×49.5 |
+         | CollectAll | 3.0 / 2.5 / 2.8 | 15.0 → 3.5 → 1.9 | **94.1 → 133.8 → 96.0** | ×49.7 |
+         | MultiKey | 3.0 / 3.2 / 5.0 | 8.3 → 3.2 → 2.1 | 35.2 → 31.2 → 24.7 | ×11.6 |
+         | Toggle | 4.0 / 4.0 / 7.5 | 6.5 → 3.0 → 2.0 | **15.6 → 15.5 → 15.7** | ×7.7 |
+         | Sokoban | 9.0 / 25.0 / 49.0 | 29.1 → 8.8 → 5.1 | 29.1 → 8.8 → 5.1 | **×1.0** |
+         Keys at radius 3, LockPath: 11,633 unfactored against **235** masked. The mask keeps about three cells
+         whatever the window size.
+         A SECOND, independent axis the mask cannot express — colour equivalence, measured by grouping the centre
+         colour by its outcome distribution: LockPath 8 colours → 4.8 behaviours (×1.9), MultiKey 8 → 4.0 (×2.3),
+         Toggle 6 → 4.5 (×1.4), Sokoban 6 → 5.0 (×1.2), CollectAll 4 → 4.0 (×1.0). Since keys are products over
+         cells, a ×1.9 merge across three kept cells is ~×7 fewer keys again.
+verdict: the user's hypothesis, confirmed, and it **corrects E43's reading**. E43 said widening the window makes
+         things worse because evidence per window collapses. The accurate statement is that widening the window
+         makes the **UNFACTORIZED reader** worse and leaves the factorized one essentially untouched: subset
+         selection — which is all the sleep pass does, and the crudest factorization there is — removes the
+         collapse completely on four of five games. LockPath at radius 3 holds 185 observations per key against
+         3.7. So the trap E43 reported is not a property of the task; it is a property of the representation the
+         in-context arms happen to use. E41, E42 and E43 all fed RAW demonstrations, which is the unfactorized
+         form, so they were handicapped in a way I attributed to the world.
+         **Sokoban is the flagged exception and the interesting one:** the sleep pass keeps every cell at every
+         radius (9, 25, 49 — gain ×1.0), so either its rule genuinely depends on the whole window or the greedy
+         search failed to find the factorization. Push dynamics depend on *the cell beyond the box in the
+         direction of motion*, which is a different cell per action; the mask is per-action, so a fixed subset
+         should exist. Worth a direct look; recorded as open, not explained.
+         **And it unifies the games line with the text line.** E33 found the sleep mask was a NO-OP on text — the
+         prequential price keeps all eight context positions. Here it keeps three of forty-nine. That is the
+         difference between the two lines in one number: **grid dynamics are SPARSE in relevance and factorize;
+         language is DENSE and does not.** So the evidence collapse is a factorization problem wherever relevance
+         is sparse and a real information limit where it is not, and E40's 1.8 stands precisely because text
+         offered no subset to drop.
+changed: the in-context arms must be re-run feeding the MASKED form (or the price must be allowed to factor the
+         demonstrations before they enter the context) before any claim about in-context learning is repeated;
+         E41/E42/E43's in-context numbers are all lower bounds obtained with the unfactorized reader. Colour
+         equivalence is a second factorization axis worth ×1.2–2.3 per cell that nothing in the line implements —
+         it is value-axis merging, the same object as the context-merging of §24's discussion, and NOT DESIGNED.
+         Caveats: one seed; masks are priced on training data; the behaviour signature is crude (outcome-delta
+         distribution rounded at a 2% threshold).
