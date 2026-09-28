@@ -42,3 +42,7 @@ dist/
 # ANN fork (shelved 2026-06-29): cloned official Mamba repo + Triton kernel cache (re-clonable, not our code)
 experiments/mamba/
 experiments/.triton_cache/
+
+# Corpora fetched from upstream (rebuild with experiments/ziplearn/research/build_classical_latin.py)
+corpora/latin_library/
+corpora/latin_classical/
