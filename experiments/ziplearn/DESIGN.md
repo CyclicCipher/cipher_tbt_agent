@@ -617,6 +617,60 @@ weights and 0.000 on an empty context, so the world model is in the context and 
 unchanged baseline beside it, and the metric of record is accuracy on CHANGED cells, where the constant scores
 zero and a world model has to earn its keep (E25: the failures are the missed changes).
 
+### 18.2 Two axes of recurrence as the answer to self-play's depth ceiling (the user's observation, 2026-09-30)
+
+**The ceiling.** Self-play pretraining (§18.1, `refs/self_play_pretraining_zero_data_2609.30063.md`) has its
+learner predict a program's OUTPUT BYTES — never its execution trace. So the learner must perform the program's
+per-byte computation internally, and a fixed-depth autoregressive transformer cannot: log-precision transformers
+sit in uniform TC⁰ (Merrill & Sabharwal 2023) and cannot do iterated composition or state tracking at fixed depth,
+which chain-of-thought provably repairs. That predicts exactly the result the abstract reports — the curriculum
+discovers "recognizable mathematical sequences", the arithmetic-progression end of program space, where per-byte
+work is SHALLOW. A program with a genuine **nested loop** — an inner iteration per outer step, which is what
+Perlin's octave sum is — has deep per-byte work, and no amount of curriculum lets a fixed-depth learner fit it.
+The generator can propose it; the learner structurally cannot learn it.
+
+**Why our substrate is the natural fix, and it is already designed.** §18 commits to TWO recurrences and its own
+words map onto a nested loop exactly: *"Depth recurrence refines a fixed state; sequence recurrence ADDS state —
+positions the loop can write to and read back, memory for a plan of unknown length."*
+
+| axis | our mechanism | the loop it is |
+|---|---|---|
+| **depth** | the core applied K times to the same positions (`LoopedModel`, E26/E30) | the INNER loop — unbounded per-token computation; Saunshi et al. (`refs/looped_latent_thoughts_2502.17416.md`): T loops simulate T steps of chain-of-thought |
+| **sequence** | Coconut's continuous thoughts, a position's final state fed forward | the OUTER loop — new state per step, memory of unknown length |
+
+So a looped-plus-thoughts learner should reach program classes a fixed-depth learner cannot, and the gap should
+appear **specifically on nested loops**. That is a sharp, falsifiable prediction about where their curve flattens.
+
+**Two further consequences worth recording.**
+*The curriculum gains a second dimension.* Their generator proposes programs at the frontier of the learner's
+capability. If the learner's capability is itself elastic — more passes for a harder program, under the halting
+rule §18 already commits to — then the frontier moves in DEPTH as well as in program length, and the curriculum
+is two-dimensional where theirs is one.
+*Depth is a speed prior.* Solomonoff weights a program by 2^(−length) and says nothing about runtime; Levin's Kt
+adds log(time), which is Schmidhuber's speed prior. **A fixed-depth learner is a speed prior with a hard cutoff —
+it can only represent programs whose runtime per output symbol fits in its layers. Depth recurrence turns that
+cutoff into a cost.** (E29's retracted design was a Levin search; the measurement stands and the framing survives.)
+
+**What this does NOT get for free.** Unbounded depth needs a halting rule — convergence testing (Geiping's KL
+threshold) or a written halting head (ACT/PonderNet), both already in §18 — and Coconut's c = 3 instability is the
+recorded hazard on the sequence axis. The full version of this is a TRAINING experiment and belongs after E32, not
+before it.
+
+**E45 — does depth buy what width cannot? (pre-registered 2026-09-30; CPU, gradient-free, testable now.)**
+The expressivity half needs no training, because E43 handed us the case. Toggle's rule changes cells far from the
+one acted on; E43 read that as needing a non-local PREDICATE (a content-addressed read). There is a second
+candidate the two-axis view supplies and E43 never considered: **a distant effect is a signal that PROPAGATES, and
+propagation is the same local rule applied K times** — depth, not width. One pass of a radius-1 rule moves
+information one cell; k passes move it k cells, at k × 8 gather heads instead of a (2k+1)² window's.
+Arms, on synthetic grid dynamics generated from short programs (so the generating rule and its description length
+are known, and changed cells are unlimited — the fix for E42/E43's 21–34-item samples): cellular-automaton-style
+rules with a propagation distance p ∈ {1, 2, 3, 4}, predicted by (a) one pass at radius p, (b) p passes at
+radius 1, (c) one pass at radius 1 (the floor). Measured: accuracy on changed cells; parameters and gather heads
+each arm costs; observations per distinct key (E44's factorization measure) for each.
+**Pass:** (b) matches (a) on accuracy at every p while costing asymptotically fewer heads AND keeping observations
+per key roughly flat where (a)'s collapses. **Refute:** (b) below (a) at any p ≥ 2 — depth does not substitute for
+width, and E43's non-local-predicate reading is the only route.
+
 ---
 
 ## 19. The library problem, and the continuous thesis (DESIGNED 2026-09-21)
@@ -1863,6 +1917,8 @@ one would settle, not by effort.
 0. **E41 — in-context learning in a written block (§18.1).** The line's actual subject: can a written interpreter
    acquire a world model from CONTEXT alone, with the weights untouched? Nothing new needs building — E28's block
    and the counted rules exist. **First.**
+0a. **E45 — does depth buy what width cannot? (§18.2).** CPU, gradient-free, and it tests the two-axis claim on
+   the case E43 left open (Toggle) while fixing E42/E43's sample-size death with generated dynamics. Before E32.
 0b. **E32 — "look for a name" on a continuous representation (§19).** The crux of the continuous thesis, shelved
    since 2026-09-21. Needs one small trained net AS THE SUBJECT, not as a comparison arm. After E41.
 
