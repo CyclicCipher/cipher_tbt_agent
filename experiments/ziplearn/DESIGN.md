@@ -671,6 +671,35 @@ each arm costs; observations per distinct key (E44's factorization measure) for 
 per key roughly flat where (a)'s collapses. **Refute:** (b) below (a) at any p ≥ 2 — depth does not substitute for
 width, and E43's non-local-predicate reading is the only route.
 
+### 18.3 E46 — a Brainfuck interpreter as a written looped block (pre-registered 2026-10-01)
+
+Reading the body of 2609.30063 (§18.1's reference) removed the obstacle to building its result our way: **its
+program space is Brainfuck** — eight instructions plus ten single-byte macros, byte output. Eight instructions
+against our eight (§21.3), and every one of them maps:
+
+| Brainfuck | written as |
+|---|---|
+| `>` `<` | the data pointer is a REGISTER; `Quantise` increments it |
+| `+` `-` | the cell under the pointer is incremented — a `Row` on the pointed cell |
+| `[` `]` | `Branch` on "the current cell is zero" — §21.3 item 7, which is how Giannou et al. get conditional branching |
+| `.` `,` | `Readout` / an input register |
+| the fetch-execute cycle | the DEPTH loop, one instruction per pass, the instruction pointer a register |
+
+So this is E28's trick on a UNIVERSAL machine instead of a gridworld, and it is Giannou et al.'s "looped
+transformer as a programmable computer" at a size we can actually compile and verify. The program sits in the
+CONTEXT as tokens, which is §18's interpreter claim in its strongest form.
+
+**Measured:** the written block executed on N sampled Brainfuck programs (drawn as the paper draws them), its
+output bytes against a reference interpreter, under a step budget. Plus compile time, d, heads, and passes per
+emitted byte. **Pass:** byte-exact on ≥ 0.99 of programs that halt within the budget, with every disagreement
+traced to a named cause. **Refute:** any systematic disagreement, or a construction needing an instruction outside
+§21.3 — which would be a precise statement of what our instruction set lacks for universality.
+
+**Why it is worth doing before the learning half.** It makes the substrate for everything downstream: E45's
+generated dynamics become Brainfuck programs; the ICL experiments get unlimited data with known generators and
+known description lengths; and a verified written interpreter is the thing a self-play curriculum would then be
+PRICED against rather than RL-trained against (§18.1). It needs no gradient and no training.
+
 ---
 
 ## 19. The library problem, and the continuous thesis (DESIGNED 2026-09-21)
@@ -1917,6 +1946,8 @@ one would settle, not by effort.
 0. **E41 — in-context learning in a written block (§18.1).** The line's actual subject: can a written interpreter
    acquire a world model from CONTEXT alone, with the weights untouched? Nothing new needs building — E28's block
    and the counted rules exist. **First.**
+0a0. **E46 — a Brainfuck interpreter as a written looped block (§18.3).** The substrate for everything after it,
+   and the cheapest decisive test of whether §21.3's eight instructions are universal. No training.
 0a. **E45 — does depth buy what width cannot? (§18.2).** CPU, gradient-free, and it tests the two-axis claim on
    the case E43 left open (Toggle) while fixing E42/E43's sample-size death with generated dynamics. Before E32.
 0b. **E32 — "look for a name" on a continuous representation (§19).** The crux of the continuous thesis, shelved

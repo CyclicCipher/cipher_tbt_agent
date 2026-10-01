@@ -1,8 +1,8 @@
 # Self-Play Pretraining with Zero Data — arXiv 2609.30063
 
 Cowsik, Dolev, Li, De Luca, Cohen, Goodman, Levine (Independent / Tel Aviv / Stanford / LAPTh USMB), 2026.
-Read 2026-09-30 from the ABSTRACT ONLY — the arXiv page fetch did not surface the body, so every number below is
-one the abstract states and nothing here should be cited as if the paper's experiments had been read.
+Read 2026-10-01: the full 32-page PDF, extracted with `pypdf`. (An earlier version of this note was written from
+the abstract alone and said so; the sections below marked **[body]** come from the paper proper.)
 
 ## Abstract, verbatim in substance
 
@@ -94,3 +94,61 @@ A benchmark follows: held-out program families (Perlin/fBm, cellular automata, L
 reaction-diffusion), each with a known description length, scored by in-context transfer. That is a far better
 probe of how well a trained net approximates the universal prior than few-shot classification, because the ground
 truth is a program.
+
+## [body] What the paper actually does, and the two things that matter most here
+
+**The program space is BRAINFUCK.** §2.3: "During program generation, logits are restricted to the eight
+Brainf*ck instructions, ten canonical single-byte macro instructions, and the end-of-program token F, whereas
+output sequences may contain any byte value." Learner and generator are independently parameterised decoder-only
+Llama transformers of identical architecture, byte-level tokenization, 256 byte values. **This is a program space
+we can build in an afternoon and, more to the point, one we can WRITE** — eight instructions against our
+instruction set's eight (§21.3).
+
+**The curriculum is what produces ICL, not the program space.** Figure 4 compares three pretraining sources on six
+ICL tasks: "universal prior pretraining shows little evidence of effective ICL, while PCFG pretraining performs
+strongly on associative recall but transfers only weakly to the remaining tasks." Self-play improves all six. So
+sampling the raw universal prior does NOT work — the adaptive curriculum carries the result, which is the caveat
+the abstract-only version of this note guessed at and the body confirms.
+
+**The capabilities, named, and each maps onto an instruction we have:** ASSOCIATIVE RECALL = "contextual search"
+(our `Match`); REVERSE STRING = "dynamically indexing" (`Gather` at a computed offset); STACK = "learning to
+simulate a context-free grammar" (needs the DEPTH axis); and MAX / MIN / SUM, "standard mathematical relations".
+At m = 0 the model already scores 6–8% on MAX and MIN "due to its prior on copying previously produced tokens".
+
+## [body] The algorithm, as far as the paper establishes it — behavioural, not mechanistic
+
+Figure 5 decomposes the model's strategy on SUM against the number of in-context examples, and the succession is
+the most useful thing in the paper for us:
+
+1. **prior** — "trivial outputs which correspond to its prior (the marginally most common bytes)": {0, 255, 1, 16};
+2. **copy** — "after seeing a few examples it begins to copy previous bytes" (an induction/copy heuristic);
+3. **collapse** — "then loses confidence after several overconfident but incorrect predictions, reverting to a very
+   broad distribution", visible as a RISE in predictive entropy;
+4. **partial** — "after around 4 examples, it begins to sum the 4 low-order bits correctly";
+5. **full** — "by 8 examples it begins to sum the 4 high-order bits correctly as well";
+6. **lock-in** — "the model improves its confidence in its strategy and locks in on the correct approach."
+
+Two readings this line should keep. **(a) That trajectory is hypothesis selection by evidence, which is our
+price.** The entropy rising before it falls is the signature of a description being abandoned before a better one
+is adopted — E4's rate price and E6's change-point minting, happening inside a trained net. **(b) Low-order bits
+before high-order bits is the tell for §18.2.** Summing low bits is carry-free, a per-position function; high bits
+need carry PROPAGATION, which is an iterated computation. The model acquires the shallow part first and the
+depth-requiring part second, which is direct evidence for depth as the scarce resource.
+
+**What the paper does NOT give: any circuit-level analysis.** No attention patterns, no probes, no ablations of
+the learner's internals. It tells us WHICH STRATEGIES the model moves through, not which circuits implement them.
+So "what algorithm did it learn under the hood" is answered behaviourally and remains open mechanistically — and
+that gap is exactly what `brainbuilder.anatomy`, `ziplearn.lift` and the sleep pass exist to close.
+
+## [body] The Dc / Du decomposition, and its correspondence to §21.8
+
+§4 refines Chinchilla's `L = E + A/N^α + B/D^β` by splitting the data term into **contingent information** Dc
+("specific to the particular world or distribution that generated the data") and **universal predictive
+structure** Du ("shared across many data-generating processes"), giving `L = E + A/N^α + B/Dc^β + C/Du^γ`;
+self-play grows only Du. Their own stated limit (§6): "universal pretraining cannot recover contingent
+information: facts about a particular world must ultimately enter through interaction with that world. Therefore,
+we do not view universal pretraining as a replacement for natural data."
+
+That is our STRUCTURE / STATE split (§21.8) with a scaling law attached. **Du is what BrainBuilder writes; Dc is
+what ZipLearn counts.** Their result says Du can be manufactured from compute; ours says Dc can be written from
+counts. The two halves are complementary and neither paper nor project has both.
