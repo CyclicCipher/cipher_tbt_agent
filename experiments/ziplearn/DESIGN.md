@@ -310,6 +310,7 @@ One line per experiment in the order run; the full entries (command, files, numb
 | E42 | REFUTED | in-context transfer over 5 games, one set of weights: the UNCHANGED baseline scores 0.87–0.95 and beats every arm on aggregate, which retracts E41's headline. On changed windows (where the constant scores 0.000) the block reaches 0.23–0.86 from context alone — but on 21–34 items per game, too few to conclude. Toggle 0.227 = the r=1 field cannot express its rule; cross-game > native twice = the action channel is doing little |
 | E43 | measured | how much of the board the RULE should see: widening the window makes 4 of 5 games WORSE (LockPath 0.833→0.537) because observations per window collapse ~4× per radius step — E40's trap in 2-D. Toggle is the exception and doubles (0.375→0.792) because its rule is genuinely non-local. The fix is not a bigger window but a non-local predicate KIND (content-match, not offset) — §19's kind problem again |
 | E44 | PASS | the evidence collapse IS a factorization issue: unfactored, LockPath falls 31.7→3.7 obs/key with radius; MASKED it holds 184→214→185 keeping 3 cells of 49 (×49.5). Corrects E43 — the trap belongs to the unfactorized reader the in-context arms use, not to the task. Sokoban is the exception (mask keeps every cell, ×1.0). Colour equivalence is a second axis worth ×1.2–2.3/cell, unbuilt. Explains the text line too: E33's mask was a no-op because language is DENSE in relevance where grids are sparse |
+| E46 | PASS | a BRAINFUCK INTERPRETER WRITTEN INTO TRANSFORMER WEIGHTS: the self-play paper's exact program space as a looped `h1_lid` block, one pass per instruction, program in context, same weights for every program — 624/624 exact (output, tape, pointer, steps, stop) over 55,921 steps; 5,686 nonzeros of 24.4M; dense = sparse 18/18. Needs only Match, Row, Quantise, Keep, Halt, Readout. Control flow is ROWS, not Branch |
 | E41 | headline WITHDRAWN | the mechanism stands (byte-identical weights; empty context 0.000, so the world model is in the context) but the performance claim does not: E42 shows a constant predictor scores 0.922 on the metric E41 used |
 
 ## 14. Glossary
@@ -681,7 +682,7 @@ against our eight (§21.3), and every one of them maps:
 |---|---|
 | `>` `<` | the data pointer is a REGISTER; `Quantise` increments it |
 | `+` `-` | the cell under the pointer is incremented — a `Row` on the pointed cell |
-| `[` `]` | `Branch` on "the current cell is zero" — §21.3 item 7, which is how Giannou et al. get conditional branching |
+| `[` `]` | ~~`Branch` on "the current cell is zero"~~ — **WRONG, corrected by E46**: no route is needed. A conditional jump is a MUX of two one-hot vectors (next instruction or jump target) keyed on a conjunction (opcode ∧ zero-test), five threshold `Row`s per program slot. Control flow is rows. |
 | `.` `,` | `Readout` / an input register |
 | the fetch-execute cycle | the DEPTH loop, one instruction per pass, the instruction pointer a register |
 
@@ -694,6 +695,13 @@ output bytes against a reference interpreter, under a step budget. Plus compile 
 emitted byte. **Pass:** byte-exact on ≥ 0.99 of programs that halt within the budget, with every disagreement
 traced to a named cause. **Refute:** any systematic disagreement, or a construction needing an instruction outside
 §21.3 — which would be a precise statement of what our instruction set lacks for universality.
+
+**RAN 2026-10-01 — PASS, 624 / 624 exact (`RESULTS.md`).** Output, final tape, data pointer, step count and stop
+reason all agree with a reference interpreter on 24 unit programs, 400 programs from the paper's own `uniform`
+distribution and 200 nested-loop programs — 55,921 Brainfuck steps, each one a forward pass of two written
+`h1_lid.Block`s. d = 1008, **5,686 nonzero weights of 24.4M**, compile 0.27 s; the literal dense forward and the sparse
+kernel agree 18 / 18. Used: `Match` ×4, `Row`, `Quantise`, `Keep`, `Halt`, `Readout`; not used: `Gather`, `Pool`,
+`Broadcast`, `Compare`, `Branch`. Bracket targets are computed in the codec; in-network bracket matching is not built.
 
 **Why it is worth doing before the learning half.** It makes the substrate for everything downstream: E45's
 generated dynamics become Brainfuck programs; the ICL experiments get unlimited data with known generators and
@@ -968,6 +976,12 @@ built brain.
 7. **Ties are reported, not forbidden.** E28 measured 1,434 and 1,475 ties on windows the table never saw; ties are
    between equally near entries and are independent of M. `verify` checks purity on the per-instruction unit tests
    (where every query has a unique target) and REPORTS the tie count on the blueprint tests.
+9. **Every row is gated by the token class it serves** (E46). A `Row` meant for the register carries the register's
+   class flag as one more literal and one more unit of threshold, so on every other token its pre-activation is −M and
+   GELU underflows to exactly zero. Without it, a bias-0 row turns 10⁻¹³ attention leakage into GELU(−ε) ≈ −ε/2 on the
+   wrong tokens, `BoundaryOp`'s quantise promotes any nonzero group to a full one-hot, and a token class acquires state
+   it should not have — in E46's first build every tape cell grew a spurious data pointer and the machine looped for
+   ever. The rule is the per-row counterpart of `BoundaryOp`'s `cls_flags`.
 8. **The product-key reader is Lample et al. 2019's, not an argmax over sub-key maxima:** sub-key scores select a
    CANDIDATE set (top-k per half), and the candidates that are stored keys are rescored exactly.
 

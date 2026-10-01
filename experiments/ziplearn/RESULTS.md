@@ -1415,3 +1415,66 @@ changed: the in-context arms must be re-run feeding the MASKED form (or the pric
          it is value-axis merging, the same object as the context-merging of §24's discussion, and NOT DESIGNED.
          Caveats: one seed; masks are priced on training data; the behaviour signature is crude (outcome-delta
          distribution rounded at a 2% threshold).
+
+### 2026-10-01 — E46 — a BRAINFUCK INTERPRETER WRITTEN INTO TRANSFORMER WEIGHTS: the self-play paper's exact program space runs as a looped `h1_lid` block, one pass per instruction, the program in the context, and agrees with a reference interpreter on 624 of 624 programs over 55,921 steps — output, tape, data pointer, step count and stop reason. 5,686 nonzero weights out of 24.4M; no training of any kind
+command: `python experiments/ziplearn/e46.py` (defaults: L 128, N 16, K 32, T_out 32, budget 256, seed 0); CPU, 814 s.
+files:   `runs/e46/e46.json`, `runs/e46/run.log`; code `e46.py` (`WrittenBF`, `run_reference`, `compile_program`, `UNIT`,
+         `sample_uniform`, `sample_loopy`); substrate `experiments/transformers/h1_lid.py` (`Block`, `Attn`, `BoundaryOp`)
+numbers: the machine is Appendix E of 2609.30063: `< > + - [ ] . ,` plus `F`, circular tape, cells mod 256, `,` reading
+         i.i.d. uniform random bytes, unmatched brackets as no-ops, the ten macros of Table 4 expanded as the table defines
+         them. One compiled machine — the SAME weights for every program — holds L = 128 program slots, N = 16 tape cells,
+         K = 32 random input bytes.
+         **Compiled:** d = 1008 (layout 1005), two `h1_lid.Block`s with `norm="none"`, 4 heads of 252, 195 threshold rows in
+         block A's MLP and 813 in block B's; **5,686 nonzero weights out of 24,403,680 parameters (0.023%)**; compile 0.27 s.
+         **Checked against `run_reference`, a plain Python interpreter with identical semantics, on output bytes AND final
+         tape AND data pointer AND step count AND stop reason:**
+         | set | programs | exact | stops (halt / output cap / budget) | mean steps | mean expanded length |
+         |---|---|---|---|---|---|
+         | unit (every instruction, every macro, wraps, carry, borrow, unmatched brackets, a jump over F, the paper's own example) | 24 | **24** | — | — | — |
+         | uniform — the paper's own `uniform` baseline distribution (Table 5): tokens i.i.d. over the 19-symbol alphabet, ≤ 24 | 400 | **400** | 303 / 0 / 97 | 82.1 | 45.2 |
+         | loopy — pure Brainfuck, balanced brackets nested to depth 3, ≤ 48 | 200 | **200** | 110 / 18 / 72 | 113.6 | 27.1 |
+         | **total** | **624** | **624** | | **55,921 steps executed** | |
+         The reference itself matches the hand-computed output on all 24 unit programs (e.g. the paper's `+++[>+.<-]F` →
+         1, 2, 3; nested loops 3 × 2 → 6 in 58 steps; `-+.` → 0; `X.-.` → 16, 15).
+         **Dense versus sparse:** the sweep runs a sparse kernel over the same weight tensors for speed; the literal
+         `h1_lid.Block.forward` was run on 18 programs beside it and the two runs were identical 18 / 18.
+verdict: PASS (pre-registered: byte-exact on ≥ 0.99 of programs, every disagreement traced; measured 1.000, none).
+         **What it establishes.** (1) **A universal machine runs as a written looped transformer, exactly.** One pass is one
+         Brainfuck step; the program and the random tape are tokens in the context; the weights do not change between
+         programs. This is §18's interpreter frame — *the block is an interpreter, knowledge and behaviour are programs in
+         the context* — demonstrated on a universal machine instead of a gridworld, and it is Giannou et al.'s "looped
+         transformer as a programmable computer" at a size we can compile in a third of a second and check exhaustively.
+         (2) **§21.3's instruction set suffices, and needs only six of its parts:** `Match` (four heads — fetch the
+         instruction, read the cell, read the input byte, write the cell), `Row` (threshold units), `Quantise`,
+         `Keep`/`Clear`, `Halt`, `Readout`. NOT needed: `Gather`, `Pool`, `Broadcast`, `Compare`, `Branch`.
+         (3) **My §18.3 prediction was wrong in a useful way: conditional control flow needed no `Branch`.** I mapped `[`
+         and `]` to `Branch` (§21.3 item 7, an attention-residual route, "how Giannou et al. get conditional branching").
+         The construction needs no route at all: a conditional jump is a MUX of two one-hot vectors (the next instruction
+         or the jump target) keyed on a conjunction (opcode ∧ zero-test), which is five threshold rows per program slot.
+         Control flow is rows. (4) **Carry costs no depth for increment.** With a byte as two one-hot nibbles, the carry
+         out of the low nibble is the conjunction (low = 15 ∧ the opcode is +), one row; increment is a single MLP layer
+         for any number of digits, because "all lower digits are 15" is one conjunction of one-hot dims. That is a precise
+         gloss on 2609.30063's low-bits-before-high-bits finding (§18.1): the depth cost it shows belongs to TWO-OPERAND
+         addition, where each digit's carry depends on a sum, not to increment.
+         **How the first build failed, recorded because it is a design rule and not a typo.** The first version looped
+         forever on every program with a loop. A pass-by-pass trace showed tape cell 0 written once and never again: rows
+         with bias 0 gave GELU(−ε) ≈ −ε/2 on the WRONG tokens from ~10⁻¹³ attention leakage, `BoundaryOp`'s quantise treats
+         any nonzero group as live, and so every tape cell acquired a spurious one-hot `dp = 0` (argmax of equal tiny
+         values is index 0) — after which cell 0's write query matched N + 1 tokens and its "here" gate diluted to nothing.
+         Fixed in the weights by gating every row with the token class it serves (one more literal, one more unit of
+         threshold), so on any other token the pre-activation is −M and GELU underflows to exactly zero in float64.
+         **Limits, stated.** (a) Bracket matching is done in the codec (`compile_program` writes each bracket's target into
+         its token, as Giannou et al. address their program); computing it in-network — the Dyck depth by a prefix-count
+         head — is not built. (b) Macros are expanded as Table 4 defines them, so a macro costs several passes; the step
+         budget counts expanded steps. (c) The machine is finite (128 / 16 / 32, budget 256), universal only in the bounded
+         sense the paper's machine also is. (d) `uniform` is the paper's baseline distribution, not its trained generator's,
+         whose programs are not available; and uniform programs emit little (mean 0.39 bytes), so output agreement is
+         tested mainly by the loopy and unit sets while tape, pointer, step and stop agreement is tested on all 624.
+         (e) Speed: 14.5 ms per pass, dominated by dense attention over hd = 252, not by the 5,686 weights.
+changed: §18.3's mapping table is corrected (control flow = rows, not `Branch`); §21.1 gains a rule (every row is gated by
+         the token class it serves); §21.3 item 5 is noted as used with SIGNED integer keys — a row is a conjunction of
+         literals, a mild generalisation of the positive one-hot key it was written with. Next: E45 on this substrate
+         (generated dynamics are now Brainfuck programs), and the ICL work with known generators and known description
+         lengths. And for the question that motivated it — what the self-play learner computes — there is now an exact
+         WRITTEN implementation of the machine that learner is trained to predict, so "what algorithm did it learn"
+         becomes a decompilation question with a known target (§24.5).

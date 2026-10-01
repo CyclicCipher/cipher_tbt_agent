@@ -1,0 +1,7 @@
+compiled: d=1008 (layout 1005), 4 heads of 252, rows A 195 / B 813, 5686 nonzeros of 24,403,680 parameters, 0.27s
+unit: 24/24 exact against the reference; reference matches the hand-computed output on 24/24
+dense h1_lid.Block.forward vs sparse kernel: 18/18 identical runs
+ uniform: 400/400 exact | stops {'halt': 303, 'output': 0, 'budget': 97} | mean steps 82.1 (max 256) | mean expanded length 45.2 | skipped 7 too long
+   loopy: 200/200 exact | stops {'halt': 110, 'output': 18, 'budget': 72} | mean steps 113.6 (max 256) | mean expanded length 27.1 | skipped 0 too long
+
+verdict: {"exact": 624, "total": 624, "rate": 1.0, "dense_equals_sparse": true, "pass": true, "passes_executed": 55921, "instructions_used": ["Match (4 heads: fetch, read, inread, write)", "Row (threshold units, signed keys)", "Quantise", "Keep/Clear", "Halt", "Readout"], "instructions_not_used": ["Gather", "Pool", "Broadcast", "Compare", "Branch"]} 813.8s

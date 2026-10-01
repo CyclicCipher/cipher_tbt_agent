@@ -1,0 +1,328 @@
+{
+ "experiment": "E46",
+ "L": 128,
+ "N": 16,
+ "K": 32,
+ "T_out": 32,
+ "budget": 256,
+ "d_layout": 1005,
+ "d": 1008,
+ "n_head": 4,
+ "hd": 252,
+ "params": 24403680,
+ "nonzeros": {
+  "A.qkv": 569,
+  "A.proj": 202,
+  "A.mlp0": 711,
+  "A.mlp2": 195,
+  "B.qkv": 71,
+  "B.proj": 33,
+  "B.mlp0": 3092,
+  "B.mlp2": 813
+ },
+ "rows": {
+  "A": 195,
+  "B": 813
+ },
+ "S": 30.0,
+ "M": 20.0,
+ "compile_seconds": 0.269,
+ "unit": [
+  {
+   "name": "paper Appendix E example",
+   "prog": "+++[>+.<-]F",
+   "expanded_len": 11,
+   "steps": 22,
+   "stop": "halt",
+   "out_len": 3,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "increment and print",
+   "prog": "+.",
+   "expanded_len": 2,
+   "steps": 2,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "wrap below zero",
+   "prog": "-.",
+   "expanded_len": 2,
+   "steps": 2,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "wrap above 255",
+   "prog": "-+.",
+   "expanded_len": 3,
+   "steps": 3,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "tape wraps left",
+   "prog": "<+.>.",
+   "expanded_len": 5,
+   "steps": 5,
+   "stop": "halt",
+   "out_len": 2,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "nested loops 3x2",
+   "prog": "+++[>++[>+<-]<-]>>.",
+   "expanded_len": 19,
+   "steps": 58,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "input echo",
+   "prog": ",.,.,.",
+   "expanded_len": 6,
+   "steps": 6,
+   "stop": "halt",
+   "out_len": 3,
+   "exact": true
+  },
+  {
+   "name": "unmatched ']' is a no-op",
+   "prog": "+].",
+   "expanded_len": 3,
+   "steps": 3,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "unmatched '[' is a no-op",
+   "prog": "[+.",
+   "expanded_len": 3,
+   "steps": 3,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "loop never entered",
+   "prog": "[+++.]+.",
+   "expanded_len": 8,
+   "steps": 3,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "macro Z clears",
+   "prog": "+++Z.",
+   "expanded_len": 7,
+   "steps": 11,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "macro R moves right",
+   "prog": "+++R>.",
+   "expanded_len": 11,
+   "steps": 21,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "macro L triples right",
+   "prog": "++L>.",
+   "expanded_len": 12,
+   "steps": 19,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "macro N subtracts left",
+   "prog": "+++++>++N<.",
+   "expanded_len": 16,
+   "steps": 21,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "macro C copies to two",
+   "prog": "++++C>.>.",
+   "expanded_len": 17,
+   "steps": 41,
+   "stop": "halt",
+   "out_len": 2,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "macro G scans right",
+   "prog": "+>+>+>>>+<<<<<G.",
+   "expanded_len": 18,
+   "steps": 22,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true
+  },
+  {
+   "name": "macro H scans left",
+   "prog": ">>>+<+<+H.",
+   "expanded_len": 12,
+   "steps": 12,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true
+  },
+  {
+   "name": "macro W",
+   "prog": "+++W>.",
+   "expanded_len": 13,
+   "steps": 17,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "macro V prints a string",
+   "prog": "+>++>+++<<V",
+   "expanded_len": 14,
+   "steps": 20,
+   "stop": "halt",
+   "out_len": 3,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "macro X sets 16",
+   "prog": "X.",
+   "expanded_len": 20,
+   "steps": 18,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "F halts early",
+   "prog": "+.F+.",
+   "expanded_len": 5,
+   "steps": 2,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "a jump over F",
+   "prog": "[F]+.",
+   "expanded_len": 5,
+   "steps": 3,
+   "stop": "halt",
+   "out_len": 1,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "carry chain 15 -> 16",
+   "prog": "+++++++++++++++.+.",
+   "expanded_len": 18,
+   "steps": 18,
+   "stop": "halt",
+   "out_len": 2,
+   "exact": true,
+   "matches_expected": true
+  },
+  {
+   "name": "borrow 16 -> 15",
+   "prog": "X.-.",
+   "expanded_len": 22,
+   "steps": 20,
+   "stop": "halt",
+   "out_len": 2,
+   "exact": true,
+   "matches_expected": true
+  }
+ ],
+ "dense_vs_sparse": {
+  "n": 18,
+  "identical": 18
+ },
+ "sweep_seconds": 762.9,
+ "uniform": {
+  "n": 400,
+  "exact": 400,
+  "skipped_too_long": 7,
+  "stops": {
+   "halt": 303,
+   "output": 0,
+   "budget": 97
+  },
+  "mean_steps": 82.1225,
+  "max_steps": 256,
+  "mean_out_len": 0.39,
+  "mean_expanded_len": 45.215,
+  "misses": []
+ },
+ "loopy": {
+  "n": 200,
+  "exact": 200,
+  "skipped_too_long": 0,
+  "stops": {
+   "halt": 110,
+   "output": 18,
+   "budget": 72
+  },
+  "mean_steps": 113.6,
+  "max_steps": 256,
+  "mean_out_len": 4.985,
+  "mean_expanded_len": 27.09,
+  "misses": []
+ },
+ "verdict": {
+  "exact": 624,
+  "total": 624,
+  "rate": 1.0,
+  "dense_equals_sparse": true,
+  "pass": true,
+  "passes_executed": 55921,
+  "instructions_used": [
+   "Match (4 heads: fetch, read, inread, write)",
+   "Row (threshold units, signed keys)",
+   "Quantise",
+   "Keep/Clear",
+   "Halt",
+   "Readout"
+  ],
+  "instructions_not_used": [
+   "Gather",
+   "Pool",
+   "Broadcast",
+   "Compare",
+   "Branch"
+  ]
+ },
+ "seconds": 813.8
+}
