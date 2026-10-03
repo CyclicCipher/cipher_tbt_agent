@@ -1,0 +1,97 @@
+{
+ "R": 1.0,
+ "m": 8,
+ "trials": 4000,
+ "rows": [
+  {
+   "d": 2,
+   "K": 16,
+   "isotropic": 0.9697687483313423,
+   "subspace_m8": 0.967922347996726,
+   "gradient": 1.0,
+   "noisy_gradient_cos03": 0.29999999999999943,
+   "needle_hit_rate": 0.93975
+  },
+  {
+   "d": 2,
+   "K": 256,
+   "isotropic": 0.9998531789649807,
+   "subspace_m8": 0.9998571304615341,
+   "gradient": 1.0,
+   "noisy_gradient_cos03": 0.29999999999999827,
+   "needle_hit_rate": 1.0
+  },
+  {
+   "d": 12,
+   "K": 16,
+   "isotropic": 0.49487075834149313,
+   "subspace_m8": 0.60129079869604,
+   "gradient": 1.0,
+   "noisy_gradient_cos03": 0.29999999999999993,
+   "needle_hit_rate": 0.00075
+  },
+  {
+   "d": 12,
+   "K": 256,
+   "isotropic": 0.7248751244865498,
+   "subspace_m8": 0.8306356330804127,
+   "gradient": 1.0,
+   "noisy_gradient_cos03": 0.2999999999999999,
+   "needle_hit_rate": 0.0115
+  },
+  {
+   "d": 64,
+   "K": 16,
+   "isotropic": 0.21951041693007842,
+   "subspace_m8": 0.5991247842029793,
+   "gradient": 1.0,
+   "noisy_gradient_cos03": 0.2999999999999999,
+   "needle_hit_rate": 0.0
+  },
+  {
+   "d": 64,
+   "K": 256,
+   "isotropic": 0.3463650511617759,
+   "subspace_m8": 0.8313891788369553,
+   "gradient": 1.0,
+   "noisy_gradient_cos03": 0.2999999999999999,
+   "needle_hit_rate": 0.0
+  },
+  {
+   "d": 256,
+   "K": 16,
+   "isotropic": 0.11098674836338177,
+   "subspace_m8": 0.6005754259402297,
+   "gradient": 1.0,
+   "noisy_gradient_cos03": 0.2999999999999999,
+   "needle_hit_rate": null
+  },
+  {
+   "d": 256,
+   "K": 256,
+   "isotropic": 0.1759319559131858,
+   "subspace_m8": 0.8317336081745504,
+   "gradient": 1.0,
+   "noisy_gradient_cos03": 0.2999999999999999,
+   "needle_hit_rate": null
+  },
+  {
+   "d": 1024,
+   "K": 16,
+   "isotropic": 0.055296278211937916,
+   "subspace_m8": 0.5997840107112378,
+   "gradient": 1.0,
+   "noisy_gradient_cos03": 0.2999999999999999,
+   "needle_hit_rate": null
+  },
+  {
+   "d": 1024,
+   "K": 256,
+   "isotropic": 0.0880120688976569,
+   "subspace_m8": 0.829530198982116,
+   "gradient": 1.0,
+   "noisy_gradient_cos03": 0.2999999999999999,
+   "needle_hit_rate": null
+  }
+ ]
+}

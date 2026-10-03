@@ -88,6 +88,19 @@ These notes replace `src/tbt/EZV2_NOTES.md`, which `REWORK_PLAN.md` cites but wh
   32 imagined latent states per decision against MPPI's 9,216.
 - Over DreamerV3: better on 50 of 66 tasks.
 
+### Dimensionality — where the method is stretched (added 2026-10-03)
+
+- The paper frames high-dimensional continuous action spaces as THE problem (Intro; §4.1's first "pivotal
+  question"), and both search remedies — the widened prior `AS2` and the simple loss — are justified by it.
+- Largest action space tested: 12-D (DMControl Quadruped; actuator counts from DM Control's model files — cartpole,
+  pendulum, acrobot 1; reacher, finger, cup 2; hopper 4; cheetah, walker 6; quadruped 12). Humanoid (21-D) and dog
+  (38-D) are not in the benchmark.
+- Ablation (App. J.2, Tables 4–5): with Sample MuZero's MCTS instead of S-Gumbel search, Quadruped Walk falls
+  925.8 → 254.7 (proprio) and 433.3 → 141.4 (vision); Walker Run 657.2 → 381.1; 1-D Cartpole Swingup Sparse is
+  unchanged (795.4 → 789.3). The authors: S-Gumbel "significantly enhances performance in tasks with a
+  high-dimensional action space".
+- Quadruped is also where more simulations still help (Fig. 3) and where EZ-V2 trails TD-MPC2 (Run 510.6 vs 742.1).
+
 ## What it means for the Neural Turing Architecture (see `../BRAINSTORM.md` §3)
 
 - **The dynamics are exact here.** For thoughts, G is the network itself and the reward is the verifier at the end,
@@ -96,14 +109,12 @@ These notes replace `src/tbt/EZV2_NOTES.md`, which `REWORK_PLAN.md` cites but wh
   less. With short episodes, full rollouts to the verdict (Monte Carlo) are also affordable.
 - **What drops out by default:** `L_G` (temporal consistency) and `L_R` beyond the terminal reward. `L_G` returns
   if a cheap learned "thought dynamics" model is added to avoid running the full core at every search node.
-- **The action is much higher-dimensional.** EZ-V2's continuous actions are DMControl actuator vectors — small. A
-  thought is a d-dimensional vector (d = 64 … 1024). K = 16 Gaussian samples in hundreds of dimensions are nearly
-  orthogonal noise, and the improvement argument (eq 7) is only asymptotic. Three ways round it, each an arm worth
-  testing: (i) a LOW-dimensional action that steers the thought (`z = μ(h) + B(h)·u`, u ∈ ℝ^m with m ≈ 8–16);
-  (ii) thoughts as mixtures over a codebook, so the action is CATEGORICAL and Gumbel MuZero's exact discrete
-  guarantee applies — and the improved policy `π′`, used as mixture weights, is itself the thought (Soft Thinking's
-  "concept token", produced by search); (iii) the paper's own remedy for large action spaces, the simple loss
-  `−log p(a*_S)` (eq 9).
+- **The action is much higher-dimensional.** EZ-V2's continuous actions are at most 12-D. A thought is a
+  d-dimensional vector (d = 64 … 1024); best-of-16 Gaussian sampling recovers about 1.77/√d of a gradient step
+  (5–11% at thought dimensions), and the improvement argument (eq 7) is only asymptotic. Codebooks (a categorical
+  action) were ruled out on 2026-10-03 as not continuous; the continuous ways round it — gradient proposals, a
+  learned low-rank subspace, searching a few controls, population search — are
+  `../CURRICULUM_LESS_COCONUT_AND_SEARCH.md` §10.
 - **Reanalyse and priorities carry over directly:** a buffer of problems, re-searched with the current model;
   replay prioritised by Bellman error, which acts as a curriculum alongside the depth curriculum.
 - **Cost.** Each simulation is one more thought position through the looped core (incremental, with a k/v cache).
