@@ -11,9 +11,14 @@ extrapolation, and memory that can be OVERWRITTEN rather than only appended? (3)
 latent reasoning with no substitution curriculum and no human reasoning traces — "EfficientZero V2 for thoughts",
 GCML on the search side, Gemini's suggestions, and protection against collapse?
 
-**Standalone.** This is not ZipLearn. ZipLearn's DESIGN §18 rule 1 forbids exactly what thread (3) proposes — "no
-policy over thoughts" — so those rules do not bind here. What carries over is evidence: E26, E28, E30, E31, E41, E46
-and the `h1_lid.py` substrate.
+**Standalone.** ZipLearn is not proceeding (the user, 2026-10-03); this experiment builds this architecture. Nothing
+here depends on ZipLearn's machinery or rules (its DESIGN §18 forbade a "policy over thoughts", which thread (3)
+proposes). What carries over is evidence — E26, E28, E30, E31, E41, E46 — and possibly the `h1_lid.py` substrate.
+
+**Updated 2026-10-03 (later the same day):** the Spotlight post and Percepta's reference code were read in full
+(§2, `refs/spotlight_memory_percepta_2026.md`); the EfficientZero V2 paper was read in full
+(`refs/efficientzero_v2_2403.00564.md`); thread (3) now has its own planning document,
+`CURRICULUM_LESS_COCONUT_AND_SEARCH.md`, which supersedes §3 below where they differ.
 
 ## 0. The architecture as currently imagined
 
@@ -23,7 +28,7 @@ tokens ─► prelude ─► e   (the anchor)
            ┌─────────▼──────────────────────────┐
            │ core block(s), applied k = 1..K     │   DEPTH axis (Ouro, Chen et al.): refine the same positions
            │   input_k = route(e, h_1 … h_{k-1})  │   ← boundary operator and/or Block AttnRes      (§1)
-           │   reads/writes memory               │   ← attention today; Spotlight-like slots?      (§2)
+           │   reads/writes memory               │   ← attention today; Spotlight memory?          (§2)
            │   exit gate: stop refining?          │   ← Ouro two-stage gate
            └─────────┬──────────────────────────┘
                      ▼
@@ -41,13 +46,12 @@ one pass = one clock tick) with read/write access to a memory, learning to compu
 
 ## 1. Do Block Attention Residuals remove the need for the boundary operator?
 
-**Short answer: for the depth axis of a trained model, mostly yes. For the sequence axis, no. For a written brain,
-no.** Keep a thin boundary operator, and let attention residuals do the routing over a BOUNDED source set.
+**Short answer: for the depth axis, mostly yes. For the sequence axis, no.** Keep a thin boundary operator, and let
+attention residuals do the routing over a BOUNDED source set.
 
 **What the boundary operator does** (Chen et al.: BO(h, e) = RMSNorm(h) + α·e between passes). Two jobs: (a) bound
 the carried state's magnitude, so the stream does not grow with every pass; (b) re-inject the input every pass, the
-stability condition Geiping et al. argue for. In ZipLearn's written brains `BoundaryOp` also does (c): discrete error
-correction — quantise to one-hot, commit pred → state, clear scratch, halt.
+stability condition Geiping et al. argue for.
 
 **What Block AttnRes covers.** (a) A pass's input is a softmax-weighted, i.e. CONVEX, combination of its sources,
 so it cannot exceed the largest source; the AttnRes paper reports bounded, periodic magnitudes, each block boundary
@@ -55,7 +59,7 @@ resetting the accumulation. (b) The anchor is source 0, so re-injection is avail
 token by content. ZipLearn DESIGN §15 already calls the fixed `rms_norm(x) + α·anchor` "the one-source special
 case" — the anchor plus only the last pass, at fixed weights.
 
-**Where it falls short — six gaps.**
+**Where it falls short — five gaps.**
 
 1. *Re-injection becomes optional.* E30's trained routes let the anchor fade from 1.00 to 0.01 by pass 4. Geiping
    et al.'s argument says the input must enter every pass. Fading did not hurt at 2× passes in E30 — run at 8
@@ -72,10 +76,7 @@ case" — the anchor plus only the last pass, at fixed weights.
    embedding is untouched by it, and AttnRes passes VALUES raw (only the keys are normalised), so an over-large
    thought flows straight through. Coconut's c = 3 loss spikes and its unnormalised feedback are exactly this.
    That axis still needs a normaliser — RMSNorm on the fed-back thought, or the simplex projection of §3.5.
-5. *Written brains need discrete operations.* No softmax mix performs an argmax re-quantisation or a clear.
-   `h1_lid.LoopedModel` currently refuses `res="attnres"` together with `core_layers != 1` or a `BoundaryOp`
-   (`experiments/transformers/h1_lid.py:528`).
-6. *The two were never measured together.* Chen et al. measured the boundary operator; Kimi measured AttnRes (in a
+5. *The two were never measured together.* Chen et al. measured the boundary operator; Kimi measured AttnRes (in a
    non-looped model). They may be complementary — RMSNorm on the carried state plus content routing — or redundant.
    No one has said.
 
@@ -94,75 +95,86 @@ norm per pass, and the learned routes.
 
 ---
 
-## 2. A Spotlight-style memory in place of the attention layers
+## 2. Spotlight memory in place of the attention layers
 
-### 2.1 What is actually known — very little
+### 2.1 What it is — now read in full (`refs/spotlight_memory_percepta_2026.md`)
 
-The post itself could not be read from this session (percepta.ai is blocked here). From coverage only:
+Per head, keys and queries are given learned 2-D ADDRESSES on an unbounded lattice. A key WRITES the 3 × 3 cells
+around its address and a query READS the 3 × 3 around its own, weighted by a compact, normalised cos² bump, so that
+addresses receive gradients. A cell is allocated on its first write and holds a small recurrent state: in the
+trained models a d_k × d_v DeltaNet state per head (routing in 2-D; content inside the cell by the delta rule), and
+in the released hand-built VM a 2-vector updated by `S ← S + w·(v − α·S)`, with a write gate β and an erase factor α.
+Work per token is constant (9 cells per head); memory grows with what has been written; O(T) in total.
 
-- "separating intelligence from memory, allowing knowledge and skills to grow without changing the model's weights";
-- it replaces attention with an unbounded memory;
-- every token can read and write that memory by *learning to index the specific cells it needs*, and the number of
-  cells a token touches is constant however large the memory gets — explicitly contrasted with Mixture-of-Experts.
+Reported: near-perfect multi-query associative recall, including 131K pairs and keys OVERWRITTEN mid-sequence
+(stale-value rate zero) where attention returns stale values and Gated DeltaNet saturates; language-model loss at
+140M–670M close to Gated DeltaNet and below attention; 8K-trained models recall a needle at 128K at 93–100%
+(attention 0%, fixed-state ≤ 5.6%). Percepta also hand-built a MicroPython interpreter inside an 8-layer, d = 16
+Spotlight transformer (`percepta-ai/spotlight-vm`, Apache-2.0), with constant work per step over 47M-token traces.
 
-The same team (Tzamos et al.) published *Can LLMs be computers?* in March 2026: a WebAssembly interpreter compiled
-into a 7-layer, d = 36 transformer with 18 two-dimensional attention heads, decoded through "HullKVCache" in
-O(k + log n) per token. That is the closest thing to a mechanism we have.
+It has exactly the properties this brainstorm wanted — linear cost, extrapolation past the training length,
+memory that can be overwritten — and it is small: the reference read/write is about twenty lines of C.
 
-**Not known:** how an address is produced (a learned key matched against cell keys? a hash? a geometric query?),
-what a write does (overwrite, add, gated erase-then-write?), how cells are allocated and freed, how the discrete
-selection is trained, whether position enters at all, whether any attention remains (a hybrid?), and every number.
+### 2.2 The earlier guesses, scored
 
-### 2.2 Four known mechanisms that fit the stated properties
+Before the post could be read, this section listed four candidates. The answer combines two of them: learned
+low-dimensional addressing that selects a constant number of cells (product-key-like; Percepta's own 2-D heads),
+and a DeltaNet (delta-rule) state inside every cell. The earlier verdict "probably NOT a DeltaNet" was wrong — the
+DeltaNet is inside each cell; what is NOT DeltaNet-like is the growing, sparsely addressed collection of them.
+Sparse Access Memory (Rae et al. 2016) remains the closest ancestor in spirit.
 
-| candidate | read / write | fits | does not fit |
-|---|---|---|---|
-| **Sparse Access Memory** (Rae et al. 2016) | top-k cells by approximate nearest-neighbour search; writes go to the least-recently-used or just-read cells | constant k cells per step; read AND write; memory size decoupled from compute; trained end-to-end | its controller was an LSTM, not a transformer |
-| **Product-key addressing** (Lample 2019; Berges 2024) | split the query in two halves, top-k against two sets of √N sub-keys, combine: exact top-k of N in O(√N) | "learns to index specific cells"; the MoE comparison is the one memory-layer papers make | in memory layers the cells are PARAMETERS; Spotlight's cells must be per-sequence STATE written by tokens — a mutable variant nobody we found has published |
-| **Hull lookup** (Percepta's own HullKVCache, read through its name) | with 2-D keys, argmax_i q·k_i is attained at a vertex of the keys' convex hull, found by binary search in O(log n); writes = insert/delete points in a dynamic hull | same team; exact hard lookup; logarithmic | speculative — how that becomes "learned indexing" of an unbounded memory is not public |
-| **Delta-rule fast weights** (DeltaNet, Gated DeltaNet, Kimi Delta Attention; Titans) | a d×d matrix; each token erases the old value at its key and writes a new one | mutable; linear time; strong length extrapolation | fixed capacity, and every token touches the whole state — contradicts "constant cells however large the memory". Probably NOT Spotlight, but the strongest baseline for "mutable, linear-cost memory" |
-
-### 2.3 We already have mutable memory — on the depth axis
+### 2.3 We already had mutable memory — on the depth axis
 
 E46's Brainfuck interpreter keeps its tape as tokens and rewrites them IN PLACE every pass (`block B: write
 tape[dp] <- register`, a `Match` from the tape side). In a depth-looped model the positions are fixed and each pass
-rewrites their residuals: **the positions are a register file.** The "KV cache you can expand but cannot fix" problem
-exists only along the SEQUENCE axis, where thoughts and tokens append. Two costs remain: every pass attends over all
-T positions — O(T²) per pass, O(K·T²) per thought — and the memory's size is the context's size.
+rewrites their residuals: **the positions are a register file.** The "KV cache you can expand but cannot fix"
+problem exists only along the SEQUENCE axis. Spotlight is the same idea made sparse and growing, and moved to the
+sequence axis: each pass reads and writes 9 cells per head instead of attending over all T positions, and a thought
+can overwrite its own earlier notes. E41 is the thesis from the other side: byte-identical weights, a world model
+entirely in the context (an empty context scores 0.000) — "separate intelligence from memory".
 
-So, for this architecture, a Spotlight-like memory means two concrete changes: make each pass's read/write SPARSE (k
-cells, not T positions), and let the sequence axis WRITE INTO SLOTS instead of appending — a thought can then
-overwrite its own working notes. E41 is the same thesis from the other side: byte-identical weights, a world model
-that is entirely in the context (an empty context scores 0.000). "Separate intelligence from memory" is that
-result, made mutable and cheap.
+### 2.4 Where it sits in this architecture
 
-### 2.4 Where it would sit
+- **As the sequence mixer** inside the prelude, core and coda blocks, in place of self-attention. The AttnRes depth
+  mix (§1) stays: it attends over a handful of depth sources, not over the sequence, so it is not where the cost is.
+- **On the depth axis** each pass of each token writes, then reads. Design choice D1: (a) one lattice per (layer,
+  head) shared by every pass — natural with tied weights; passes communicate through memory; a later pass can
+  overwrite what an earlier pass of the same token wrote; (b) a separate table per pass (K× the cells); (c) memory
+  written only outside the core (prelude/coda), the core reading only.
+- **On the sequence axis** a thought costs O(1) — there is no growing cache — and the state of the thought process
+  lives partly in memory.
+- **For search** a node that adds one thought changes at most 9 · H · L cells, so forking is a copy-on-write overlay
+  (`CURRICULUM_LESS_COCONUT_AND_SEARCH.md` §2).
+- **Sharp vs smooth.** The VM's kernel (`cos²(πt/2)`, |t| < 1) makes an integer address exact RAM; the trained
+  kernel (`cos²(πt/3)`, |t| < 3/2) is smooth. One mechanism spans both regimes.
 
-Inside the core block, in place of self-attention: each pass reads k cells, computes, writes k cells. The AttnRes
-depth-mix STAYS — it is attention over a handful of depth sources, not over the sequence, so it is not where the
-cost is. Once thoughts write into slots, the action of §3 grows an address part: what to write AND where — the NTM
-controller in full.
+### 2.5 What the post leaves open — implementation questions
 
-### 2.5 Tests any memory candidate must pass (proposed: NTA-M)
+How addresses are parameterised and kept in range (raw linear projections in the VM); how training is parallelised
+(the per-token write-then-read is a recurrence — DeltaNet has chunked parallel forms, the sparse scatter complicates
+them; at our sizes a sequential scan may simply be acceptable); batched allocation on a GPU (a bounded grid per
+sequence, or hashing with collisions); gating or decay inside a cell; whether addresses need a regulariser to keep
+distinct keys apart (the post's routing figure shows matching queries and keys converging to shared cells while
+distinct keys spread apart — learned, with no explicit term mentioned).
 
-- **M1 — binding load beyond training.** Associative recall with m pairs, trained to m₀, tested to 8·m₀.
-  `experiments/binding_mqar.py` is a harness (it imports Mamba-3 from a local clone not in the repo — the mamba
-  clone is gitignored).
-- **M2 — overwrite.** A key-value stream with UPDATES; query the latest value. Append-only attention must learn
-  recency; a slot memory overwrites. The test Spotlight's "mutable" claim is about.
-- **M3 — a tape longer than trained.** Brainfuck programs (E46's generator, the 2609.30063 distribution) whose tape
-  grows past the training length.
-Arms: softmax attention; Gated DeltaNet; a SAM-style top-k slot memory; a product-key slot memory written per token.
+### 2.6 Tests (proposed: NTA-M)
 
-### 2.6 To learn what Spotlight really is
-
-Either add `percepta.ai` (and `arxiv.org`, which also blocked this session) to the cloud environment's allowed
-domains, or save the post's text into this folder (e.g. `sources/spotlight_memory.md`). Then §2.1–2.2 get
-reconciled against it.
+- **M0 — understand the reference.** Build and run `spotlight-vm` (C, one CPU core) and check our reading of its
+  read/write against it. Then validate our own trainable implementation on Percepta's published MQAR behaviour
+  (extrapolation from ≤ 64 to 256 pairs; the overwrite variant) before using it for anything else.
+- **M1 — binding load beyond training** (Zoology's MQAR protocol; `experiments/binding_mqar.py` is a harness, though
+  it imports Mamba-3 from a gitignored local clone).
+- **M2 — overwrite:** a key–value stream with updates; query the latest value.
+- **M3 — a tape longer than trained:** Brainfuck programs (the E46 generator) whose tape grows past training length.
+Arms: softmax attention; Gated DeltaNet; Spotlight.
 
 ---
 
 ## 3. Discovering latent reasoning with no curriculum and no traces
+
+The first pass at this thread. It continues in `CURRICULUM_LESS_COCONUT_AND_SEARCH.md`, which works out the
+thought space, the search algorithm, exploration, cost and the experiment order, and supersedes this section where
+they differ.
 
 ### 3.1 What Coconut's curriculum was really supplying
 
@@ -189,9 +201,11 @@ changes as the policy trains.
 
 ### 3.3 What transfers from EfficientZero V2
 
-- **Gaussian policy over a continuous action + sampling-based Gumbel search** — candidates sampled from π(z | s),
-  Gumbel-top-k + sequential halving; policy improvement is guaranteed even with a handful of simulations, and EZ-V2
-  shows the guarantee holds for continuous actions. This is the core import.
+- **Gaussian policy over a continuous action + sampling-based Gumbel search** — root candidates sampled from π(z | s)
+  and from a flattened copy of it (for exploration), Sequential Halving to pick among them. In the discrete case
+  (Gumbel MuZero) policy improvement is guaranteed at any budget; in EZ-V2's continuous case the argument holds only
+  as the number of policy samples grows (their eq. 7) — and a thought is far higher-dimensional than EZ-V2's
+  actuator vectors. That is why the planning document prefers a codebook (discrete) thought space for search.
 - **Search-based value estimation** — the root's empirical mean as the value target; makes early, stale data usable.
 - **Reanalyse** — with exact dynamics, old problems can be re-searched with the current model at any time.
 - **Not needed by default:** the learned representation/dynamics, the value prefix and the SimSiam consistency
@@ -221,9 +235,9 @@ changes as the policy trains.
 | 1 | **Stochastic latent emissions**: the head outputs μ_t, log σ_t; z_t = μ_t + ε ⊙ σ_t | **keep** | It is EZ-V2's continuous policy. Soft Tokens, Hard Truths shows noise on the fed-back embedding is enough exploration for RL (RLOO) at 8B with no reference CoT — the simplest baseline arm. |
 | 2 | **Pathwise gradients via reparameterisation**: terminal rewards backpropagate into μ, σ "without REINFORCE's variance" | **keep only with a critic** | A terminal reward is a verifier's verdict — not differentiable in z. Reparameterisation needs a differentiable path: a learned V/Q (as in SAC) or a learned model (as in Dreamer). Then the policy will EXPLOIT the critic's errors, pushing z to where V is wrongly high — a second kind of drift. Ground it with real (exact) rollouts and the verifier. (The answer's log-likelihood IS differentiable through the thoughts — that is Coconut's loss, and alone it did not learn without the curriculum.) |
 | 3 | **Information bottleneck**: D_KL(q(z_t \| h_t) ‖ N(0, I)) | **modify** | A per-sample KL to a fixed prior pushes every thought toward the prior — posterior collapse, thoughts that carry nothing — the very failure to avoid. Magnitude control is better done by normalisation (§1, gap 4). If a KL is wanted: free bits. Better: regularise the AGGREGATE distribution of thoughts (LeJEPA's SIGReg, or WAE-style), which prevents dimensional collapse without making each thought uninformative. |
-| 4 | **Soft-embedding simplex projection**: z_t = softmax(W_p h_t / τ) · E, τ annealed from high to low | **keep, re-motivated** | "Drift from the pretrained semantic manifold" is a problem of adapting a pretrained LM; this experiment trains from scratch (or from a written brain), so that motivation is weak. The real benefits: bounded magnitude for free (the convex hull of the codebook), legibility (a thought is a readable distribution), and **τ → 0 is exactly the written `BoundaryOp`'s Quantise** (argmax → one-hot) — the trained and the written forms of one operator. Gumbel-softmax gives it stochasticity and reparameterisation together. Soft Thinking (training-free) and Soft Tokens, Hard Truths (RL) are the evidence. Cost: thoughts limited to the hull of the codebook — test a learned codebook against the token embeddings. |
+| 4 | **Soft-embedding simplex projection**: z_t = softmax(W_p h_t / τ) · E, τ annealed from high to low | **keep, re-motivated** | "Drift from the pretrained semantic manifold" is a problem of adapting a pretrained LM; if this experiment trains from scratch, that motivation is weak. The real benefits: bounded magnitude for free (the convex hull of the codebook), legibility (a thought is a readable distribution), τ → 0 gives hard one-hot thoughts (discrete, decodable), and a codebook makes the SEARCH discrete, where its improvement guarantee is exact (planning doc §3). Gumbel-softmax gives it stochasticity and reparameterisation together. Soft Thinking (training-free) and Soft Tokens, Hard Truths (RL) are the evidence. Cost: thoughts limited to the hull of the codebook — test a learned codebook against the token embeddings. |
 | 5 | **JEPA-style state prediction**: thoughts must predict representations of future task-relevant observations | **keep for environments; probe only otherwise** | In a game, "the thought predicts the embedding of the next observation" IS EfficientZero's temporal-consistency loss (stop-gradient target) and SPR. For pure reasoning tasks the only "future observations" are execution states, which is trace supervision by another name. Use them to PROBE (can the tape be decoded from the thoughts?), not as a training target, in the main arm. |
-| 6 | **Curriculum by circuit depth**, a learned continue/halt token, reward 0 when too few steps, a λ·K penalty | **keep — already in ZipLearn DESIGN §18.2** | The two-dimensional frontier (length × depth) and "depth as a speed prior" are recorded there. Concrete generator: E46's Brainfuck programs (steps per output byte = the depth a problem needs); or a self-play generator (2609.30063) scored by the learner's progress. The penalty schedule matters: λ·K from step 0 collapses to K = 0 — use Ouro's two stages (entropy-regularised exit distribution first, then tune the gate on realised gains). "Reward 0 at K = 0" needs no engineering: on problems deeper than the network it happens by itself. |
+| 6 | **Curriculum by circuit depth**, a learned continue/halt token, reward 0 when too few steps, a λ·K penalty | **keep** — the same idea is recorded in ZipLearn DESIGN §18.2 | The two-dimensional frontier (length × depth) and "depth as a speed prior". As a curriculum over PROBLEM difficulty it does not conflict with "no substitution curriculum". Concrete generator: E46's Brainfuck programs (steps per output byte = the depth a problem needs); or a self-play generator (2609.30063) scored by the learner's progress. The penalty schedule matters: λ·K from step 0 collapses to K = 0 — use Ouro's two stages (entropy-regularised exit distribution first, then tune the gate on realised gains). "Reward 0 at K = 0" needs no engineering: on problems deeper than the network it happens by itself. |
 
 ### 3.6 Collapse modes, and what guards each
 
@@ -250,27 +264,25 @@ changes as the policy trains.
 ## 4. First experiments, if we build this (proposals, not pre-registrations yet)
 
 - **NTA-Q1** — attention residuals vs the boundary operator in a loop (§1).
-- **NTA-0 — is a thought ever necessary?** A task family where a K = 0, fixed-depth model provably fails (pointer
-  chasing with more hops than layers; Brainfuck outputs needing more steps than passes). Arms: no thoughts; Coconut
-  feedback with noise trained by RLOO (the Soft Tokens, Hard Truths recipe — the literature's baseline). Measured:
-  accuracy against hops; the thought ablation of §3.6. Pass: the thought arm solves hop counts the no-thought arm
-  cannot, and the ablation destroys it.
-- **NTA-1 — does search beat sampling?** Sampling-based Gumbel search over thoughts (EZ-V2-style) against RLOO,
-  at an EQUAL number of forward passes. Pass: deeper problems solved at the same compute. Refute: no difference.
-- **NTA-M** — the memory tests of §2.5.
+- **The thinking experiments (P0–P5)** — the task family and its no-thought ceiling, the baselines (including
+  Coconut's BPTT-only negative result), Gumbel thought search, the continuous arm, halting, amortised vs test-time
+  search: `CURRICULUM_LESS_COCONUT_AND_SEARCH.md` §7.
+- **NTA-M** — the memory tests of §2.6.
 
 ---
 
 ## 5. Decisions for the user
 
-1. **Starting point.** From scratch on synthetic tasks, from a BrainBuilder-written brain (the E46 interpreter as
-   initial weights — ZipLearn §21.8's gradient-compatibility clause), or from a small pretrained LM? This decides
-   whether "semantic drift" (Gemini #4's motivation) is a real problem.
+1. **Starting point.** From scratch on synthetic tasks, or from a small pretrained LM? This decides whether
+   "semantic drift" (Gemini #4's motivation) is a real problem.
 2. **Outcome-only, or are machine execution states allowed** as an auxiliary signal (Gemini #5)? "No human text
    traces" rules out human traces; it does not by itself rule out a Brainfuck tape.
 3. **Task suite priority:** Brainfuck (E46 generator), pointer chasing / parity / graph connectivity, the ARC
    replica games, or a mix.
-4. **Spotlight:** allow `percepta.ai` in the cloud environment, or paste the post into this folder.
-5. **EfficientZero V2 notes:** `src/tbt/EZV2_NOTES.md` and the PDF are not in the pushed repo; push them if they
-   exist locally.
-6. **Code:** a self-contained model file in this folder, or import `experiments/transformers/h1_lid.py`?
+4. **Sequence mixer:** start with attention (simplest, known) and swap in Spotlight once NTA-M validates our
+   implementation — or build on Spotlight from the start?
+5. **Code:** a self-contained model file in this folder, or import `experiments/transformers/h1_lid.py`?
+6. The planning document's own questions: `CURRICULUM_LESS_COCONUT_AND_SEARCH.md` §9.
+
+(Resolved 2026-10-03: the Spotlight post and code were read once the network allowed it; the EfficientZero V2
+notes were re-made from the paper as `refs/efficientzero_v2_2403.00564.md`.)
