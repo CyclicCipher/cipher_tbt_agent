@@ -51,9 +51,15 @@ def main(paths):
             else:
                 row += " — |"
             print(row)
-        for mode in ws[0]["planners"]:
-            names = list(ws[0]["planners"][mode])
-            print(f"planners [{mode}]: " + ", ".join(f"{n} {mean([w['planners'][mode][n] for w in ws]):.2f}" for n in names))
+        for key in ("planners", "planners_explored"):
+            if key not in ws[0]:
+                continue
+            if key == "planners_explored":
+                print("explored planner model: " + ", ".join(
+                    f"{n} ×{c}" for n, c in Counter(w["planner_model_explored"] for w in ws).items()))
+            for mode in ws[0][key]:
+                names = list(ws[0][key][mode])
+                print(f"{key} [{mode}]: " + ", ".join(f"{n} {mean([w[key][mode][n] for w in ws]):.2f}" for n in names))
 
 
 if __name__ == "__main__":

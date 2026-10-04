@@ -14,7 +14,8 @@ problems per goal mode (heading: "pos" and "any"), budgets 64 / 256: `gcml_greed
 explores with its OWN prototype thoughts from every node (N·K transitions -- the protocol of the random-thought data,
 with the learned repertoire in place of isotropic noise; no labels) and is refitted on everything; the explored models
 get the same measurements and their own planner block; also fitted: a "gated additive" model (every operator the
-identity -- the additive form made fair to continuous thoughts).
+identity -- the additive form made fair to continuous thoughts). `--emp_sr` (with --explore): the explored planners
+again, with the SR metric ESTIMATED from the exploration transitions instead of computed from the true graph.
     python experiments/neural_turing_architecture/search_bench/run_operator.py --worlds heading --d 64 256 --seeds 6 --out runs/operator_heading.json
 """
 from __future__ import annotations
@@ -43,6 +44,16 @@ from run_geometry import run_algo, r2  # noqa: E402
 
 SHAPE = {"grid": (64, 4), "heading": (256, 6), "perm": (120, 4)}
 M_TRUE = {"grid": 2, "heading": 4, "perm": 4}
+def empirical_sr(T, gamma=0.9, dim=16):
+    """The SR eigenmap of an ESTIMATED transition matrix (rows: where the model's own prototype thoughts took the
+    walker from each node, averaged over prototypes) -- the world's "sr" construction, from the agent's own
+    exploration instead of the true graph."""
+    N = T.shape[0]
+    M = torch.linalg.inv(torch.eye(N) - gamma * T)
+    ev, U = torch.linalg.eigh((M + M.T) / 2)
+    return (U[:, -dim:] * ev[-dim:].clamp_min(0).sqrt()).contiguous()
+
+
 PLANNERS = ["gcml_greedy", "op_look_own", "op_look_sr", "sim_look_sr", "grad_greedy", "mcts_hybrid"]
 
 
@@ -91,6 +102,7 @@ def job(a):
             r["prototypes"] = prototype_report(t0, mod)
         out["models"][name] = r
     learned = [n for n in models if n.startswith("operator m=")]
+    emp_sr = {}
     if o["explore"]:                                                  # the fair additive baseline for thoughts, too
         ga = OperatorModel(N, d, M_TRUE[world_type], K=o["K"], additive=True).fit(X, Z, X2, steps=o["steps"], seed=world)
         acc, acc_clean = path_integration(t0, ga.E, ga.predict, torch.Generator().manual_seed(world))
@@ -108,6 +120,7 @@ def job(a):
             Xa, Za, X2a = torch.cat([X, Xe]), torch.cat([Z, Ze]), torch.cat([X2, X2e])
             ex = OperatorModel(N, d, mod.m, K=o["K"]).fit(Xa, Za, X2a, steps=o["steps"], seed=world)
             name = n.replace("operator", "explored")
+            emp_sr[name] = empirical_sr(X2e[:, :N].reshape(o["K"], N, N).mean(0))  # from these exploration transitions
             models[name] = ex
             acc, acc_clean = path_integration(t0, ex.E, ex.predict, torch.Generator().manual_seed(world))
             r = dict(m=mod.m, held_unexplained=ex.unexplained(Xh, Zh, X2h), pi=acc, pi_clean=acc_clean,
@@ -121,13 +134,19 @@ def job(a):
     blocks = [("planners", learned)]
     if o["explore"]:
         blocks.append(("planners_explored", [n.replace("operator", "explored") for n in learned]))
+    if o["explore"] and o["emp_sr"]:
+        blocks.append(("planners_explored_empsr", [n.replace("operator", "explored") for n in learned]))
     for key, pool in blocks:
         best = min(pool, key=lambda n: out["models"][n]["held_unexplained"])
         out["planner_model" if key == "planners" else "planner_model_explored"] = best
+        if key == "planners_explored_empsr":
+            out["empsr_r2"] = r2(emp_sr[best], t0.codes["sr"])           # how close to the true graph's SR
         out[key] = {}
         for mode in modes:
             res = {}
-            for name in (PLANNERS if key == "planners" else ["op_look_own", "op_look_sr", "sim_look_sr"]):
+            names = {"planners": PLANNERS, "planners_explored": ["op_look_own", "op_look_sr", "sim_look_sr"],
+                     "planners_explored_empsr": ["op_look_sr", "sim_look_sr"]}[key]
+            for name in names:
                 for B in o["budgets"]:
                     if name == "mcts_hybrid" and B != max(o["budgets"]):
                         continue
@@ -135,7 +154,8 @@ def job(a):
                     for j in range(o["n_test"]):
                         ps = world * 1000 + 500 + j
                         t = make(ps, mode)
-                        t.opm, t.metric = models[best], t.codes["sr"]
+                        t.opm = models[best]
+                        t.metric = emp_sr[best] if key == "planners_explored_empsr" else t.codes["sr"]
                         t.inv, t.inv_code = {"lin": W}, "add"
                         hits += run_algo(t, name, B, ps * 13 + B)
                     res[f"{name}@{B}"] = hits / o["n_test"]
@@ -160,6 +180,7 @@ def main():
     ap.add_argument("--steps", type=int, default=3000)
     ap.add_argument("--budgets", type=int, nargs="+", default=[64, 256])
     ap.add_argument("--explore", action="store_true")
+    ap.add_argument("--emp_sr", action="store_true")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--out", default="")
     a = ap.parse_args()
