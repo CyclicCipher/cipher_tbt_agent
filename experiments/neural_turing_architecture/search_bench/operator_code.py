@@ -24,8 +24,11 @@ from matrix_code import whiten
 
 
 class OperatorModel:
-    def __init__(self, N, d, m, K=8):
-        self.N, self.d, self.m, self.K = N, d, m, K
+    """`additive=True` fixes every M_k to the identity: a gated mixture of TRANSLATIONS -- GCML's additive form made fair
+    to continuous thoughts (a thought's effect is a softmax function of z, which no c + V·z can follow)."""
+
+    def __init__(self, N, d, m, K=8, additive=False):
+        self.N, self.d, self.m, self.K, self.additive = N, d, m, K, additive
 
     def fit(self, X, Z, X2, E_fixed=None, steps=3000, lr=0.01, restarts=2, seed=0):
         N, d, m, K = self.N, self.d, self.m, self.K
@@ -36,9 +39,10 @@ class OperatorModel:
             Eraw = (E_fixed.clone() if E_fixed is not None else torch.randn(N, m, generator=g)).requires_grad_(E_fixed is None)
             G = (0.1 * torch.randn(K, d, generator=g)).requires_grad_(True)
             a = torch.zeros(K, requires_grad=True)
-            A = (0.01 * torch.randn(K, m, m, generator=g)).requires_grad_(True)
+            A = (0.0 if self.additive else 0.01) * torch.randn(K, m, m, generator=g)
+            A.requires_grad_(not self.additive)
             b = torch.zeros(K, m, requires_grad=True)
-            opt = torch.optim.Adam([G, a, A, b] + ([Eraw] if E_fixed is None else []), lr=lr)
+            opt = torch.optim.Adam([G, a, b] + ([] if self.additive else [A]) + ([Eraw] if E_fixed is None else []), lr=lr)
             for _ in range(steps):
                 E = Eraw if E_fixed is not None else whiten(Eraw)
                 loss = self._loss(E, G, a, torch.eye(m) + A, b, p, zu, p2)

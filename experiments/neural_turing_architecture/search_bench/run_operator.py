@@ -10,6 +10,11 @@ learned. Measured per model: held-out unexplained share of the code's change, pa
 problems per goal mode (heading: "pos" and "any"), budgets 64 / 256: `gcml_greedy` on the additive code (tier 0),
 `op_look_own`, `op_look_sr`, `sim_look_sr` (the operator code at the m with the lowest held-out error), `grad_greedy`,
 `mcts_hybrid`.
+`--explore` (an exploratory follow-up, §18.5, not pre-registered): after the first fit, each learned operator model
+explores with its OWN prototype thoughts from every node (N·K transitions -- the protocol of the random-thought data,
+with the learned repertoire in place of isotropic noise; no labels) and is refitted on everything; the explored models
+get the same measurements and their own planner block; also fitted: a "gated additive" model (every operator the
+identity -- the additive form made fair to continuous thoughts).
     python experiments/neural_turing_architecture/search_bench/run_operator.py --worlds heading --d 64 256 --seeds 6 --out runs/operator_heading.json
 """
 from __future__ import annotations
@@ -71,7 +76,7 @@ def job(a):
     Ec = whiten(constructed(world_type, t0))
     models["operator, constructed code"] = OperatorModel(N, d, Ec.shape[1], K=o["K"]).fit(X, Z, X2, E_fixed=Ec,
                                                                                           steps=o["steps"], seed=world)
-    out = dict(world_type=world_type, d=d, world=world, n_transitions=int(X.shape[0]), models={}, planners={})
+    out = dict(world_type=world_type, d=d, world=world, n_transitions=int(X.shape[0]), models={})
     for name, mod in models.items():
         E = mod.E
         held = (mod.unexplained(Xh, Zh, X2h) if isinstance(mod, OperatorModel) else
@@ -86,25 +91,55 @@ def job(a):
             r["prototypes"] = prototype_report(t0, mod)
         out["models"][name] = r
     learned = [n for n in models if n.startswith("operator m=")]
-    best = min(learned, key=lambda n: out["models"][n]["held_unexplained"])
-    out["planner_model"] = best
+    if o["explore"]:                                                  # the fair additive baseline for thoughts, too
+        ga = OperatorModel(N, d, M_TRUE[world_type], K=o["K"], additive=True).fit(X, Z, X2, steps=o["steps"], seed=world)
+        acc, acc_clean = path_integration(t0, ga.E, ga.predict, torch.Generator().manual_seed(world))
+        r = dict(m=ga.m, held_unexplained=ga.unexplained(Xh, Zh, X2h), pi=acc, pi_clean=acc_clean,
+                 train_unexplained=ga.train_unexplained, prototypes=prototype_report(t0, ga))
+        if world_type == "heading":
+            r["r2"] = {"position": r2(ga.E, t0.xy), "heading": r2(ga.E, t0.codes["allo"][:, 2:])}
+        out["models"]["gated additive"] = r
+        for n in learned:
+            mod = models[n]
+            Xe = t0.onehot(torch.arange(N)).repeat(o["K"], 1)
+            Ze = mod.protos.repeat_interleave(N, 0)
+            with torch.no_grad():
+                X2e = t0.step(Xe, Ze)
+            Xa, Za, X2a = torch.cat([X, Xe]), torch.cat([Z, Ze]), torch.cat([X2, X2e])
+            ex = OperatorModel(N, d, mod.m, K=o["K"]).fit(Xa, Za, X2a, steps=o["steps"], seed=world)
+            name = n.replace("operator", "explored")
+            models[name] = ex
+            acc, acc_clean = path_integration(t0, ex.E, ex.predict, torch.Generator().manual_seed(world))
+            r = dict(m=mod.m, held_unexplained=ex.unexplained(Xh, Zh, X2h), pi=acc, pi_clean=acc_clean,
+                     train_unexplained=ex.train_unexplained, prototypes=prototype_report(t0, ex),
+                     explore_steps=int(Xe.shape[0]))
+            if world_type == "heading":
+                r["r2"] = {"position": r2(ex.E, t0.xy), "heading": r2(ex.E, t0.codes["allo"][:, 2:])}
+            out["models"][name] = r
     W = InverseModel("ridge", "add").fit(t0, X, Z, X2)
     modes = ("pos", "any") if world_type == "heading" else ("any",)
-    for mode in modes:
-        res = {}
-        for name in PLANNERS:
-            for B in o["budgets"]:
-                if name == "mcts_hybrid" and B != max(o["budgets"]):
-                    continue
-                hits = 0
-                for j in range(o["n_test"]):
-                    ps = world * 1000 + 500 + j
-                    t = make(ps, mode)
-                    t.opm, t.metric = models[best], t.codes["sr"]
-                    t.inv, t.inv_code = {"lin": W}, "add"
-                    hits += run_algo(t, name, B, ps * 13 + B)
-                res[f"{name}@{B}"] = hits / o["n_test"]
-        out["planners"][mode] = res
+    blocks = [("planners", learned)]
+    if o["explore"]:
+        blocks.append(("planners_explored", [n.replace("operator", "explored") for n in learned]))
+    for key, pool in blocks:
+        best = min(pool, key=lambda n: out["models"][n]["held_unexplained"])
+        out["planner_model" if key == "planners" else "planner_model_explored"] = best
+        out[key] = {}
+        for mode in modes:
+            res = {}
+            for name in (PLANNERS if key == "planners" else ["op_look_own", "op_look_sr", "sim_look_sr"]):
+                for B in o["budgets"]:
+                    if name == "mcts_hybrid" and B != max(o["budgets"]):
+                        continue
+                    hits = 0
+                    for j in range(o["n_test"]):
+                        ps = world * 1000 + 500 + j
+                        t = make(ps, mode)
+                        t.opm, t.metric = models[best], t.codes["sr"]
+                        t.inv, t.inv_code = {"lin": W}, "add"
+                        hits += run_algo(t, name, B, ps * 13 + B)
+                    res[f"{name}@{B}"] = hits / o["n_test"]
+            out[key][mode] = res
     out["secs"] = round(time.time() - t1, 1)
     return out
 
@@ -124,6 +159,7 @@ def main():
     ap.add_argument("--K", type=int, default=8)
     ap.add_argument("--steps", type=int, default=3000)
     ap.add_argument("--budgets", type=int, nargs="+", default=[64, 256])
+    ap.add_argument("--explore", action="store_true")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--out", default="")
     a = ap.parse_args()
