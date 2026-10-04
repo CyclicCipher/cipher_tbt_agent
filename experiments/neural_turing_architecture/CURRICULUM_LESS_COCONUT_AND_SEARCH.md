@@ -1190,6 +1190,9 @@ gradient search solved S₅ problems where every GCML variant failed (§15).
 | 2 | any group | matrix code: actions multiply the code | one-step lookahead in the code (k predictions per step); locally, transport (continuous groups) | k matrix products |
 | 3 | discrete and non-commuting, no cheap metric (permutation puzzles) | any | search; learned macros that act on few parts | a search |
 
+*(Revised in §18.6: tier 3's "no cheap planner" holds at scale — S₅ at 120 states yields to lookahead with a learned
+metric.)*
+
 Measurement decides the tier per domain: tier 0 by the k-step probe (§13.4); tier 1 by the same probe with W gated by
 a candidate factor; tier 2 by path integration in a matrix code; what fails all three is tier 3. Each tier keeps the
 lower ones as special cases, and search (tier 3) stays the fallback everywhere (§14).
@@ -1400,3 +1403,130 @@ lowest held-out prediction error (chosen without looking at planning results).
 *Refuted if:* no operator code can be learned from thoughts (O1 and O2 fail on the heading world — then tier 2 needs
 action labels, which a thinking network does not have); or operator lookahead does not beat tier 0 on the heading world
 (O3).
+
+### 18.4 Results — the pre-registered test (run 2026-10-04)
+
+Code: `search_bench/operator_code.py` (the model, its measurements, the planners), `run_operator.py`,
+`summarize_operator.py`; data `search_bench/runs/operator_{grid,heading,perm}.json` (6 worlds per world type and d).
+About 2.5 hours on 4 CPU cores with the follow-ups of §18.5, most of it fitting.
+
+Path integration along key-thought walks (wall-free, decoding accuracy after 8 predicted steps; mean over 6 worlds),
+the learned operator code at its best m, against the references:
+
+| world | d | additive (c + V·z) | learned operator code | operator model on the CONSTRUCTED code |
+|---|---|---|---|---|
+| grid | 64 / 256 | 0.12 / 0.13 | 0.42 / 0.27 | 0.55 / 0.70 |
+| heading | 64 / 256 | 0.01 / 0.01 | ≤ 0.01 / ≤ 0.01 | 0.54 / 0.67 |
+| S₅ | 64 / 256 | 0.01 / 0.02 | 0.36 / 0.02 | 0.91 / 0.91 |
+
+Held-out prediction of the learned operator codes is unstable — unexplained share 0.03–5.34 (above 1 means worse than
+predicting no change) — while on the constructed codes it is 0.00–0.26. On the heading world no learned operator code
+holds position or heading (R² ≤ 0.06). The GATE, though, is learned in every case: on average 4–6 of its 8 prototype thoughts move
+the real walker, with 0.81–0.95 of the moved mass on one edge. Learning which thoughts are which actions works;
+learning the code from this data does not.
+
+Planner success at budget 64 / 256 (6 held-out problems × 6 worlds per cell):
+
+| planner | grid d=64 | grid d=256 | heading "pos" d=64 | heading "pos" d=256 | heading "any" d=64 / 256 (at 256) | S₅ d=64 | S₅ d=256 |
+|---|---|---|---|---|---|---|---|
+| tier 0: `gcml_greedy`, additive code | 0.61 / 0.75 | 0.47 / 0.58 | 0.03 / 0.03 | 0.06 / 0.06 | 0.08 / 0.03 | 0.00 / 0.00 | 0.00 / 0.00 |
+| `op_look_own` | 0.08 / 0.39 | 0.22 / 0.47 | 0.03 / 0.08 | 0.03 / 0.14 | 0.19 / 0.22 | 0.06 / 0.11 | 0.00 / 0.06 |
+| `op_look_sr` | 0.58 / 0.75 | 0.67 / 0.72 | 0.00 / 0.03 | 0.03 / 0.03 | 0.14 / 0.11 | 0.42 / 0.64 | 0.06 / 0.17 |
+| `sim_look_sr` (true dynamics) | **1.00 / 1.00** | **0.92 / 0.94** | **0.69 / 0.78** | **0.61 / 0.67** | **0.94 / 0.92** | **0.89 / 0.92** | **0.53 / 0.64** |
+| `grad_greedy` | 0.50 / 0.69 | 0.31 / 0.72 | 0.11 / 0.47 | 0.22 / 0.47 | 0.53 / 0.47 | 0.19 / 0.53 | 0.22 / 0.39 |
+| `mcts_hybrid` (256 only) | 0.78 | 0.72 | 0.58 | 0.61 | 0.58 / 0.50 | 0.50 | 0.50 |
+
+**Against the pre-registration (§18.3):**
+- **O1 — learnable without labels: FAILED.** The learned operator code at m = 4 holds neither position nor heading
+  (R² ≤ 0.02 in every world). (The additive code holds no heading: R² 0.02–0.11, ≤ 0.1 in 11 of 12 worlds.)
+- **O2 — path integration: FAILED** for the operator codes (best: grid 0.27–0.42, heading ≤ 0.01, S₅ 0.02–0.36) and for
+  the additive code on the grid (0.12–0.13, predicted ≥ 0.8 — see below); held for the additive code on the heading
+  world and S₅ (≤ 0.02).
+- **O3 — operator lookahead beats tier 0 on the heading world: FAILED** (`op_look_sr` 0.00–0.03 on "pos" goals).
+- **O4 — at least `grad_greedy` at budget 64: HELD on the grid** (0.58 vs 0.50; 0.67 vs 0.31), failed on the heading
+  world.
+- **O5 — the metric matters: HELD.** On the grid the code's own distance gives 0.08–0.47, the SR distance 0.58–0.75.
+- **O6 — S₅ stays with search: PARTLY.** `sim_look_sr` beats `op_look_sr` at both d, but `op_look_sr` reaches 0.64
+  at d = 64 (≤ 0.3 predicted); 0.17 at d = 256.
+- **Refutation criteria: MET.** No operator code was learned from these thoughts on the heading world (O1 and O2 fail
+  there), and operator lookahead did not beat tier 0 there (O3). As pre-registered, that reads: tier 2, learned this way,
+  needs something a thinking network does not have — and §18.5 asks what.
+
+One prediction failed for a reason outside the question: the additive baseline `c′ = c + V·z` cannot follow a thought
+whose effect is a SOFTMAX function of z (it moves the walker only once it points at an edge), so it path-integrates
+poorly even on the grid. The fair additive form for thoughts is a gated mixture of TRANSLATIONS (the operator model
+with every operator the identity) — added in §18.5.
+
+### 18.5 Follow-up (exploratory, not pre-registered): explore with the learned repertoire, then refit
+
+The learned gate works even where the code fails, so the model can EXPLORE with its own prototype thoughts: from every
+node, each prototype once (N·K transitions — the protocol of the random-thought data, with the learned repertoire in
+place of isotropic noise; 512 / 2,048 / 960 thought-steps for the grid / heading world / S₅, once per world; no labels),
+then refit on everything. Same worlds, same seeds (`--explore`; the base results in these reruns are bit-identical to
+§18.4's).
+
+| world | d | learned, base → after exploration (path integration k = 8, wall-free, m = 16) | held-out unexplained after | gated additive (fair tier 0) | constructed |
+|---|---|---|---|---|---|
+| grid | 64 / 256 | 0.42 → **0.72** / 0.27 → **0.62** | 0.01–0.04 / 0.03–0.24 | 0.78 / 0.46 | 0.55 / 0.70 |
+| heading | 64 / 256 | 0.01 → 0.25 / 0.01 → 0.33 | 0.04–0.10 / 0.04–0.11 | 0.04 / 0.01 | 0.54 / 0.67 |
+| S₅ | 64 / 256 | 0.36 → **0.85** / 0.02 → **0.91** | 0.01–0.04 / 0.01–0.03 | 0.02 / 0.01 | 0.91 / 0.91 |
+
+- On S₅ the explored code path-integrates as well as the constructed one, and its gate finds exactly the 4 generators
+  (4.0 of 8 prototypes move, with 1.00 of the moved mass on one edge). On the heading world exploration helps but
+  unevenly: some worlds recover the factored structure (R² up to 0.99 for position and for heading), others not.
+- The fair additive form (gated translations) path-integrates the grid (0.46–0.78) and fails on the heading world and
+  S₅ (≤ 0.04) — §17's tier-0 limit, reproduced for continuous thoughts.
+- Planners with the explored code (budget 64 / 256):
+
+| planner | grid d=64 | grid d=256 | heading "pos" d=64 | heading "pos" d=256 | heading "any" d=64 / 256 (at 256) | S₅ d=64 | S₅ d=256 |
+|---|---|---|---|---|---|---|---|
+| `op_look_own` | 0.17 / 0.36 | 0.22 / 0.42 | 0.14 / 0.22 | 0.11 / 0.25 | 0.25 / 0.44 | 0.00 / 0.03 | 0.03 / 0.08 |
+| `op_look_sr` | **0.86 / 0.94** | **0.83 / 0.94** | 0.36 / 0.53 | 0.58 / 0.67 | 0.64 / 0.64 | **0.89 / 1.00** | **1.00 / 1.00** |
+| `sim_look_sr` | 1.00 / 1.00 | 1.00 / 1.00 | 0.78 / 0.83 | 0.89 / 0.92 | 0.94 / 1.00 | 0.92 / 0.94 | 0.94 / 1.00 |
+
+  After exploration, lookahead in the learned operator code — no simulation, one thought-step per step — solves
+  0.83–1.00 of grid and S₅ problems at budget 64, above `mcts_hybrid` at four times the budget (0.50–0.78); on the
+  heading world 0.36–0.58 at 64 and 0.53–0.67 at 256, below `mcts_hybrid` (0.50–0.61) in three of four cells. The code's
+  own distance stays poor (0.00–0.44): the metric has to come from elsewhere.
+- **The metric can be learned from the same exploration.** The SR distance above was computed from the true graph.
+  Rebuilt instead from the exploration transitions themselves (where each prototype took the walker from each node,
+  averaged — `--emp_sr`; d = 64, 3 worlds per world type, `runs/empsr_d64.json`), the estimate matches the true SR
+  closely (R² 0.95–0.96 on the grid, 0.89–0.97 on the heading world, 0.82–1.00 on S₅) and the planners do about as well:
+  `op_look_sr` 0.83 / 0.89 (grid, budget 64 / 256), 0.22–0.39 (heading), 0.94 / 1.00 (S₅); `sim_look_sr` 0.94 (grid),
+  0.78–0.94 (heading), 1.00 (S₅) — within 0.17 of the true-SR numbers on the same worlds, mostly within 0.06. The
+  whole pipeline is then label-free and uses no privileged knowledge of the world beyond the reset to arbitrary nodes
+  that the random-thought data already used.
+
+### 18.6 What it says
+
+1. **Pre-registered: refuted.** From search experience and random thoughts, operator codes are not learnable — not at
+   all on the heading world, partly on the grid and S₅ — and lookahead in them does not beat tier 0 where it matters.
+   What IS learned, everywhere, is the GATE: which thoughts are which actions. The code fails for want of COVERAGE:
+   random thoughts in high d barely move the state (§10, §13.2), and search covers few states.
+2. **A label-free route that works: repertoire → exploration → code.** Learn the gate first; explore with its
+   prototype thoughts (a few hundred to two thousand thought-steps per world, once); refit. The code then
+   path-integrates S₅ as well as the exact construction (0.85–0.91), the grid at 0.62–0.72, the heading world partly
+   (0.25–0.33, with some worlds recovering its factored structure exactly). The metric for planning comes from the same
+   exploration. It is a developmental order — discover your actions, explore with them, build the map — and, like
+   §17.7's finding that tier 1 is learned rather than engineered, it needs no labels.
+3. **Planning in the learned code works where the code was learned.** Lookahead in the operator code — K predictions per
+   step, one thought-step — solves 0.83–1.00 of grid and S₅ problems at budget 64, above `mcts_hybrid` at four times the
+   budget. On the heading world, whose code was learned only partly, 0.36–0.67. Lookahead that simulates the learned
+   repertoire with the true dynamics (`sim_look_sr`) is the strongest planner everywhere (0.78–1.00 after exploration):
+   search over DISCOVERED actions with a LEARNED metric.
+4. **Model, metric and planner stay separate (§17.8).** The operator code's own distance plans poorly (0.00–0.44) even
+   when its predictions are good; the exploration-estimated SR is what lookahead needs.
+5. **A revision to §17.5: tier 3 is a matter of scale.** S₅ at distance 4 — 120 states — yields to lookahead with a
+   learned diffusion metric (0.89–1.00). The hardness results of §17.3 are asymptotic; small non-commuting worlds are
+   handled by a good metric, and search earns its keep as they grow. The mock cannot show where that crossover is.
+6. **For the real model.** (a) A learned gate over thoughts is a discovered ACTION REPERTOIRE: prototypes to propose
+   in search and to explore with — candidates, not a codebook (Q1): the thought stays a free vector, and search can
+   refine or leave them. (b) Explore with the repertoire, not with isotropic noise — §10's dimensionality lesson again.
+   (c) Learn the operator code and the metric from that exploration. (d) Where the code is learned only partly (the
+   heading world), the state-conditioned inverse network of §17.7 (tier 1) remains the practical tool.
+
+**Caveats.** The mock's keys are global, so a thought's gate does not depend on the state — the case in which an exact
+operator code exists; with state-dependent gates the model class is wrong. Exploration starts from every node (a reset
+the real model may not have). Six worlds per cell, three for the estimated-SR check; 6 held-out problems per planner
+cell per world (36 per cell; standard error up to ~0.08). Small worlds; walls. m chosen by held-out error among
+{true, 8, 16}. Everything in §18.5 is exploratory — designed after the pre-registered results were seen.
