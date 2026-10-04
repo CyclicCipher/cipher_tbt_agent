@@ -238,7 +238,9 @@ V calibration; thoughts per problem against difficulty (does thinking grow with 
 - **Q2 — Is search needed at test time, or only for training?** (§4.7.)
 - **Q3 — Does the answer's cross-entropy alone suffice in our setting?** Coconut says no without the curriculum.
   Unknown (2026-10-03) — P1(b) answers it. If it DOES suffice on these tasks, the search is a speed-up, not a
-  necessity.
+  necessity. *Mock result (§16): it suffices there and gives the best search-free policy — but the mock lacks
+  trainable dynamics, a learned decoder and representation learning, the likely causes of Coconut's failure; P1(b)
+  remains the test.*
 - **Q4 — Partial credit: allowed?** (§5.2.)
 - **Q5 — A problem-difficulty curriculum: allowed?** (§5.1.) It is not a substitution curriculum, but it is a
   curriculum.
@@ -372,7 +374,9 @@ S0 (RLOO with noise — Soft Tokens, Hard Truths).
   search can still leave — which is what `mcts_hybrid` is.
 - Population (D5) or tree (v1)? *The user: tree seems more likely.* §11: a real tree (with backtracking) is the best
   family from budget ≈ 512 up — provided its candidates come from gradients; with EZ-V2's sampled candidates it fails.
-- Answer-gradients at training time? *The user: experiment.* Planned in tier 2 (§11.6).
+- Answer-gradients at training time? *The user: experiment.* Ran in tier 2 (§16): back-propagated into the policy
+  (`bptt`) they gave the best search-free policy; as a training-time search (`answer_opt`) the fastest early
+  learning. The encoding trap of §10.5 cannot arise in the mock (fixed decoder, target given).
 
 
 ---
@@ -498,7 +502,7 @@ not tuned per method, so close cells could reorder under tuning; 40–60 instanc
 0.06–0.08), so differences under ~0.15 are not reliable. The budgets (512, 4096) are test-time scale; training will
 have less.
 
-### 11.6 Next — the learning loop (tier 2)
+### 11.6 Next — the learning loop (tier 2) — RAN 2026-10-04, results in §16
 
 The question that matters for training is not "which search finds a solution" but "which search gives the policy
 the most useful targets". Tier 2: train a small policy (and a LEARNED value, replacing the mocked one) on many
@@ -945,3 +949,155 @@ splitting the state at step 1, was measured and ruled out.)
 one learned-code objective (linear, whitened); m and the amount of random data chosen by hand, and the m = 2 / m = 4
 runs chosen AFTER seeing the m = 8 results (an exploratory follow-up, not pre-registered); the axis diagnosis uses
 only the true-coordinate code.
+
+---
+
+## 16. The training loop (tier 2) — results (run 2026-10-04)
+
+**The question (§11.6).** Not "which search finds a solution" but "which improvement operator gives a LEARNED policy
+the most useful targets" — and Q3: does the answer's gradient alone suffice?
+
+**Setup.** `search_bench/train_loop.py`. One world per seed: §11's random graph (64 nodes, 4 out-edges, keys per node,
+the loose regime), thoughts in ℝ^d acting through a hidden 8-dimensional projection, d ∈ {64, 256}. A problem is a
+(start, target) pair with the target 1–4 steps away (uniform — a fixed mix of difficulties, not an adaptive
+curriculum), horizon 8 thoughts; 80 held-out pairs (20 per distance) are never trained on. A policy network
+π(z | state, target) (a Gaussian over ℝ^d, noise norm 0.5) and a value network V(state, target) ∈ (0, 1) — MLPs with
+two hidden layers of 256 — start UNTRAINED; nothing is mocked except the dynamics (exact, as a network's own are) and
+the verifier. Every arm gets 300 iterations × 16 problems × 256 thought-steps = 1.23 M thought-steps (a gradient
+through a step costs 3), and 8 policy and 8 value updates per iteration (the on-policy arms step every 2 problems);
+3 seeds (= 3 worlds) per arm and d. The value is trained on the states each arm itself simulated.
+
+| arm | improvement operator |
+|---|---|
+| `rloo` | S0: chains sampled from π, binary verifier reward, REINFORCE with a leave-one-out baseline (Soft Tokens, Hard Truths) |
+| `bestofn` | S1: chains sampled from π, the verified ones distilled (expert iteration) |
+| `bptt` | **Q3**: no search — the answer's log-likelihood (log of the mean over stopping steps of p_t[target]) back-propagated through the exact dynamics into π: Coconut without its curriculum, P1(b) |
+| `answer_opt` | §10.5: the answer's gradient as a TRAINING-TIME search proposal — Adam on the chain's thoughts toward the answer, started at policy samples, held near them by a trust-region penalty; solutions distilled |
+| `pi_grad` | restarted chains; each thought a policy sample refined by one step along ∇_z V (the LEARNED value); solutions distilled |
+| `pi_mcts` | §11's hybrid tree (learned-subspace samples + gradient refinement + a policy sample) plus the policy mean as a candidate, on the learned value; the solution found is distilled |
+
+Measured on the held-out pairs: the AMORTISED policy (its mean, one chain, no search) and the policy and value inside
+`pi_mcts` at a test budget of 256 ("with search"); also the amortised policy on its own first 80 TRAINING problems,
+V at the start state, and the training solve rate.
+
+**Two value-label rules.** The first run labelled every simulated state off the solution path a failure (`path`:
+γ^(steps to success) on the path, 1 if verified, 0 otherwise). That turned out to be a confound (§16.2), and the arms
+were rerun with `bellman` labels: each simulated state with simulated successors gets γ·max over them (1 if verified),
+leaves bootstrapped from the current V — the tree's own backup used as a target. Main tables: `bellman`. Code:
+`train_loop.py` (`--vlabel`), `summarize_train.py`; data `search_bench/runs/train_*.json`. About an hour on 4 CPU cores.
+
+### 16.1 Results (bellman labels; mean over 3 seeds, range in brackets)
+
+| arm | d | amortised, mean over L = 1–4 | amortised, L = 4 | with search, mean over L | with search, L = 4 | training solve rate (end) |
+|---|---|---|---|---|---|---|
+| `rloo` | 64 | 0.03 (0.01–0.07) | 0.00 | 0.28 | 0.00 | 0.03 |
+| `bestofn` | 64 | 0.03 (0.00–0.06) | 0.00 | 0.35 | 0.00 | 0.09 |
+| `bptt` | 64 | **0.72** (0.66–0.76) | **0.57** (0.50–0.65) | 0.52 | 0.13 | 0.79 |
+| `answer_opt` | 64 | 0.53 (0.53–0.54) | 0.27 (0.20–0.35) | 0.56 | 0.17 | 1.00 |
+| `pi_grad` | 64 | 0.64 (0.59–0.68) | 0.50 (0.45–0.55) | 0.77 (0.73–0.80) | 0.55 (0.45–0.65) | 0.88 |
+| `pi_mcts` | 64 | 0.48 (0.44–0.53) | 0.17 (0.00–0.25) | **0.86** (0.84–0.88) | **0.63** (0.55–0.70) | 0.88 |
+| `rloo` | 256 | 0.00 | 0.00 | 0.31 | 0.00 | 0.00 |
+| `bestofn` | 256 | 0.00 | 0.00 | 0.31 | 0.00 | 0.00 |
+| `bptt` | 256 | **0.73** (0.67–0.77) | **0.67** (0.60–0.75) | 0.45 | 0.08 | 0.76 |
+| `answer_opt` | 256 | 0.69 (0.65–0.72) | 0.63 (0.60–0.65) | 0.50 | 0.15 | 1.00 |
+| `pi_grad` | 256 | 0.51 (0.49–0.55) | 0.35 (0.30–0.40) | 0.70 (0.64–0.76) | 0.45 (0.35–0.55) | 0.74 |
+| `pi_mcts` | 256 | 0.43 (0.42–0.44) | 0.07 (0.00–0.15) | **0.86** (0.84–0.89) | **0.58** (0.50–0.65) | 0.92 |
+
+Learning speed — amortised success averaged over L, against thought-steps spent:
+
+| arm | d | 204 k | 409 k | 819 k | 1.23 M |
+|---|---|---|---|---|---|
+| `bptt` | 64 / 256 | 0.19 / 0.23 | 0.36 / 0.31 | 0.56 / 0.55 | 0.72 / 0.73 |
+| `answer_opt` | 64 / 256 | **0.28 / 0.35** | 0.38 / 0.47 | 0.50 / 0.62 | 0.53 / 0.69 |
+| `pi_grad` | 64 / 256 | 0.15 / 0.12 | 0.27 / 0.22 | 0.48 / 0.35 | 0.64 / 0.51 |
+| `pi_mcts` | 64 / 256 | 0.12 / 0.10 | 0.19 / 0.19 | 0.35 / 0.35 | 0.48 / 0.43 |
+| `rloo`, `bestofn` | 64 / 256 | ≤ 0.02 / 0.00 | ≤ 0.02 / 0.00 | ≤ 0.03 / 0.00 | ≤ 0.03 / 0.00 |
+
+The value at the start state, L = 1 / 2 / 3 / 4 (an optimal chain's discounted outcome: 0.70 / 0.49 / 0.34 / 0.24):
+`pi_mcts` 0.56–0.58 / 0.40–0.42 / 0.34 / 0.29–0.31; `bptt` 0.38–0.39 / 0.24–0.27 / 0.22–0.23 / 0.17–0.18; `pi_grad`
+0.30–0.42 / 0.27 / 0.15–0.21 / 0.12–0.16; `rloo`, `bestofn` ≤ 0.03 everywhere.
+
+Distillation: the policy fits its distilled (state, thought) pairs about equally in every distilling arm (cosine
+0.82–0.84 for `pi_mcts`, 0.85–0.87 for the others). The tree's solutions are the shortest (2.6–2.7 thoughts, against
+4.0–4.2 for `pi_grad` and `answer_opt`; the mean distance is 2.5). Yet `pi_mcts`'s amortised policy is the weakest of the
+learning arms on its own TRAINING problems too (L = 4: 0.28–0.41, against 0.49–0.84).
+
+### 16.2 The confound: what counts as a failed state
+
+With `path` labels (an explored state off the solution path = a failure), the trees' values collapsed. A tree
+explores many states and expands few, so nearly all its labels were 0:
+
+| arm | d | labels | V(start), L = 4 | with search, L = 4 | with search, mean over L | amortised, mean over L | training solve rate |
+|---|---|---|---|---|---|---|---|
+| `pi_mcts` | 64 | path → bellman | 0.04 → 0.29 | 0.10 → **0.63** | 0.59 → 0.86 | 0.33 → 0.48 | 0.57 → 0.88 |
+| `pi_mcts` | 256 | path → bellman | 0.02 → 0.31 | 0.05 → **0.58** | 0.60 → 0.86 | 0.32 → 0.43 | 0.57 → 0.92 |
+| `pi_grad` | 64 | path → bellman | 0.05 → 0.16 | 0.12 → 0.55 | 0.49 → 0.77 | 0.54 → 0.64 | 0.80 → 0.88 |
+| `pi_grad` | 256 | path → bellman | 0.02 → 0.12 | 0.05 → 0.45 | 0.45 → 0.70 | 0.38 → 0.51 | 0.58 → 0.74 |
+
+The arms whose policies do not use V (`bptt`, `answer_opt`) have identical amortised results under both rules (same
+random draws); `rloo` and `bestofn` change within noise (the labelling consumes extra random draws).
+
+### 16.3 What it says
+
+1. **Without a gradient, nothing is learned from d = 64 up.** Outcome-only sampling — S0 (RLOO with noise, Soft Tokens
+   Hard Truths) and S1 (best-of-N + distil) — never gets going: training solve rate 0.00–0.09, amortised 0.00–0.03
+   averaged over distances (seed means), 0.00 everywhere at d = 256. §11's verdict on sampling (fails from d ≥ 64) carries over to learning. In the
+   literature these methods start from a PRETRAINED model whose samples already succeed; from scratch, in a thought
+   space, they have nothing to reinforce.
+2. **Q3 — in this mock the answer's gradient alone is enough, and gives the best policy without search.** `bptt` ends
+   at 0.72–0.73 averaged over distances and 0.57–0.67 at L = 4, still rising. Coconut's negative result does not
+   reproduce here. But the mock lacks the three things that could cause it: trainable dynamics (here only the policy
+   learns; in Coconut the network producing the thoughts is also the network they feed), a LEARNED decoder (here the
+   answer is read by the fixed verifier and the target is in the problem statement, so §10.5's answer-encoding trap
+   cannot arise), and having to build the state representation. So the mock says the answer's gradient is not too
+   weak a signal in principle; whether it survives those three is P1(b) on the real model.
+3. **The best test-time solver is a tree whose value was trained on the tree's own search.** `pi_mcts` with its own
+   policy and value solves 0.86 averaged over distances and 0.58–0.63 at L = 4 at a test budget of 256 — about what §11's
+   hybrid tree reached with a MOCKED value of noise 0.1 at the same budget (0.57, loose, d = 256). Its value is the
+   best calibrated: monotone in distance, close to the optimal discounted outcome.
+4. **A tree on a value that was not trained by search does worse than the policy alone.** `bptt`'s policy solves
+   0.57–0.67 at L = 4 alone and 0.08–0.13 inside the tree with its own value (trained on single chains, never on
+   branches). The tree trusts V over π. Two practical rules follow: train the value on the data of the search that will
+   use it, and run the policy's own chain first (8 thoughts) and search only if it fails.
+5. **The value's labels matter as much as the operator (§16.2).** Counting explored-but-unexpanded states as failures
+   made the trees' values useless (V(start) 0.02–0.05 at L = 4) and cut test-time search at L = 4 from 0.58–0.63 to
+   0.05–0.10. The tree's own backup as the target fixes it.
+6. **The answer's gradient as a training-time search (`answer_opt`) learns fastest at first** (0.28–0.35 after 204 k
+   thought-steps, the best of all arms; every training problem solved from the first iteration), and is then caught
+   by `bptt` (d = 64: 0.53 against 0.72 at the end; d = 256: 0.69 against 0.73). It is training-time only (in the real
+   model the answer is unknown at test time), as §10.5 planned.
+7. **Cold start: any gradient through the dynamics finds the effective subspace.** At d = 256 random thoughts solve
+   nothing even one step away (random shooting at 256 thought-steps: 0.00), yet the tree with an UNTRAINED value solves
+   0.80–0.95 of one-step problems at iteration 0. The reason: `∇_z V(step(s, z)) = Jᵀ·∇V` lies in the row space of the
+   Jacobian J = ∂s′/∂z — the directions the dynamics respond to — whatever V is. So value-gradient arms bootstrap from
+   scratch without an answer. In a real network the analogue is the Jacobian's row space, which E-dim2 (§10.7)
+   measures.
+8. **A good search is not automatically a good teacher.** The tree solves the most training problems (0.88–0.92) with
+   the shortest solutions, and the policy fits those targets as well as any other arm's — yet the policy distilled from
+   it is the weakest of the learning arms, even on its own training problems. *Hypothesis (untested):* distribution
+   shift (DAgger's problem) — the tree's solution passes through states the policy's own chain never reaches, so
+   distillation teaches the right thought at states the policy will not be in. The chain-based operators (`bptt`,
+   `answer_opt`, `pi_grad`) start from the policy's own samples, so their targets lie where the policy goes — §10.5's
+   "targets reachable from where the policy is", met by construction. Candidate fixes: start each search at the
+   policy's own chain, or relabel the states the policy visits with the tree's improved thoughts.
+
+**Against the plan (§11.6).** Run: S0, S1, `grad_greedy` (as `pi_grad`), `mcts_hybrid` (as `pi_mcts`), and the
+answer-gradient arms for Q3. Not run: `mcts_guided`, `smc_grad`. GCML is not in this round: this world has no
+geometry, and §13 found GCML fails without it — its arm belongs in a geometric world. Compute was equal in
+thought-steps and in update count, not in wall-clock (`pi_mcts` costs about twice the CPU of the chain-based arms,
+mostly Python bookkeeping).
+
+**Recommendation for the real model.**
+- *Policy signal:* the answer's gradient through the thoughts (`bptt`) as the base, with P1(b) deciding whether it
+  survives trainable dynamics and a learned decoder; the thought ablation (R6) as the guard against answer-encoding.
+- *Search signal:* `pi_grad` — a policy sample refined by the value's gradient — is the best all-rounder found
+  (amortised 0.51–0.64, with search 0.70–0.77, chain-based so its targets are on-policy).
+- *Test time:* the tree, on a value trained on search data with the Bellman backup, after the policy's own chain.
+- *Drop* S0 and S1 as main lines: they cannot start from scratch in a thought space.
+
+**Caveats.** A mock: fixed dynamics, a perfect fixed decoder, the target in the problem statement, a planted 8-dim
+effective subspace. One kind of world (random graph, keys per node). Three seeds; 20 held-out problems per distance
+(standard error up to ~0.11 per seed). Constants were set once (noise 0.5, lr 1e-3, trust weight 1.0, budgets). The
+`bptt` loss is the log-mean over stopping steps. The `bellman` rerun was decided after seeing the `path` results (an
+exploratory correction, not pre-registered). The learning curves of `bptt` and `pi_grad` were still rising at the
+end, so the ranking at 1.23 M thought-steps may not be the final one.
