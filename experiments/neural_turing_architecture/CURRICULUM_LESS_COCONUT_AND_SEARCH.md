@@ -364,9 +364,146 @@ S0 (RLOO with noise — Soft Tokens, Hard Truths).
   the true rollout value, tracked over training. The toy's bar: cosine ≈ 0.3 already beats 256 random samples at
   d ≳ 256.
 
-### 10.8 Questions for the user
+### 10.8 Questions for the user — and where they stand (2026-10-04)
 
 - Is D4 — the thought deterministic and continuous, the search varying only a few controls (e.g. where Spotlight
-  reads and writes) — "continuous thought" in your sense?
-- Population (D5) or tree (v1) as the main line — or both, compared?
-- Answer-gradients at training time: allowed inside a trust region (§10.5), or value-gradients only?
+  reads and writes) — "continuous thought" in your sense? *The user: it could limit the model.* §11.4 point 7 agrees:
+  a search confined to a subspace it did not learn fails from d = 64; D4 survives only as a learned subspace that the
+  search can still leave — which is what `mcts_hybrid` is.
+- Population (D5) or tree (v1)? *The user: tree seems more likely.* §11: a real tree (with backtracking) is the best
+  family from budget ≈ 512 up — provided its candidates come from gradients; with EZ-V2's sampled candidates it fails.
+- Answer-gradients at training time? *The user: experiment.* Planned in tier 2 (§11.6).
+
+
+---
+
+## 11. Which search works? — a CPU benchmark on a mock task (run 2026-10-04)
+
+**What it answers:** at an equal compute budget, which search over continuous thoughts finds a solution — TEST-TIME
+search on fixed dynamics. It does not yet answer which search gives the best TRAINING signal (§11.6).
+Code: `search_bench/` — `mock_task.py` (the task), `searchers.py` (the algorithms), `run_bench.py` (the grid),
+`summarize.py` (these tables); results in `search_bench/runs/*.json`. CPU only (PyTorch for gradients), about
+15 minutes for every grid below on 4 cores.
+
+### 11.1 The mock task
+
+A **thought-space graph walk** with exactly the properties of §2 (details in `mock_task.py`'s docstring). The state is
+a probability distribution over the 64 nodes of a random graph (4 out-edges each) — continuous, able to hold several
+branches at once. A thought z ∈ ℝ^d is normalised and acts only through a hidden 8-dimensional projection; at each
+node, an out-edge is taken in proportion to softmax(β·key·u) against a STAY option, so a thought must POINT at the
+right edge's key to move. The target is 4 edges away, the horizon 8 thoughts; the verifier (argmax node = target, with
+more than half the mass) is checked at every simulated state, which is the exact stop value. A learned value is mocked
+as a per-node table γ^distance plus noise. Knobs:
+- **regime** — *loose* (β 16, gate 0.3): finding the right DIRECTION is the problem; *tight* (β 8, gate 0.5): a thought
+  must be PRECISE, or mass leaks and the verifier fails four steps later;
+- **d** — 16 … 1024, effective dimension fixed at 8;
+- **value noise** 0.1 / 0.3; **value exploitable** — a spurious value term driven by thought directions the verifier
+  ignores (the risk of following a learned value's gradient); **prior** — untrained (isotropic) or partly trained
+  (cosine 0.3 to the right thought).
+Budget = thought-steps (a gradient through a step costs 3). Instances are shared across methods (paired comparison).
+A sanity check confirms every instance is solved by the right thoughts in exactly 4 steps.
+
+### 11.2 The methods (15 + 3 references)
+
+- *Sampling only:* `random_shooting` (best-of-N chains), `cem` (cross-entropy method, TD-MPC2's family), `smc`
+  (particles twisted by V), `look_iso` (EZ-V2's candidates, one-step lookahead), `mcts_iso` (EZ-V2's candidates in a
+  real tree), `look_randsub` (sampling confined to a FIXED random 8-dim subspace — §10.4 D4's failure mode).
+- *Gradient-using:* `grad_greedy` (one value-gradient step per thought, restarted), `smc_grad`, `grad_trajopt`
+  (Adam on the whole chain through the exact dynamics), `look_grad` / `look_langevin` / `look_guided` (one-step
+  lookahead with gradient, Langevin-chain or learned-subspace candidates), and the real tree (best-first with
+  progressive widening and backtracking) with four expansion rules: `mcts_grad`, `mcts_langevin`, `mcts_guided`
+  (samples in the subspace spanned by the tree's own recent value gradients), `mcts_hybrid` (learned-subspace samples,
+  each refined by two noisy gradient steps).
+- *Reference:* `look_oracle` — sampling in the TRUE effective subspace.
+
+### 11.3 Results — success rate (fraction of instances solved)
+
+**Dimension** (value noise 0.1, untrained prior; budget 512 / 4096 thought-steps; 60 instances per cell):
+
+| method | loose d=16 | loose d=64 | loose d=256 | loose d=1024 | tight d=16 | tight d=64 | tight d=256 | tight d=1024 |
+|---|---|---|---|---|---|---|---|---|
+| `random_shooting` | 0.05 / 0.10 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+| `cem` | 0.05 / 0.78 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+| `smc` | 0.35 / 0.95 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+| `look_iso` | 0.30 / 0.77 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+| `mcts_iso` | 0.28 / 0.97 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+| `look_randsub` | 0.35 / 0.70 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+| `look_oracle` | 0.68 / 0.85 | 0.53 / 0.72 | 0.52 / 0.58 | 0.32 / 0.57 | 0.03 / 0.32 | 0.00 / 0.28 | 0.00 / 0.30 | 0.00 / 0.18 |
+| `grad_greedy` | 0.92 / 1.00 | 0.87 / 0.97 | 0.73 / 0.90 | 0.62 / 0.82 | 0.35 / 0.72 | 0.32 / 0.63 | 0.13 / 0.33 | 0.02 / 0.03 |
+| `smc_grad` | 0.97 / 1.00 | 0.88 / 0.95 | 0.73 / 0.88 | 0.47 / 0.70 | 0.73 / 0.88 | 0.33 / 0.73 | 0.13 / 0.33 | 0.00 / 0.03 |
+| `grad_trajopt` | 0.80 / 0.98 | 0.70 / 0.97 | 0.37 / 0.80 | 0.32 / 0.68 | 0.37 / 0.93 | 0.17 / 0.85 | 0.10 / 0.60 | 0.03 / 0.58 |
+| `look_langevin` | 0.62 / 0.68 | 0.55 / 0.58 | 0.47 / 0.48 | 0.40 / 0.43 | 0.60 / 0.63 | 0.45 / 0.47 | 0.42 / 0.45 | 0.27 / 0.32 |
+| `mcts_grad` | 0.87 / 0.98 | 0.67 / 0.93 | 0.47 / 0.87 | 0.32 / 0.63 | 0.25 / 0.78 | 0.20 / 0.62 | 0.08 / 0.18 | 0.00 / 0.02 |
+| `mcts_langevin` | 0.75 / 0.95 | 0.72 / 0.93 | 0.62 / 0.82 | 0.43 / 0.58 | 0.68 / 0.80 | 0.60 / 0.83 | 0.45 / 0.65 | 0.30 / 0.42 |
+| `mcts_guided` | 0.93 / 1.00 | 0.85 / 1.00 | 0.90 / 1.00 | 0.80 / 1.00 | 0.18 / 0.58 | 0.28 / 0.60 | 0.17 / 0.52 | 0.12 / 0.38 |
+| `mcts_hybrid` | 0.82 / 1.00 | 0.80 / 0.98 | 0.73 / 0.98 | 0.68 / 0.93 | 0.58 / 0.92 | 0.63 / 0.93 | 0.55 / 0.88 | 0.45 / 0.82 |
+
+**Robustness at d = 256** (budget 512 / 4096; 40 instances per cell):
+
+| method | loose: baseline | loose: exploitable V | loose: prior cos 0.3 | loose: V noise 0.3 | loose: V noise 0.3 + prior | tight: baseline | tight: exploitable V | tight: prior cos 0.3 | tight: V noise 0.3 | tight: V noise 0.3 + prior |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `look_iso` | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+| `mcts_iso` | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+| `grad_greedy` | 0.75 / 0.93 | 0.53 / 0.85 | 0.75 / 0.75 | 0.30 / 0.53 | 0.17 / 0.17 | 0.15 / 0.35 | 0.03 / 0.07 | 0.40 / 0.40 | 0.00 / 0.00 | 0.03 / 0.03 |
+| `smc_grad` | 0.72 / 0.88 | 0.60 / 0.82 | 0.82 / 0.93 | 0.07 / 0.10 | 0.15 / 0.17 | 0.07 / 0.28 | 0.03 / 0.05 | 0.50 / 0.55 | 0.00 / 0.00 | 0.03 / 0.03 |
+| `grad_trajopt` | 0.33 / 0.80 | 0.03 / 0.57 | 0.33 / 0.80 | 0.03 / 0.12 | 0.03 / 0.12 | 0.15 / 0.62 | 0.00 / 0.15 | 0.15 / 0.62 | 0.00 / 0.03 | 0.00 / 0.03 |
+| `mcts_langevin` | 0.57 / 0.82 | 0.55 / 0.88 | 0.57 / 0.72 | 0.03 / 0.07 | 0.07 / 0.15 | 0.42 / 0.65 | 0.15 / 0.38 | 0.45 / 0.57 | 0.00 / 0.00 | 0.00 / 0.03 |
+| `mcts_guided` | 0.85 / 1.00 | 0.55 / 0.88 | 1.00 / 1.00 | 0.15 / 0.60 | 0.42 / 0.75 | 0.15 / 0.53 | 0.00 / 0.00 | 0.62 / 0.88 | 0.05 / 0.05 | 0.07 / 0.30 |
+| `mcts_hybrid` | 0.70 / 1.00 | 0.40 / 0.95 | 0.75 / 0.97 | 0.07 / 0.35 | 0.10 / 0.33 | 0.53 / 0.90 | 0.07 / 0.53 | 0.55 / 0.85 | 0.00 / 0.10 | 0.07 / 0.12 |
+
+**Budget at d = 256** (value noise 0.1, untrained prior; 40 instances per cell):
+
+| method | loose B=128 | loose B=256 | loose B=512 | loose B=1024 | loose B=2048 | tight B=128 | tight B=256 | tight B=512 | tight B=1024 | tight B=2048 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `grad_greedy` | 0.45 | 0.70 | 0.75 | 0.82 | 0.90 | 0.10 | 0.12 | 0.15 | 0.23 | 0.30 |
+| `smc_grad` | 0.42 | 0.62 | 0.72 | 0.80 | 0.80 | 0.00 | 0.03 | 0.07 | 0.20 | 0.25 |
+| `grad_trajopt` | 0.00 | 0.12 | 0.33 | 0.60 | 0.65 | 0.00 | 0.00 | 0.15 | 0.33 | 0.53 |
+| `mcts_langevin` | 0.28 | 0.35 | 0.57 | 0.70 | 0.78 | 0.17 | 0.25 | 0.42 | 0.53 | 0.57 |
+| `mcts_guided` | 0.35 | 0.50 | 0.85 | 0.97 | 1.00 | 0.05 | 0.07 | 0.15 | 0.35 | 0.38 |
+| `mcts_hybrid` | 0.17 | 0.57 | 0.70 | 0.95 | 1.00 | 0.15 | 0.38 | 0.53 | 0.78 | 0.88 |
+
+### 11.4 What it says
+
+1. **Sampling-only search fails from d = 64 up — in every condition, tree or no tree, trained prior or not.**
+   EZ-V2's candidate generation does not transfer to thought-sized vectors: `look_iso` and `mcts_iso` score 0.00 in
+   every cell from d = 64, as do random shooting, CEM and plain SMC. §10.2's prediction, now on a task with sparse
+   reward, multi-step structure and a noisy value.
+2. **Gradient information is the necessary ingredient.** Every method that works takes ∇_z V through the exact
+   dynamics. Even sampling in the TRUE effective subspace without gradients (`look_oracle`) stays below the
+   gradient-using trees (d = 256: loose 0.52 / 0.58 against 0.62–0.90 / 0.82–1.00; tight 0.00 / 0.30).
+3. **A real tree beats one-step lookahead with the same candidates** — backtracking matters once the value is noisy:
+   loose d = 256, `mcts_guided` 0.90 / 1.00 vs `look_guided` 0.50 / 0.65; tight d = 256, `mcts_langevin` 0.45 / 0.65 vs
+   `look_langevin` 0.42 / 0.45.
+4. **The best candidate generator depends on what the hard part is.** Direction-finding (loose): the LEARNED
+   SUBSPACE (`mcts_guided`) — 0.80–0.93 at budget 512 and 1.00 at 4096 at every d up to 1024. Precision (tight):
+   gradient REFINEMENT (`mcts_langevin`, `mcts_hybrid`). **`mcts_hybrid` is the best all-rounder**: the best method in
+   the tight regime from d = 64 to 1024 (0.55 / 0.88 at d = 256, 0.45 / 0.82 at d = 1024), and in the loose one
+   0.68–0.82 at budget 512 and 0.93–1.00 at 4096.
+5. **At very small budgets, simple wins.** At 128 thought-steps (loose), restarted gradient-greedy chains (0.45) beat
+   every tree; trees need roughly 512 to pay for their bookkeeping. Training-time budgets will sit in this range.
+6. **The value's quality dominates everything.** At value noise 0.3 the tight regime collapses for every method
+   (≤ 0.12 except `mcts_guided` with a trained prior, 0.30). An exploitable value hurts whole-chain gradient
+   optimisation most (tight, budget 4096: 0.62 → 0.15); trees, which verify every simulated state exactly, recover
+   more (`mcts_hybrid` 0.90 → 0.53). No search rescues a bad value — calibrating V is as important as the search.
+7. **Confining the search to a subspace it did not learn fails** (`look_randsub`: 0.00 from d = 64). This is the risk in
+   "keep the thought deterministic and search only a few controls" (§10.4 D4): the restriction is safe only when the
+   subspace is LEARNED from the problem and the search can still leave it.
+
+### 11.5 Caveats — what this mock does not show
+
+The dynamics are fixed and known (nothing is trained); the low-dimensional structure is planted, and real thoughts
+may have none; the value is a noisy table with one planted exploit, not a network that off-distribution states can
+fool in unplanned ways; one task family; every method's constants (step sizes, UCT bonus, widening) were set once and
+not tuned per method, so close cells could reorder under tuning; 40–60 instances per cell (standard error about
+0.06–0.08), so differences under ~0.15 are not reliable. The budgets (512, 4096) are test-time scale; training will
+have less.
+
+### 11.6 Next — the learning loop (tier 2)
+
+The question that matters for training is not "which search finds a solution" but "which search gives the policy
+the most useful targets". Tier 2: train a small policy (and a LEARNED value, replacing the mocked one) on many
+instances of the same mock, with each search as the improvement operator (`π′` targets as in §4.4), and measure,
+at equal compute: the policy's success WITHOUT search (amortisation), with search, and the learning speed. Candidates:
+`mcts_hybrid`, `mcts_guided`, `grad_greedy` (the cheap-budget winner), `smc_grad`, and S1 (best-of-N + distil) and
+S0 (RLOO with noise) as the literature baselines. It also gives Q3 an arena: an answer-gradient arm (§10.5) inside a
+trust region against value-gradients only.
