@@ -799,3 +799,149 @@ problems whose goal changes ONE part, and is tested on goals that change BOTH. M
 geometric code (coordinates or learned) generalises from one-part to two-part goals; on S₅ every code fails (progress
 at the level of a random graph, probe near zero). *Refuted if* the learned code does no better than raw on the grid,
 or if S₅ succeeds (then commutativity is not the limit).
+
+---
+
+## 15. The geometry test — results (run 2026-10-04)
+
+**Setup.** §14's pre-registration, on the loose regime (value noise 0.1), d ∈ {64, 256}, 6 worlds per (world type, d).
+Per world: the `mcts_hybrid` search at budget 512 on 24 TRAINING problems (in the product world `grid2`, only goals
+that change ONE part) gives 1,700–4,400 transitions (2,300–3,200 on average per world type); the LEARNED code is fitted to those plus 4,096 random-thought
+transitions by `gcml.learn_code_als` (GCML's eq-11 objective `Δc ≈ V·z`, alternating least squares, whitened against
+collapse; m = 8 dimensions; no coordinates given); a ridge inverse model W per code is fitted on the search
+transitions. Measured on held-out problems: one-step progress of `W(goal − state)` from every node, the k-step probe on
+24 held-out value-gradient chains, and the GCML planner (`gcml_greedy`) at budgets 64 and 256 (36 problems per cell —
+standard error up to ~0.08), against `grad_greedy` and `mcts_hybrid` on the same problems. Code:
+`search_bench/run_geometry.py`, `summarize_geometry.py`, `probe_axes.py`; data `search_bench/runs/geometry_*.json`.
+About a minute of CPU per run.
+
+### 15.1 Does the learned code find the geometry?
+
+R² of a linear map (with bias) between the learned code and the true coordinates, range over the 6 worlds:
+
+| world | d | m | coordinates ← learned | learned ← coordinates |
+|---|---|---|---|---|
+| grid (2 coordinates) | 64 | 8 | 0.99–1.00 | 0.25 |
+| grid | 256 | 8 | 0.98–0.99 | 0.25 |
+| grid | 64 | **2** | 0.99–1.00 | 0.99–1.00 |
+| grid | 256 | **2** | 0.98–0.99 | 0.98–0.99 |
+| grid2 (4 coordinates) | 64 | 8 | 0.93–0.97 | 0.47–0.48 |
+| grid2 | 256 | 8 | 0.83–0.92 | 0.42–0.46 |
+| grid2 | 64 | **4** | 0.86–0.95 | (same) |
+| grid2 | 256 | **4** | 0.73–0.88 | (same) |
+| grid2, 16,384 random transitions | 64 | **4** | 0.96–0.99 | (same) |
+| grid2, 16,384 random transitions | 256 | **4** | 0.80–0.94 | (same) |
+
+The learned code CONTAINS the coordinates. With more dimensions than the world has (m = 8), the coordinates explain
+exactly their share of it (2/8, 4/8): whitening gives every learned dimension the same variance, so the extra six (or
+four) are as large as the real ones. With m equal to the true dimension, on the grid the learned code IS the
+coordinates. In `grid2` it is data-limited: quadrupling the random transitions raises R² from 0.86–0.95 to 0.96–0.99
+(d = 64).
+
+### 15.2 Direction, probe and planner, per code
+
+Grid (8 × 8, commuting actions). Columns: k-step probe at k = 1 / k = 3; one-step progress; planner success at
+budget 64 / 256.
+
+| code | d=64 probe | progress | planner | d=256 probe | progress | planner |
+|---|---|---|---|---|---|---|
+| raw (one-hot) | 0.26 / 0.21 | 0.82 | 0.19 / 0.25 | 0.26 / 0.25 | 0.82 | 0.22 / 0.22 |
+| SR eigenmap | 0.48 / 0.36 | 0.92 | 0.42 / 0.44 | 0.46 / 0.39 | 0.89 | 0.50 / 0.50 |
+| true coordinates | 0.57 / 0.42 | 0.95 | 0.69 / 0.75 | 0.54 / 0.44 | 0.93 | 0.67 / 0.75 |
+| learned, m = 8 | 0.47 / 0.35 | 0.89 | 0.47 / 0.50 | 0.44 / 0.38 | 0.87 | 0.28 / 0.28 |
+| learned, m = 2 | 0.56 / 0.41 | 0.94 | 0.64 / 0.75 | 0.52 / 0.43 | 0.93 | 0.67 / 0.72 |
+| *baselines* | | | `grad_greedy` 0.50 / 0.69; `mcts_hybrid`@256 0.78 | | | `grad_greedy` 0.31 / 0.72; `mcts_hybrid`@256 0.72 |
+
+Product world (`grid2`: two 4 × 4 grids, k = 8). W learned from ONE-part goals only; tested on one-part | two-part
+goals. Progress is not comparable ACROSS the two goal types (a node that differs from the goal in more axes has more
+neighbours closer to it, so progress is higher on two-part goals for every code, raw included); compare codes within
+a column.
+
+| code | d | probe k=1 / k=3 | progress one \| both | planner 64/256, one | planner 64/256, both |
+|---|---|---|---|---|---|
+| raw | 64 | 0.10 / 0.07 | 0.64 \| 0.72 | 0.11 / 0.11 | 0.03 / 0.03 |
+| SR | 64 | 0.43 / 0.27 | 0.82 \| 0.89 | 0.36 / 0.36 | 0.33 / 0.42 |
+| true coordinates | 64 | 0.48 / 0.31 | 0.83 \| 0.90 | 0.64 / 0.67 | 0.22 / 0.36 |
+| learned, m = 8 | 64 | 0.44 / 0.29 | 0.81 \| 0.85 | 0.19 / 0.28 | 0.08 / 0.17 |
+| learned, m = 4 | 64 | 0.47 / 0.30 | 0.79 \| 0.87 | 0.25 / 0.28 | 0.28 / 0.31 |
+| learned, m = 4, 16k random | 64 | 0.48 / 0.32 | 0.82 \| 0.89 | 0.47 / 0.53 | 0.28 / 0.33 |
+| *baselines* | 64 | | | `grad_greedy` 0.22 / 0.33; `mcts_hybrid`@256 0.64 | `grad_greedy` 0.19 / 0.44; `mcts_hybrid`@256 0.78 |
+| raw | 256 | 0.11 / 0.09 | 0.62 \| 0.73 | 0.11 / 0.11 | 0.03 / 0.03 |
+| SR | 256 | 0.42 / 0.32 | 0.79 \| 0.89 | 0.28 / 0.33 | 0.19 / 0.28 |
+| true coordinates | 256 | 0.46 / 0.36 | 0.81 \| 0.90 | 0.50 / 0.58 | 0.17 / 0.25 |
+| learned, m = 8 | 256 | 0.38 / 0.32 | 0.69 \| 0.82 | 0.14 / 0.17 | 0.06 / 0.06 |
+| learned, m = 4 | 256 | 0.40 / 0.33 | 0.77 \| 0.86 | 0.22 / 0.19 | 0.03 / 0.03 |
+| learned, m = 4, 16k random | 256 | 0.42 / 0.30 | 0.79 \| 0.88 | 0.39 / 0.42 | 0.11 / 0.17 |
+| *baselines* | 256 | | | `grad_greedy` 0.08 / 0.36; `mcts_hybrid`@256 0.61 | `grad_greedy` 0.11 / 0.42; `mcts_hybrid`@256 0.61 |
+
+(In the 16k run only the probe moves for the other codes, by ≤ 0.04: its chains draw from the same generator.)
+
+S₅ (permutations of 5 items, 4 generators; non-commuting — the negative control):
+
+| code | d | probe k=1 / k=3 | progress | cosine with the right thought | planner 64 / 256 |
+|---|---|---|---|---|---|
+| raw | 64 / 256 | −0.03 / 0.00, 0.03 / 0.03 | 0.32 / 0.34 | −0.03 / −0.02 | 0.00 / 0.00 |
+| SR | 64 / 256 | 0.02 / 0.00, 0.02 / 0.01 | 0.33 / 0.33 | −0.02 / −0.02 | 0.00 / 0.00 |
+| learned, m = 8 | 64 / 256 | 0.02 / −0.00, 0.02 / −0.01 | 0.34 / 0.33 | −0.02 / −0.02 | 0.00 / 0.00 |
+| *baselines* | 64 | `grad_greedy` 0.19 / 0.53; `mcts_hybrid`@256 0.50 | | | |
+| *baselines* | 256 | `grad_greedy` 0.22 / 0.39; `mcts_hybrid`@256 0.50 | | | |
+
+### 15.3 Why two-part goals are harder: the number of axes, not the number of parts
+
+The planner's success with the true coordinates falls from one-part goals (0.50–0.67) to two-part goals (0.17–0.36),
+while the one-step direction stays good. Deterministic chains `z_t = W(goal − state_t)` (`probe_axes.py`, 40 held-out
+problems × 6 worlds per goal type), grouped by how many coordinate axes the goal differs in. A one-part goal at
+distance 4 in a 4 × 4 part always needs exactly 2 axes; a two-part goal needs 2–4.
+
+| goal | axes | problems | solved d=64 / d=256 | peak target mass | largest node's mass after step 1 | after step 4 |
+|---|---|---|---|---|---|---|
+| one part | 2 | 240 | 0.40 / 0.36 | 0.41–0.45 | 0.84 | 0.47–0.49 |
+| two parts | 2 | 59 | 0.36 / 0.32 | 0.41–0.42 | 0.87–0.90 | 0.47–0.51 |
+| two parts | 3 | 158 | 0.08 / 0.09 | 0.17 | 0.79–0.82 | 0.41 |
+| two parts | 4 | 23 | 0.00 / 0.00 | 0.06–0.08 | 0.86–0.88 | 0.38–0.43 |
+
+At the same number of axes, crossing from one part to two costs nothing measurable (0.36 vs 0.40; 0.32 vs 0.36 —
+within one standard error at n = 59). The loss comes with the third and fourth axis. W is linear, so this is not a gap
+in the training goals: a 3-axis difference is mapped to the weighted SUM of the per-axis thoughts whatever goals W was
+fitted on. It is not a split at the first step either (the state is as concentrated after step 1 with 4 axes as with
+2). Every chain leaks mass — by step 4 the largest node holds 0.38–0.51 in every group — and with more axes the mass
+reaches the target less often. The mechanism is not pinned down; the suspect is one linear proposal per step for a
+goal along several axes, under dynamics where an action is a discrete choice. (A first suspect, a superposed thought
+splitting the state at step 1, was measured and ruled out.)
+
+### 15.4 Against the pre-registration (§14)
+
+1. **The learned code recovers geometry on the grid — HELD.** R² 0.98–1.00 against the coordinates; planner 0.28–0.50
+   (m = 8) and 0.64–0.75 (m = 2) against raw's 0.19–0.25, and with m = 2 equal to the true coordinates (0.67–0.75).
+   The progress margin over raw is modest (0.87–0.94 vs 0.82) because "raw" is not code-free: W·(e_goal − e_state)
+   is the difference of two columns of W, a node embedding that ridge regression LEARNS from the thoughts, and on a
+   64-node grid with ~2,300 transitions it becomes partly geometric. In the 256-node product world it does not (raw
+   progress 0.62–0.73, planner ≤ 0.11).
+2. **A geometric code generalises from one-part to two-part goals — HELD for the direction and for crossing parts; the
+   planner loses on goals along 3–4 axes.** Progress on two-part goals with SR / coordinates / learned: 0.82–0.90
+   against raw's 0.72–0.73. Planner success with two-part goals that need 2 axes equals one-part goals' (§15.3).
+3. **S₅: every code fails — HELD.** Probe −0.03 to 0.03; progress 0.32–0.34, the random-graph level of §13.1
+   (0.29–0.38); cosine with the right thought ≈ 0; planner 0.00 for every code — while gradient search solves
+   0.19–0.53 of the same problems. W's proposals move the state, but not toward the goal.
+4. **Refutation criteria** — learned code no better than raw on the grid; S₅ succeeds — **neither met.**
+
+### 15.5 What it adds to the pipeline (§14)
+
+- **Stage 3's mechanism works on the mock.** GCML's own forward-model objective, given only (state, thought, next
+  state) transitions, learns a code in which thoughts add — it recovers the coordinates — and the inverse model on
+  it generalises across the parts of a compositional world. Commutativity is confirmed as the limit (S₅).
+- **Two new open problems.** (a) *How many dimensions.* Too many, and whitening inflates directions that carry no
+  geometry, halving the planner (grid: 0.28–0.50 vs 0.64–0.75). m was set by hand here; it has to be chosen from the
+  data — candidates: the per-dimension fit of the eq-11 objective (keep dimensions whose changes the thoughts predict),
+  or the k-step probe on held-out chains. (b) *Goals along many axes.* One linear proposal per step stops working at 3+
+  axes. Candidates: decompose the goal into few-axis sub-goals (needs a code whose axes are identifiable — whitening
+  leaves them free up to a rotation, so this asks for an extra criterion such as independence or sparsity, i.e. the
+  factored code of §14); the state-conditioned inverse network (better in §13); or search over W's proposals. Untested.
+- **The code is hungry for data with even coverage.** Here random-thought transitions supplied it (4,096–16,384 per
+  world). §13.2 showed such transitions carry little signal at d = 256 in a real network; where the code's data comes
+  from in the real model is open.
+
+**Caveats.** A mock with planted structure; 6 worlds and 36 problems per planner cell (standard error up to ~0.08);
+one learned-code objective (linear, whitened); m and the amount of random data chosen by hand, and the m = 2 / m = 4
+runs chosen AFTER seeing the m = 8 results (an exploratory follow-up, not pre-registered); the axis diagnosis uses
+only the true-coordinate code.

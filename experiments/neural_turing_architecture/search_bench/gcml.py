@@ -198,3 +198,72 @@ def progress(task, X, z, target):
 def nodes_toward(task, target):
     d = task.dist_all[:, target]
     return (torch.isfinite(d) & (d >= 1)).nonzero().flatten()
+
+
+# ── learning a code in which thoughts ADD (GCML eq 11), and the k-step precondition probe ───────────────────────────────
+def learn_code_als(task, X, Z, X2, m=8, iters=60, lam=1e-3, seed=0):
+    """A state code E (N × m) learned from transitions with GCML's forward-model objective c' ≈ c + V·z (its eq 11):
+    minimise ‖ΔP·E − Z·Vᵀ‖² over E and V, with E whitened (EᵀE = N·I) against the collapse E = V = 0. Solved by
+    alternating least squares -- in effect the m node-embedding directions whose CHANGES are most linearly predictable
+    from the thoughts that caused them (a CCA between state changes and thoughts). No coordinates are given."""
+    N, d = task.cfg.N, Z.shape[1]
+    dP = X2[:, :N] - X[:, :N]
+    keep = dP.abs().sum(1) > 1e-3
+    dP, Z = dP[keep], Z[keep]
+    A = dP.T @ dP
+    A_inv = torch.linalg.inv(A + lam * (A.trace() / N) * torch.eye(N))
+    B = Z.T @ Z
+    B_inv = torch.linalg.inv(B + lam * (B.trace() / d) * torch.eye(d))
+    g = torch.Generator().manual_seed(seed)
+    E = torch.randn(N, m, generator=g)
+
+    def whiten(E):
+        E = E - E.mean(0)
+        ev, U = torch.linalg.eigh(E.T @ E / N)
+        return E @ U @ torch.diag(ev.clamp_min(1e-9).rsqrt()) @ U.T
+
+    for _ in range(iters):
+        E = whiten(E)
+        Vt = B_inv @ Z.T @ (dP @ E)                                                  # (d, m): Δc ≈ Z·Vt
+        E = A_inv @ dP.T @ (Z @ Vt)                                                  # (N, m)
+    return whiten(E)
+
+
+def value_gradient_chains(make, seeds, gen, T=8):
+    """Chains of the `grad_greedy` rule (one normalised ∇_z V step per thought) from each problem's start: the
+    experience a real model's own value head can produce, with no knowledge of the right thoughts."""
+    out = []
+    for ps in seeds:
+        t = make(ps)
+        X, xs, zs = t.p0[None], [t.p0[None]], []
+        for _ in range(T):
+            base = _unit(torch.randn(1, t.cfg.d, generator=gen)).requires_grad_(True)
+            (g,) = torch.autograd.grad(t.value(t.step(X, base)).sum(), base)
+            z = _unit(g)
+            with torch.no_grad():
+                X = t.step(X, z)
+            xs.append(X), zs.append(z)
+        out.append((torch.cat(xs), torch.cat(zs)))
+    return out
+
+
+def kstep_probe(t0, code, train_chains, test_chains, ks=(1, 2, 3)):
+    """Fit ridge W on the ONE-step pairs of the training chains; on the test chains, the mean cosine between
+    W·(c_{t+k} − c_t) and the first thought z_t, per k. High = a multi-step difference maps linearly to a good first
+    step (what GCML's W(s* − s) needs); near zero = it does not."""
+    X = torch.cat([x[:-1] for x, _ in train_chains])
+    X2 = torch.cat([x[1:] for x, _ in train_chains])
+    Z = torch.cat([z for _, z in train_chains])
+    W = InverseModel("ridge", code).fit(t0, X, Z, X2)
+    res = {}
+    for k in ks:
+        cs = []
+        for xs, zs in test_chains:
+            c = t0.code(xs, code)
+            for s in range(len(zs) - k + 1):
+                dc = (c[s + k] - c[s])[None]
+                if dc.norm() < 1e-6:
+                    continue
+                cs.append(float((W.propose(t0, xs[s:s + 1], dc) * zs[s:s + 1]).sum()))
+        res[k] = sum(cs) / max(1, len(cs))
+    return res

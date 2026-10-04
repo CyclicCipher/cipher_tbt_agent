@@ -13,6 +13,13 @@
                      "sr" (an eigenmap of the symmetrised successor representation of the random walk -- the old TBT
                      column's frame, in which s* − s points along paths), "coord" (grid only: the node's (x, y)).
 The variants of §12.2: V0 = random/node/raw, V1 = random/global (raw or sr), V2 = grid/global (coord or sr).
+Added for the geometry test (§14–§15):
+  "grid2"            the PRODUCT of two 4 × 4 grids (N = 256, k = 8: four moves in each part) -- a compositional world;
+                     `goal_mode` "one" (the target differs from the start in one part) | "both" | "any"; code "coord"
+                     = (x_a, y_a, x_b, y_b)
+  "perm"             the permutation group S5 (N = 120, k = 4: rotate left, rotate right, swap 0-1, swap 1-2) -- a
+                     Cayley graph of a NON-commuting group, the negative control: no code makes its actions translations
+  code "learned"     not built here: injected per world (`gcml.learn_code_als`) from search experience
 """
 from __future__ import annotations
 
@@ -34,24 +41,59 @@ VARIANTS = {
 
 def all_pairs(dest):
     N = dest.shape[0]
-    D = torch.full((N, N), math.inf)
+    adj = dest.tolist()
+    rows = []
     for s in range(N):
-        D[s, s] = 0
+        dist = [math.inf] * N
+        dist[s] = 0
         q = deque([s])
         while q:
             i = q.popleft()
-            for j in dest[i].tolist():
-                if D[s, j] == math.inf:
-                    D[s, j] = D[s, i] + 1
+            for j in adj[i]:
+                if dist[j] == math.inf:
+                    dist[j] = dist[i] + 1
                     q.append(j)
-    return D
+        rows.append(dist)
+    return torch.tensor(rows)
+
+
+_WORLDS = {}                                                  # world structure, cached: problems in a world share it
 
 
 class StructuredWalk(GraphWalk):
     def __init__(self, cfg: TaskConfig, world_seed: int, problem_seed: int, graph="random", keys="node", kappa=0.0,
-                 sr_dim=16, sr_gamma=0.9):
+                 sr_dim=16, sr_gamma=0.9, goal_mode="any", extra_codes=None):
         self.cfg = c = cfg
         self.graph_kind, self.keys_kind, self.kappa = graph, keys, kappa
+        key = (c.N, c.k, c.n, c.d, c.hack_dim, world_seed, graph, keys, kappa, sr_dim, sr_gamma)
+        if key not in _WORLDS:
+            _WORLDS[key] = self._build_world(c, world_seed, graph, keys, kappa, sr_dim, sr_gamma)
+        for attr, val in _WORLDS[key].items():
+            setattr(self, attr, val)
+        self.codes = dict(self.codes)
+        for name, E in (extra_codes or {}).items():
+            self.codes[name] = E
+        # -- the problem ------------------------------------------------------------------------------------------------
+        gp = torch.Generator().manual_seed(problem_seed)
+        for _ in range(1000):
+            start = int(torch.randint(c.N, (1,), generator=gp))
+            at_L = (self.dist_all[start] == c.L).nonzero().flatten()
+            if graph == "grid2" and goal_mode != "any":
+                a_s, b_s = start // 16, start % 16
+                a_t, b_t = at_L // 16, at_L % 16
+                diff = (a_t != a_s).long() + (b_t != b_s).long()
+                at_L = at_L[diff == (1 if goal_mode == "one" else 2)]
+            if at_L.numel():
+                target = int(at_L[int(torch.randint(at_L.numel(), (1,), generator=gp))])
+                break
+        else:
+            raise RuntimeError("no target at distance L")
+        self.start, self.target = start, target
+        self.set_target(target, gp)
+        self.p0 = torch.zeros(c.N + self.H)
+        self.p0[start] = 1.0
+
+    def _build_world(self, c, world_seed, graph, keys, kappa, sr_dim, sr_gamma):
         g = torch.Generator().manual_seed(world_seed)
         # -- the world --------------------------------------------------------------------------------------------------
         if graph == "grid":
@@ -63,6 +105,29 @@ class StructuredWalk(GraphWalk):
             inside = ((nxt >= 0) & (nxt < S)).all(-1)
             dest = torch.where(inside, nxt[..., 0] * S + nxt[..., 1], torch.arange(c.N)[:, None].expand(-1, 4))
             self.xy = xy.float()
+        elif graph == "grid2":
+            S = 4
+            if c.N != S ** 4 or c.k != 8:
+                raise ValueError("grid2 needs N = 256 and k = 8")
+            xy = torch.stack(torch.meshgrid(torch.arange(S), torch.arange(S), indexing="ij"), -1).reshape(-1, 2)  # 16 cells
+            mv = torch.tensor([[0, 1], [1, 0], [0, -1], [-1, 0]])
+            part = xy[:, None, :] + mv[None]                                           # (16, 4, 2)
+            ok = ((part >= 0) & (part < S)).all(-1)
+            step1 = torch.where(ok, part[..., 0] * S + part[..., 1], torch.arange(S * S)[:, None].expand(-1, 4))
+            a = torch.arange(c.N) // (S * S)
+            b = torch.arange(c.N) % (S * S)
+            dest = torch.cat([step1[a] * (S * S) + b[:, None], a[:, None] * (S * S) + step1[b]], 1)
+            self.xy = torch.cat([xy[a], xy[b]], 1).float()                                # (N, 4)
+        elif graph == "perm":
+            import itertools
+            perms = list(itertools.permutations(range(5)))
+            if c.N != len(perms) or c.k != 4:
+                raise ValueError("perm needs N = 120 and k = 4")
+            index = {q: i for i, q in enumerate(perms)}
+            gens = [lambda q: q[1:] + q[:1], lambda q: q[-1:] + q[:-1],
+                    lambda q: (q[1], q[0]) + q[2:], lambda q: (q[0], q[2], q[1]) + q[3:]]
+            dest = torch.tensor([[index[gf(q)] for gf in gens] for q in perms])
+            self.xy = None
         else:
             dest = torch.stack([torch.randperm(c.N - 1, generator=g)[:c.k] for _ in range(c.N)])
             dest = dest + (dest >= torch.arange(c.N)[:, None]).long()
@@ -87,20 +152,8 @@ class StructuredWalk(GraphWalk):
         self.codes["sr"] = (U[:, -sr_dim:] * ev[-sr_dim:].clamp_min(0).sqrt()).contiguous()
         if self.xy is not None:
             self.codes["coord"] = self.xy / (S - 1)
-        # -- the problem ------------------------------------------------------------------------------------------------
-        gp = torch.Generator().manual_seed(problem_seed)
-        for _ in range(1000):
-            start = int(torch.randint(c.N, (1,), generator=gp))
-            at_L = (self.dist_all[start] == c.L).nonzero().flatten()
-            if at_L.numel():
-                target = int(at_L[int(torch.randint(at_L.numel(), (1,), generator=gp))])
-                break
-        else:
-            raise RuntimeError("no target at distance L")
-        self.start, self.target = start, target
-        self.set_target(target, gp)
-        self.p0 = torch.zeros(c.N + H)
-        self.p0[start] = 1.0
+        return dict(xy=self.xy, keys=self.keys, P=self.P, Q=self.Q, H=self.H, hack_dir=self.hack_dir, dest=self.dest,
+                    dest_flat=self.dest_flat, dist_all=self.dist_all, codes=self.codes)
 
     def set_target(self, target, gp):
         c = self.cfg
