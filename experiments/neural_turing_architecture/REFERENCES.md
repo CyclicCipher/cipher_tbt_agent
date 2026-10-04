@@ -139,3 +139,17 @@ All IDs confirmed against arXiv on 2026-10-03; none read in full.
   E31 (Coconut × attention residuals, stopped after 2 cells), E41 (weights fixed, world model entirely in the
   context), E46 (a Brainfuck interpreter as a written looped block, 624/624 exact). Substrate:
   `experiments/transformers/h1_lid.py`. Associative-recall harness: `experiments/binding_mqar.py`.
+
+## 10. Past commutativity — group structure, navigation, and planning (planning doc §17)
+
+All confirmed by web search on 2026-10-04 (title, venue, headline claim); none read in full.
+
+| ref | status | what we take from it |
+|---|---|---|
+| **Sargolini, Fyhn, Hafting, McNaughton, Witter, Moser & Moser** — *Conjunctive representation of position, direction, and velocity in entorhinal cortex*, Science 312:758–762 (2006), doi:10.1126/science.1125572 | web | Deeper layers of medial entorhinal cortex hold conjunctive grid × head-direction cells, all modulated by running speed — the bridge that rotates self-motion by heading before it updates position (tier 1 of §17.5). |
+| **Burak & Fiete** — *Accurate path integration in continuous attractor network models of grid cells*, PLoS Comput Biol 5(2):e1000291 (2009) | web | A continuous-attractor grid network driven only by velocity and heading inputs path-integrates accurately: the heading-gated velocity input, as a mechanism. |
+| **Gao, Xie, Zhu & Wu** — *Learning Grid Cells as Vector Representation of Self-Position Coupled with Matrix Representation of Self-Motion*, ICLR 2019, arXiv [1810.05597](https://arxiv.org/abs/1810.05597) | web | Position as a vector, self-motion as a MATRIX acting on it; learns hexagonal grid patterns, path-integrates and plans — tier 2's "actions as matrices", for space. |
+| **Whittington et al.** — *The Tolman-Eichenbaum Machine: Unifying Space and Relational Memory through Generalization in the Hippocampal Formation*, Cell (Nov 2020) | web | Action-dependent transitions of a learned structural code, for spatial and non-spatial graphs; grid-, band-, border- and object-vector-like cells emerge. |
+| **Even & Goldreich** — *The minimum-length generator sequence problem is NP-hard*, Journal of Algorithms (1981); **Jerrum** — *The complexity of finding minimum-length generator sequences*, Theoretical Computer Science 36:265–289 (1985) | web | Shortest generator sequence to a target group element: NP-hard (NP-complete with the length bound in unary), PSPACE-complete with it in binary. Why tier 3 has no cheap inverse in general. |
+| **Demaine, Eisenstat & Rudoy** — *Solving the Rubik's Cube Optimally is NP-complete*, STACS 2018, arXiv [1706.06708](https://arxiv.org/abs/1706.06708) | web | The concrete case: optimal n × n × n cube solving is NP-complete. |
+| **Korf** — *Macro-operators: a weak method for learning*, Artificial Intelligence 26 (1985) | web | Learn macro-operators (operator sequences) that solve problems with non-serialisable subgoals such as Rubik's Cube; "operator decomposability" characterises where it works. What people do at tier 3. |

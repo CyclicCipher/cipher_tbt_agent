@@ -781,13 +781,18 @@ between planning and habit by their reliability — Daw, Niv & Dayan, Nature Neu
 try, not a replacement: it wins at the smallest budgets and plateaus (§13.5 point 3), so search takes over when it
 stalls.
 
-**Stage 3 — general structure. Plausible, with a mechanism and a hard limit.**
+**Stage 3 — general structure. Plausible, with a mechanism and a limit — of GCML's additive form, not of maps in
+general (corrected 2026-10-04: §17).**
 - *Mechanism:* GCML's own forward-model objective, `Q·o_{t+1} ≈ Q·o_t + V·a_t` (its eq. 11), is an objective for
   LEARNING a state code in which actions add — the property `W(s* − s)` needs. §13 hints it is learnable: the SR code,
   computed from transition statistics alone, worked with the state-conditioned inverse (0.94–0.96).
-- *Limit — commutativity:* a code in which every action is a fixed translation exists only if the actions (nearly)
-  commute. ZipLearn's E12 found exactly this: commuting action sets compress to coordinates (8.9 bits), non-commuting
-  ones need a word table (1,190 bits). No code makes a random graph or a permutation puzzle GCML-friendly as a whole.
+- *Limit — commutativity, for the ADDITIVE form:* a code in which every action is a fixed translation, read by one
+  inverse W for all states, exists only if the actions (nearly) commute — such a code sees only what is left of the
+  world when the order of actions is ignored (§17.1). ZipLearn's E12 found exactly this: commuting action sets compress
+  to coordinates (8.9 bits), non-commuting ones need a word table (1,190 bits). No ADDITIVE code makes a random graph or
+  a permutation puzzle GCML-friendly as a whole. *Corrected 2026-10-04:* this is not a limit of cognitive maps —
+  brains navigate a non-commuting world (movement with heading) by factoring the state and rotating the action into
+  the right frame, and matrix codes represent any group. §17 sets out the escalating tools past the additive form.
 - *Compositionality as the way past it:* domains built from known parts (objects × operations), each part commutative
   in its own slice of the code, let a goal decompose into per-part differences, each mapped by a known inverse
   (GCML's building-block result: trained on 5 blocks, solved 8). The price is a code that factors by part — the
@@ -803,6 +808,8 @@ problems whose goal changes ONE part, and is tested on goals that change BOTH. M
 geometric code (coordinates or learned) generalises from one-part to two-part goals; on S₅ every code fails (progress
 at the level of a random graph, probe near zero). *Refuted if* the learned code does no better than raw on the grid,
 or if S₅ succeeds (then commutativity is not the limit).
+*[Note added 2026-10-04, after §15 ran: "the limit" here means the limit of the additive, state-independent form
+only — see §17.]*
 
 ---
 
@@ -924,7 +931,8 @@ splitting the state at step 1, was measured and ruled out.)
 2. **A geometric code generalises from one-part to two-part goals — HELD for the direction and for crossing parts; the
    planner loses on goals along 3–4 axes.** Progress on two-part goals with SR / coordinates / learned: 0.82–0.90
    against raw's 0.72–0.73. Planner success with two-part goals that need 2 axes equals one-part goals' (§15.3).
-3. **S₅: every code fails — HELD.** Probe −0.03 to 0.03; progress 0.32–0.34, the random-graph level of §13.1
+3. **S₅: every code fails — HELD** (for the additive, state-independent form; §17 explains why, and what goes past
+   it). Probe −0.03 to 0.03; progress 0.32–0.34, the random-graph level of §13.1
    (0.29–0.38); cosine with the right thought ≈ 0; planner 0.00 for every code — while gradient search solves
    0.19–0.53 of the same problems. W's proposals move the state, but not toward the goal.
 4. **Refutation criteria** — learned code no better than raw on the grid; S₅ succeeds — **neither met.**
@@ -933,7 +941,8 @@ splitting the state at step 1, was measured and ruled out.)
 
 - **Stage 3's mechanism works on the mock.** GCML's own forward-model objective, given only (state, thought, next
   state) transitions, learns a code in which thoughts add — it recovers the coordinates — and the inverse model on
-  it generalises across the parts of a compositional world. Commutativity is confirmed as the limit (S₅).
+  it generalises across the parts of a compositional world. Commutativity is confirmed as the limit of this ADDITIVE,
+  state-independent form (S₅) — not of cognitive maps in general (§17).
 - **Two new open problems.** (a) *How many dimensions.* Too many, and whitening inflates directions that carry no
   geometry, halving the planner (grid: 0.28–0.50 vs 0.64–0.75). m was set by hand here; it has to be chosen from the
   data — candidates: the per-dimension fit of the eq-11 objective (keep dimensions whose changes the thoughts predict),
@@ -1101,3 +1110,125 @@ effective subspace. One kind of world (random graph, keys per node). Three seeds
 `bptt` loss is the log-mean over stopping steps. The `bellman` rerun was decided after seeing the `path` results (an
 exploratory correction, not pre-registered). The learning curves of `bptt` and `pi_grad` were still rising at the
 end, so the ranking at 1.23 M thought-steps may not be the final one.
+
+---
+
+## 17. Past commutativity — the escalating tools (discussed 2026-10-04; test pre-registered the same day)
+
+**The user's question.** Why is commutativity the limit? Would biology share it, or has it found a way round — movement
+in space is non-commuting once rotation counts. Answer: §14–§15 overstated it. Commutativity is the limit of GCML's
+ADDITIVE form (one code in which every action adds a fixed vector, read by one inverse W for every state), not of
+cognitive maps. Brains navigate a non-commuting world; what they do, and what lies further out, is a ladder of tools.
+
+### 17.1 Why the additive form stops exactly at commutativity
+
+If every action adds a fixed vector (GCML eq 11, `c′ = c + V·a`), a state's code is the sum of the vectors along any
+path to it. Sums ignore order, so two action sequences that differ only in order land on the same code: the code can
+tell apart only what is left of the world when every commutator ("x, y, undo x, undo y") is set to nothing — in group
+terms, the ABELIANISATION.
+- **S₅:** its commutators generate A₅, so the abelianisation is parity — 2 states out of 120. A real-valued additive
+  code cannot hold even that (a swap done twice is the identity, so 2v = 0, so v = 0). §15's S₅ result (probe ≈ 0 for
+  every code) is therefore not a training failure: no such code exists.
+- **Movement with heading:** the rigid motions of the plane (SE(2)). Rotating, stepping, rotating back and stepping
+  back yields a translation, and these commutators generate EVERY translation: the abelianisation is heading alone.
+  An agent with egocentric actions (forward, turn) and an additive code could learn its heading at most, never its
+  position. (With 90° turns, Z² ⋊ Z₄, what is left is heading plus a checkerboard bit of position — all finite, so a
+  real additive code holds none of it exactly.)
+- **Phase codes do not escape.** Grid cells are PHASE codes (plane waves): each action shifts phases by fixed amounts —
+  additive modulo 2π, the one-dimensional representations of the group ("characters"). A phase code can hold S₅'s
+  parity bit and a heading, but characters only ever see the abelianisation.
+- **GCML never met this.** Its spatial agent moves in world-frame directions (`Δx = a_right − a_left`, its eq 1, no
+  heading), and its building blocks form a silhouette whose union does not depend on the order of placement. Both
+  of its showcase domains commute.
+
+### 17.2 How brains get past it in space — factor the state, transport the action
+
+The brain does not use one additive code for movement with heading. It splits the state into two parts that each
+commute on their own — HEAD-DIRECTION cells (a ring: rotations commute with rotations) and GRID cells (position:
+translations commute) — and bridges them by ROTATING the self-motion signal by the current heading before it reaches
+the grid code: allocentric velocity = R(θ)·(egocentric velocity). Conjunctive grid × head-direction × speed cells in
+the deeper layers of medial entorhinal cortex (Sargolini et al., Science 2006) and continuous-attractor models whose
+velocity input is gated by head direction (Burak & Fiete 2009) are this bridge.
+
+In GCML's terms: the position code stays additive, but the action's effect on it depends on part of the state,
+`x′ = x + R(θ)·v` — the state-conditioned inverse W(s) of §12.1 (the best variant in §13) in its most structured form,
+a gate set by one factor of the state rather than an arbitrary network. It covers any world built as a commuting part
+acted on by the rest (a semidirect product — rigid motion in 2-D and 3-D). It works for continuous space for a deeper
+reason too: small motions commute to first order (the effect of their order is second order, ε²), so "goal minus
+state" is right locally once it is expressed in the current frame. Discrete groups have no small steps.
+
+(A body that can only move forward needs one more layer — turn toward the goal's bearing first — because turning
+does not reduce the position difference at all. The test below gives the agent sideways steps to keep that apart.)
+
+### 17.3 The general tool — actions as matrices, not vectors
+
+Every group, commuting or not, has faithful MATRIX representations: the code is a vector and each action MULTIPLIES it
+by a matrix (`E[g] = ρ(g)⁻¹·v` gives `E[g·s] = ρ(s)⁻¹·E[g]`, a fixed matrix per action); matrix products do not
+commute. Grid cells have been modelled exactly so — position a vector, self-motion a matrix acting on it (Gao, Xie,
+Zhu & Wu, ICLR 2019) — and the Tolman-Eichenbaum Machine (Whittington et al., Cell 2020) learns action-dependent
+transition matrices for spatial and non-spatial graphs alike. So the REPRESENTATION limit can be lifted entirely.
+
+What is lost is GCML's cheap planner: "goal minus state" no longer names the action. For continuous groups there is a
+local fix (transport into the current frame, §17.2; formally the logarithm of `g*·g⁻¹`). For finite non-commuting
+groups no cheap fix can exist in general — the limit is the problem's: finding the shortest sequence of generators
+reaching a target permutation is NP-hard (Even & Goldreich 1981), PSPACE-complete when the length bound is written in
+binary (Jerrum 1985); solving n×n×n Rubik's Cubes optimally is NP-complete (Demaine, Eisenstat & Rudoy 2018).
+
+### 17.4 What people do on such problems — search with macros
+
+No map. Puzzle solvers learn MACRO-OPERATORS — sequences (commutators and conjugates, in cubing terms) that move a
+few pieces and leave the rest intact (Korf 1985) — and solve stage by stage, each stage untouched by the next: they
+manufacture near-independence by decomposition, and search. It is slow and must be learned, which matches the mock:
+gradient search solved S₅ problems where every GCML variant failed (§15).
+
+### 17.5 The escalating tools — a division of labour by structural difficulty
+
+| tier | the world's structure | code | how a goal becomes a thought | cost per step |
+|---|---|---|---|---|
+| 0 | actions commute (grids, products of parts) | additive (or phases) | `W(goal − state)`, one W for every state (GCML) | one matrix-vector product |
+| 1 | a commuting part acted on by the rest (movement with heading, rigid motion) | factored: additive for the commuting part, a separate code for the rest | W gated by the non-commuting factor (the action transported into its frame) | as tier 0, plus the gate |
+| 2 | any group | matrix code: actions multiply the code | one-step lookahead in the code (k predictions per step); locally, transport (continuous groups) | k matrix products |
+| 3 | discrete and non-commuting, no cheap metric (permutation puzzles) | any | search; learned macros that act on few parts | a search |
+
+Measurement decides the tier per domain: tier 0 by the k-step probe (§13.4); tier 1 by the same probe with W gated by
+a candidate factor; tier 2 by path integration in a matrix code; what fails all three is tier 3. Each tier keeps the
+lower ones as special cases, and search (tier 3) stays the fallback everywhere (§14).
+
+### 17.6 Pre-registered — the tier test (written before any code for it ran)
+
+**World "heading":** an 8 × 8 grid × 4 headings (N = 256), six egocentric actions — forward, back, step left, step
+right (moves in the frame of the heading; off the grid = stay), turn left, turn right. Thought-space mock as in §15
+(global keys, the loose regime, value noise 0.1, d ∈ {64, 256}, 6 worlds); the plain 8 × 8 grid through the same
+pipeline as the reference. Goals 4 steps away: "pos" (same heading, position differs) and "any".
+
+**Part A — tiers 0 and 1, in thought space.** Codes: raw, SR, "allo" (position + heading unit vector: the grid-cell
+plus head-direction code), learned additive (§15's ALS, m = the true dimension: 2 on the grid, 4 here). Inverse models,
+each fitted on the search experience of 24 training problems: a global ridge W (tier 0); a heading-gated ridge W (one
+W per heading, mixed by the state's heading marginal — tier 1 with the factor GIVEN); a state-conditioned network
+W(c, Δc) (tier 1 NOT told the factor). Measured as in §15: the k-step probe (each with its own inverse model), one-step
+progress, the GCML planner at budgets 64 / 256, against `grad_greedy` and `mcts_hybrid`.
+
+**Part B — tier 2, representation, with discrete actions** (given as labels, as TEM gets them). On the grid, the
+heading world and S₅: learn a code (m = 4 and 8, whitened) with either an additive model `E[next] ≈ E[cur] + v_a` or a
+matrix model `E[next] ≈ M_a·E[cur] + b_a`, same optimiser. Measured: path integration — decode the node after k = 1…8
+composed predictions (nearest code); and a one-step-lookahead planner in the code (take the action whose predicted
+code is nearest the goal's). For S₅, a constructed exact matrix code (the permutation representation) as the reference.
+
+*Expected:*
+- **E1 (tier 0 fails with heading):** with a global W, the SR, allo and learned codes reach progress on "pos" goals at
+  least 0.25 below the same code on the plain grid, and planner success at most half the grid's. (Raw is a per-node
+  table and could absorb the heading in principle; expected weak through data, as in §15's product world.)
+- **E2 (tier 1 recovers it):** the heading-gated W on the allo code comes within 0.10 of the grid's progress with
+  coordinates and within 0.15 of its planner success, on "pos" goals.
+- **E3 (open):** the state-conditioned network, not told the factor, lands between E1 and E2.
+- **E4:** the learned ADDITIVE code does not recover allocentric position (R² ≤ 0.5, against 0.98–1.00 on the grid).
+- **E5 (tier 2 represents what tier 0 cannot):** additive codes path-integrate on the grid (decoding ≥ 0.8 at k = 8)
+  but not on the heading world or S₅ (≤ 0.3 at k = 4); matrix codes path-integrate on all three (≥ 0.8 at k = 8,
+  m = 8). A learned failure on S₅ next to the exact constructed code would be the optimiser's, not the code's.
+- **E6 (tier 2 represents, but does not plan, on S₅):** one-step lookahead in the matrix code solves ≥ 0.9 of grid
+  problems and ≤ 0.5 of S₅ problems, even where the code path-integrates S₅. No prediction for the heading world.
+
+*Refuted if:* a global W works on the heading world (E1 fails: the additive limit does not bite in practice); the
+gated W does not recover (E2 fails: factor + transport is not enough); no matrix code — not even the constructed one
+— path-integrates S₅ (E5); or lookahead in the matrix code solves S₅ as often as the grid (E6: then tier 3 is not
+needed there).
