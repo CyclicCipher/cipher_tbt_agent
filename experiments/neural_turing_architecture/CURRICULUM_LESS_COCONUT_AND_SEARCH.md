@@ -507,3 +507,76 @@ at equal compute: the policy's success WITHOUT search (amortisation), with searc
 `mcts_hybrid`, `mcts_guided`, `grad_greedy` (the cheap-budget winner), `smc_grad`, and S1 (best-of-N + distil) and
 S0 (RLOO with noise) as the literature baselines. It also gives Q3 an arena: an answer-gradient arm (§10.5) inside a
 trust region against value-gradients only.
+
+---
+
+## 12. Testing the GCML-inspired component — plan (2026-10-04, not yet run)
+
+**What the component is.** From GCML (`src/tbt/notes/gcml_neural_sampling_cognitive_maps.md`): an INVERSE model W
+that maps a wanted state change to the action that produces it, `z = W(s* − s) + ε`, learned by a local Hebbian rule
+from observed transitions (`ΔW = η·z·(s' − s)ᵀ`). In this document it has three proposed roles: (a) a goal-directed
+PROPOSAL inside the tree (S4); (b) a cheap ROLLOUT policy — "imagination" without search (§5.4); (c) a search-free
+PLANNER, GCML's own use (iterate the forward model, W choosing each step, noise for diversity).
+
+**The test has to be built around its assumptions**, because each can fail in thought space:
+1. *State-invariant action effects.* GCML's world is (nearly) linear: the action's effect `V·a` is the same everywhere
+   (eq 11). A thought's effect on a network's state depends on the state. The mock's current graph is the worst case
+   (every node's edges have their own keys), so a single linear W cannot work there BY CONSTRUCTION.
+2. *A state code in which subtraction means something.* `s* − s` must point along the way to the goal (grid cells
+   in GCML's spatial case). Our raw state (a distribution over nodes) has no such geometry.
+3. *A known goal state s*.* Games may supply one; in reasoning the goal is the answer, which is unknown.
+4. *Data to learn W from.* GCML learns from random exploration with a few discrete actions. In high d a random thought
+   mostly does nothing (§10.2, §11), so `s' − s ≈ 0` and Hebbian learning gets no signal — the dimensional curse
+   again, this time on learning the inverse model rather than on searching.
+
+**What the component would buy if its assumptions hold: cost.** A proposal `W(s* − s)` costs a matrix-vector product;
+a value-gradient proposal costs a backward pass through the core (in the mock 3 thought-steps; in a looped
+transformer, a backward pass through K passes × L layers). §11.4 point 5 says small budgets matter, so cheap
+proposals could matter.
+
+### 12.1 Three directions to a better thought — how they relate
+
+With J = ∂s'/∂z the local action Jacobian of the dynamics:
+- the **value gradient** (what §11's winners use): `∇_z V = Jᵀ ∇_s V` — needs a backward pass through the dynamics;
+- the **exact local inverse** (Gauss-Newton toward a goal): `z ∝ J⁺ (s* − s)` — needs the Jacobian;
+- **GCML**: `z ∝ W (s* − s)`, W a LEARNED, state-independent stand-in for J⁺ — needs nothing at use time;
+- **GCML + value** (no goal state needed): `z ∝ W ∇_s V` — the value's gradient in STATE space (cheap: no backprop
+  through the core), mapped to a thought by W. It answers assumption 3;
+- a **state-conditioned inverse** `W(s)·(s* − s)` (a small network) — GCML generalised past assumption 1.
+
+### 12.2 The mock, with a structure dial (assumptions 1–2)
+
+- **V0** — today's random graph, keys per node: no shared structure (control: GCML should fail).
+- **V1** — random graph, GLOBAL edge keys (k action types shared by every node: "the same thought does the same
+  operation everywhere"); destinations still arbitrary. State code: raw (a distribution over nodes) or an
+  **SR / Laplacian-eigenmap embedding** of the graph — the successor-representation frame of the old TBT column —
+  under which `s* − s` points along paths.
+- **V2** — a torus grid, global N/E/S/W keys, coordinate (grid-cell-like Fourier) state code: GCML's own world, the
+  positive control.
+- A dial κ between them: global keys plus per-node perturbations of size κ.
+
+### 12.3 The tests
+
+- **G0 — probe the precondition (no learning).** "Action-effect invariance": the spread of J = ∂s'/∂z across states,
+  `mean ‖J_i − J̄‖ / ‖J̄‖`, per variant. The same probe can later be run on a real looped model (beside E-dim2, §10.7)
+  — it would say, before anything is built, whether GCML can work there.
+- **G1 — can W be learned, and from what data?** Hebbian (GCML eq 14) and ridge regression, from N transitions whose
+  thoughts come from (a) random exploration, (b) the thoughts the tree search executed on OTHER instances, (c) oracle
+  demonstrations (upper bound). Measured against N: cosine between `W(s* − s)` and the right thought; one-step success.
+  *Expected:* (a) fails in high d (no signal); (b) works where the structure exists — the search bootstrapping its
+  own inverse model.
+- **G2 — direction quality at equal cost (W fixed, no search).** Value gradient, exact `J⁺`, `W(s* − s)`,
+  `W ∇_s V`, `W(s)`: cosine with the right thought, greedy multi-step success, cost per proposal. Across V0/V1/V2 and
+  d ∈ {64, 256}.
+- **G3 — inside the tree.** New expansion rules `mcts_gcml` (`W(s* − s) + ε` samples) and `mcts_gcml_v`
+  (`W ∇_s V + ε`), GCML rollouts in place of prior rollouts, and a mixture with the hybrid. Budget sweep 64–2048 —
+  the regime where cheap proposals should show.
+- **G4 — GCML's own claim: the search-free planner.** Iterate `z_t = W(s* − s_t) + ε` with restarts, against
+  `grad_greedy` and `mcts_hybrid` at equal budget.
+
+**Pre-registered expectations.** V2: W learns from search-generated or even random data (d permitting), its proposals
+come close to the value gradient's quality at a fraction of the cost, and GCML-in-the-tree wins at budgets ≤ 512. V1:
+works only with the SR embedding. V0: fails (control). **Refuted if** GCML does not beat the value gradient at EQUAL
+COST in V2 — then its cost advantage does not survive even in its own world. **Decisive for the real model:** G0's
+invariance on a trained looped network. If a thought's effect varies as much as V0's, a state-independent W is out,
+and only `W(s)` (or gradients) remain.
