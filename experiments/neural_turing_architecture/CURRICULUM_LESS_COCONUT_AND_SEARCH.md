@@ -510,7 +510,7 @@ trust region against value-gradients only.
 
 ---
 
-## 12. Testing the GCML-inspired component — plan (2026-10-04, not yet run)
+## 12. Testing the GCML-inspired component — plan (2026-10-04; RAN the same day, results in §13)
 
 **What the component is.** From GCML (`src/tbt/notes/gcml_neural_sampling_cognitive_maps.md`): an INVERSE model W
 that maps a wanted state change to the action that produces it, `z = W(s* − s) + ε`, learned by a local Hebbian rule
@@ -580,3 +580,171 @@ works only with the SR embedding. V0: fails (control). **Refuted if** GCML does 
 COST in V2 — then its cost advantage does not survive even in its own world. **Decisive for the real model:** G0's
 invariance on a trained looped network. If a thought's effect varies as much as V0's, a state-independent W is out,
 and only `W(s)` (or gradients) remain.
+
+
+---
+
+## 13. GCML tests — results (run 2026-10-04)
+
+**Setup.** §12's plan on the loose regime (value noise 0.1, untrained prior), d ∈ {64, 256}, 8 worlds per (variant,
+d) = 80 worlds. Per world: 16 TRAINING problems give the search experience (the `mcts_hybrid` search at budget 512,
+every simulated transition recorded); 4,096 random-thought and 4,096 demonstration transitions; nine inverse models
+(random / demonstration / search experience × Hebbian / ridge / state-conditioned network); 5 HELD-OUT problems for
+G2 and G3/G4 (40 per cell). Code: `search_bench/structured_task.py` (the structure dial), `gcml.py` (inverse models,
+deltas, measurements), `searchers_gcml.py` (the GCML search algorithms), `run_gcml.py`; follow-up probes
+`probe_gcml.py`, `probe_kstep.py`; tables `summarize_gcml.py`; data `search_bench/runs/gcml_*.json`. About 20 CPU
+minutes in all.
+
+### 13.1 G2 — how good is the direction? (one-step progress from every node of the held-out problems)
+
+| proposal | V0 d=64 | V0 d=256 | V1raw d=64 | V1raw d=256 | V1sr d=64 | V1sr d=256 | V2coord d=64 | V2coord d=256 | V2sr d=64 | V2sr d=256 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| random thought | 0.01 | 0.00 | 0.01 | 0.00 | 0.01 | 0.00 | 0.01 | 0.00 | 0.01 | 0.00 |
+| value gradient ∇_z V — cost 3 | 0.54 | 0.59 | 0.53 | 0.59 | 0.53 | 0.59 | 0.54 | 0.59 | 0.54 | 0.59 |
+| exact local inverse J⁺·(goal − state) — reference | 0.15 | 0.18 | 0.15 | 0.18 | 0.08 | 0.09 | 0.82 | 0.86 | 0.08 | 0.07 |
+| W from random thoughts (ridge) · (goal − state) | 0.20 | 0.01 | 0.20 | 0.03 | 0.23 | 0.05 | 0.97 | 0.96 | 0.96 | 0.94 |
+| W from random thoughts (Hebbian, GCML's rule) · (goal − state) | 0.21 | 0.01 | 0.19 | 0.01 | 0.23 | 0.06 | 0.97 | 0.97 | 0.84 | 0.65 |
+| W from search experience (Hebbian) · (goal − state) | 0.29 | 0.29 | 0.33 | 0.36 | 0.35 | 0.38 | 0.95 | 0.95 | 0.71 | 0.71 |
+| W from search experience (ridge) · (goal − state) | 0.29 | 0.29 | 0.34 | 0.34 | 0.36 | 0.38 | 0.94 | 0.94 | 0.88 | 0.89 |
+| W from search experience (ridge) · ∇_c V — no goal | 0.26 | 0.26 | 0.34 | 0.34 | 0.38 | 0.36 | 0.88 | 0.88 | 0.72 | 0.75 |
+| W(c) network from search experience · (goal − state) | 0.29 | 0.32 | 0.34 | 0.35 | 0.41 | 0.44 | 0.99 | 1.00 | 0.96 | 0.94 |
+| W(c) network from search experience · ∇_c V — no goal | 0.08 | 0.11 | 0.11 | 0.11 | 0.19 | 0.21 | 0.92 | 0.91 | 0.55 | 0.48 |
+| W from demonstrations (ridge) · (goal − state) | 0.39 | 0.39 | 0.37 | 0.36 | 0.36 | 0.36 | 0.82 | 0.82 | 0.84 | 0.83 |
+| W(c) network from demonstrations · (goal − state) | 0.43 | 0.43 | 0.45 | 0.46 | 0.53 | 0.52 | 1.00 | 1.00 | 1.00 | 1.00 |
+
+### 13.2 G1 — what can the inverse model be learned from?
+
+Signal strength — how much a transition actually changes the state code, relative to a full move:
+
+| d | random thoughts | search transitions |
+|---|---|---|
+| 64 | 0.08–0.13 | 0.32–0.59 |
+| 256 | 0.02–0.04 | 0.33–0.58 |
+
+Ridge W against the amount of experience (one-step progress, goal-directed):
+
+| variant d | random N=256 | random N=1024 | random all (4096) | search N=256 | search N=1024 | search all |
+|---|---|---|---|---|---|---|
+| V0 d=64 | 0.02 | 0.08 | 0.20 | 0.24 | 0.29 | 0.29 |
+| V0 d=256 | 0.00 | 0.00 | 0.01 | 0.24 | 0.29 | 0.29 |
+| V1raw d=64 | 0.04 | 0.10 | 0.20 | 0.30 | 0.34 | 0.34 |
+| V1raw d=256 | 0.00 | 0.00 | 0.03 | 0.30 | 0.34 | 0.34 |
+| V1sr d=64 | 0.05 | 0.12 | 0.23 | 0.34 | 0.35 | 0.36 |
+| V1sr d=256 | 0.00 | 0.00 | 0.05 | 0.34 | 0.38 | 0.38 |
+| V2coord d=64 | 0.85 | 0.96 | 0.97 | 0.92 | 0.95 | 0.94 |
+| V2coord d=256 | 0.64 | 0.93 | 0.96 | 0.91 | 0.95 | 0.94 |
+| V2sr d=64 | 0.62 | 0.89 | 0.96 | 0.82 | 0.87 | 0.88 |
+| V2sr d=256 | 0.25 | 0.79 | 0.94 | 0.83 | 0.89 | 0.89 |
+
+### 13.3 G3/G4 — search success (budget 64 / 256 / 1024; 40 held-out problems per cell)
+
+d = 64:
+
+| algorithm | V0 | V1raw | V1sr | V2coord | V2sr |
+|---|---|---|---|---|---|
+| `grad_greedy` | 0.42 / 0.78 / 0.95 | 0.35 / 0.68 / 0.93 | 0.35 / 0.68 / 0.93 | 0.33 / 0.65 / 0.88 | 0.33 / 0.65 / 0.88 |
+| `mcts_hybrid` | 0.00 / 0.68 / 0.97 | 0.00 / 0.62 / 0.97 | 0.00 / 0.62 / 0.97 | 0.00 / 0.75 / 0.95 | 0.00 / 0.75 / 0.95 |
+| `mcts_guided` | 0.20 / 0.60 / 0.93 | 0.28 / 0.72 / 0.97 | 0.28 / 0.72 / 0.97 | 0.28 / 0.78 / 0.97 | 0.28 / 0.78 / 0.97 |
+| `gcml_greedy` | 0.03 / 0.03 / 0.03 | 0.05 / 0.07 / 0.07 | 0.07 / 0.10 / 0.10 | 0.57 / 0.70 / 0.68 | 0.35 / 0.45 / 0.47 |
+| `gcml_greedy_v` | 0.00 / 0.03 / 0.03 | 0.10 / 0.12 / 0.12 | 0.15 / 0.15 / 0.15 | 0.17 / 0.23 / 0.23 | 0.10 / 0.10 / 0.10 |
+| `invnet_greedy` | 0.00 / 0.00 / 0.03 | 0.05 / 0.10 / 0.07 | 0.07 / 0.12 / 0.20 | 0.78 / 0.88 / 0.93 | 0.80 / 0.82 / 0.82 |
+| `invnet_greedy_v` | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 | 0.33 / 0.35 / 0.47 | 0.03 / 0.03 / 0.05 |
+| `mcts_gcml` | 0.03 / 0.03 / 0.03 | 0.03 / 0.03 / 0.07 | 0.07 / 0.07 / 0.15 | 0.45 / 0.60 / 0.68 | 0.30 / 0.47 / 0.50 |
+| `mcts_gcml_v` | 0.00 / 0.00 / 0.03 | 0.05 / 0.05 / 0.05 | 0.10 / 0.15 / 0.17 | 0.12 / 0.23 / 0.25 | 0.07 / 0.07 / 0.12 |
+| `mcts_invnet` | 0.00 / 0.00 / 0.05 | 0.03 / 0.03 / 0.07 | 0.07 / 0.17 / 0.20 | 0.60 / 0.85 / 0.95 | 0.70 / 0.82 / 0.82 |
+| `mcts_invnet_v` | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 | 0.30 / 0.40 / 0.45 | 0.00 / 0.03 / 0.05 |
+| `mcts_hybrid_gcml` | 0.00 / 0.68 / 0.80 | 0.00 / 0.70 / 0.97 | 0.00 / 0.60 / 0.97 | 0.00 / 0.75 / 0.95 | 0.00 / 0.75 / 0.97 |
+
+d = 256:
+
+| algorithm | V0 | V1raw | V1sr | V2coord | V2sr |
+|---|---|---|---|---|---|
+| `grad_greedy` | 0.53 / 0.80 / 0.95 | 0.33 / 0.78 / 0.88 | 0.33 / 0.78 / 0.88 | 0.35 / 0.65 / 0.78 | 0.35 / 0.65 / 0.78 |
+| `mcts_hybrid` | 0.00 / 0.62 / 0.97 | 0.00 / 0.78 / 0.97 | 0.00 / 0.78 / 0.97 | 0.00 / 0.72 / 0.95 | 0.00 / 0.72 / 0.95 |
+| `mcts_guided` | 0.15 / 0.70 / 0.95 | 0.28 / 0.70 / 0.97 | 0.28 / 0.70 / 0.97 | 0.38 / 0.75 / 0.95 | 0.38 / 0.75 / 0.95 |
+| `gcml_greedy` | 0.00 / 0.00 / 0.00 | 0.07 / 0.10 / 0.10 | 0.07 / 0.07 / 0.07 | 0.57 / 0.60 / 0.62 | 0.40 / 0.45 / 0.50 |
+| `gcml_greedy_v` | 0.00 / 0.00 / 0.00 | 0.07 / 0.07 / 0.07 | 0.10 / 0.10 / 0.10 | 0.17 / 0.23 / 0.25 | 0.12 / 0.12 / 0.12 |
+| `invnet_greedy` | 0.05 / 0.05 / 0.05 | 0.07 / 0.07 / 0.10 | 0.12 / 0.12 / 0.12 | 0.72 / 0.75 / 0.85 | 0.55 / 0.62 / 0.68 |
+| `invnet_greedy_v` | 0.03 / 0.03 / 0.03 | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 | 0.28 / 0.30 / 0.30 | 0.07 / 0.07 / 0.07 |
+| `mcts_gcml` | 0.00 / 0.00 / 0.00 | 0.03 / 0.05 / 0.07 | 0.07 / 0.07 / 0.10 | 0.47 / 0.57 / 0.60 | 0.23 / 0.38 / 0.45 |
+| `mcts_gcml_v` | 0.00 / 0.00 / 0.03 | 0.05 / 0.05 / 0.05 | 0.07 / 0.07 / 0.07 | 0.10 / 0.17 / 0.23 | 0.10 / 0.12 / 0.12 |
+| `mcts_invnet` | 0.00 / 0.05 / 0.07 | 0.05 / 0.07 / 0.10 | 0.05 / 0.07 / 0.10 | 0.53 / 0.75 / 0.80 | 0.45 / 0.57 / 0.65 |
+| `mcts_invnet_v` | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 | 0.17 / 0.30 / 0.33 | 0.05 / 0.05 / 0.05 |
+| `mcts_hybrid_gcml` | 0.00 / 0.50 / 0.90 | 0.00 / 0.50 / 0.90 | 0.00 / 0.57 / 0.90 | 0.00 / 0.72 / 0.95 | 0.00 / 0.65 / 0.95 |
+
+### 13.4 Preconditions — which probe predicts whether GCML will work?
+
+| variant | its code | invariance of its code | raw | sr | coord |
+|---|---|---|---|---|---|
+| V0 | raw | **0.01** | 0.01 | 0.02 | — |
+| V1raw | raw | **0.01** | 0.01 | 0.01 | — |
+| V1sr | sr | **0.01** | 0.01 | 0.01 | — |
+| V2coord | coord | **0.84** | 0.00 | 0.05 | 0.84 |
+| V2sr | sr | **0.05** | 0.00 | 0.05 | 0.84 |
+
+| variant | d | G0 invariance (its code) | 1-step predictability on search transitions | k-step probe k=1 | k=2 | k=3 |
+|---|---|---|---|---|---|---|
+| V0 | 64 | 0.01 | 0.38 | 0.16 | 0.08 | 0.03 |
+| V0 | 256 | 0.01 | 0.40 | 0.13 | 0.06 | 0.05 |
+| V1raw | 64 | 0.01 | 0.39 | 0.19 | 0.07 | 0.06 |
+| V1raw | 256 | 0.01 | 0.44 | 0.20 | 0.08 | 0.08 |
+| V1sr | 64 | 0.01 | 0.25 | 0.15 | 0.07 | 0.06 |
+| V1sr | 256 | 0.01 | 0.30 | 0.10 | 0.05 | 0.03 |
+| V2coord | 64 | 0.84 | 0.49 | 0.58 | 0.44 | 0.42 |
+| V2coord | 256 | 0.84 | 0.52 | 0.54 | 0.44 | 0.43 |
+| V2sr | 64 | 0.05 | 0.50 | 0.54 | 0.42 | 0.40 |
+| V2sr | 256 | 0.05 | 0.54 | 0.49 | 0.41 | 0.40 |
+
+(The k-step probe: fit ridge W on the ONE-step pairs of value-gradient chains on training problems; on held-out chains,
+cosine between W·(c_{t+k} − c_t) and the first thought z_t. It needs no goal and no knowledge of the right thoughts.)
+
+### 13.5 What it says
+
+1. **In its own world, GCML is excellent and free.** On the grid with consistent action semantics (V2), W·(goal −
+   state) — ridge or network, fitted on random or search experience — makes progress from 0.88–1.00 of all nodes,
+   above the value gradient's 0.54–0.59, which costs 3
+   thought-steps, while W costs a matrix-vector product. A LEARNED GLOBAL inverse even beats the EXACT LOCAL one
+   (J⁺: 0.82–0.86 with coordinates, 0.07–0.08 with the SR code): W is amortised over many transitions, J⁺ is
+   linearised at a single point.
+2. **Outside it, it fails** — and consistent action semantics are not enough. With a random graph (V0, V1) every
+   linear W is at ≤ 0.39 and the best network (trained on demonstrations) at ≤ 0.53 — at or below the value gradient
+   (0.53–0.59). **The
+   pre-registered V1 expectation is refuted:** the SR eigenmap did not rescue a random graph with global keys
+   (V1sr ≈ V1raw). What GCML needs is GEOMETRY: a goal-minus-state difference that is linearly related to a good first
+   step.
+3. **Search: GCML wins where the budget is smallest, then plateaus.** In V2 at budget 64, the inverse-network planner
+   (`invnet_greedy`) solves 0.72–0.78 of problems with coordinates and 0.55–0.80 with SR, against ≤ 0.38 for every
+   baseline (the hybrid tree scores 0.00 at 64, the subspace tree 0.28–0.38). By budget 1024 it plateaus (0.68–0.93) where the gradient trees reach 0.95–0.97.
+   The linear-W planner plateaus lower (0.47–0.68). Adding GCML proposals to the hybrid tree (`mcts_hybrid_gcml`)
+   did not help. In V0/V1 every GCML method stays ≤ 0.20.
+4. **The goal-free form is not ready.** W·∇_c V (no goal) is weaker than W·(goal − state) everywhere (V2coord
+   0.88 vs 0.94; the network version much worse), and its search variants stay ≤ 0.47. Our kernel estimate of the
+   value's state gradient may be the weak link; open.
+5. **Learn W from search experience, with ridge or a network — not from random thoughts with Hebb's rule.** A search
+   transition carries 0.32–0.59 of a full move; a random thought 0.08–0.13 at d = 64 and 0.02–0.04 at d = 256. 256
+   search transitions give 0.82–0.92 progress in V2; random ones need ≥ 1,024 at d = 256 (V2sr: 0.25 → 0.79 → 0.94).
+   (In this mock tiny moves are noise-free, so random data still works given enough of it; in a real network they would
+   sit in noise.) GCML's Hebbian rule matches ridge with an uncorrelated code (coordinates: 0.95–0.97) and falls behind
+   with a correlated one (SR: 0.65–0.84 vs 0.88–0.96) — it lacks ridge's decorrelation.
+6. **The right precondition probe is the k-step one.** G0's invariance does not predict success (V2sr: 0.05, yet W
+   works); one-step predictability on search transitions separates the worlds only weakly (0.25–0.44 vs 0.49–0.54).
+   The k-step probe separates them cleanly: at k = 3, 0.40–0.43 where GCML works and 0.03–0.08 where it does not —
+   and a real looped model can produce the value-gradient chains it needs.
+
+**Against the pre-registration (§12.3).** V2: held — W beats the value gradient at zero cost, and GCML wins at the
+smallest budgets (through the search-free planner rather than inside the tree). V1: refuted (the SR embedding does
+not rescue it). V0: held (fails). The refutation criterion (GCML no better than the value gradient at equal cost in
+V2) was not met. G0, named "decisive for the real model", is replaced by the k-step probe.
+
+### 13.6 Recommendation
+
+GCML is a CONDITIONAL component. Run the k-step probe on the real looped model's own value-gradient chains first.
+If its thought space shows GCML structure (k = 3 predictability far above zero), use a learned inverse — a
+state-conditioned network, trained on search experience — as a cheap first try: the search-free planner at small
+budgets, before handing over to the gradient tree (`mcts_hybrid`) as budget grows. It needs a goal (games can supply
+one); the goal-free form is not ready. If the probe reads near zero, leave GCML out.
+
+**Caveats.** A mock, with planted structure; the dynamics are fixed and soft, so tiny effects are noise-free (which
+flatters random exploration); W is learned per world from 16 problems' experience while the baselines learn nothing
+across problems, so the comparison favours GCML; 40 problems per search cell (standard error up to ~0.08); constants
+set once.

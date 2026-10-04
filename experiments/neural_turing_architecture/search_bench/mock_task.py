@@ -157,15 +157,20 @@ class GraphWalk:
         p, h = X[:, :c.N], X[:, c.N:]
         z = _unit(z)
         u = z @ self.P.T                                                                  # (C, n)
+        p2 = self.move(p, u)
+        if self.H:
+            return torch.cat([p2, h + z @ self.Q.T], -1)
+        return p2
+
+    def move(self, p, u):
+        """The node distribution after the effective control u = P·unit(z): p (C, N), u (C, n) -> p' (C, N)."""
+        c = self.cfg
         s = torch.einsum("ikn,cn->cik", self.keys, u)                                     # (C, N, k)
         logits = torch.cat([c.beta * s, torch.full_like(s[..., :1], c.beta * c.gate)], -1)
         w = logits.softmax(-1)                                                            # (C, N, k+1)
         mass = p.unsqueeze(-1) * w
         out = torch.zeros_like(p).scatter_add(1, self.dest_flat.expand(p.shape[0], -1), mass[..., :c.k].reshape(p.shape[0], -1))
-        p2 = out + mass[..., c.k]
-        if self.H:
-            return torch.cat([p2, h + z @ self.Q.T], -1)
-        return p2
+        return out + mass[..., c.k]
 
     def success(self, X):
         p = X[:, :self.cfg.N]
