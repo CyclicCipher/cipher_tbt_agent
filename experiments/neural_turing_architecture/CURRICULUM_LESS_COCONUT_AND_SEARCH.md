@@ -1338,3 +1338,65 @@ untested. Bounded worlds with walls. m chosen by hand; m = 2 in Part B and the S
 after the pre-registration, as stated. Part A has 36 problems per planner cell (standard error up to ~0.08); 3 seeds in
 Part B. One small non-commuting group (S₅, 120 states): at distance 4, greedy search with a good metric still works;
 larger puzzles would separate metric-guided search from planning more sharply.
+
+---
+
+## 18. Tier 2 for continuous thoughts — operator codes (planned and pre-registered 2026-10-04)
+
+§17.7's matrix codes used discrete action LABELS. A thought is a free vector with no label. This section brings tier 2
+into the thought-space mock.
+
+### 18.1 What a matrix code looks like for a continuous thought
+
+In the mock (global keys), a thought z moves the walker along edge e with a softmax weight `w_e(z)` (or stays, `w_0`)
+that does not depend on the node. If E is an exact matrix code for the discrete actions (`E[dest(i, e)] = M_e·E[i] + b_e`),
+then for the code of any distribution over nodes, `c = pᵀE`, exactly:
+
+    c′ = M(z)·c + b(z),   M(z) = w_0(z)·I + Σ_e w_e(z)·M_e,   b(z) = Σ_e w_e(z)·b_e
+
+— a thought acts on the code as a GATED MIXTURE OF OPERATORS. So the model to learn is: a code E (whitened), a gate
+`g(z) = softmax(G·unit(z) + a)` over K components, and an operator (M_k, b_k) per component, fitted to (state, thought,
+next state) transitions with no action labels. The gate's rows give PROTOTYPE thoughts — the thought that best selects
+each component — so the model also supplies its own action repertoire. (With node-specific keys the gate would depend
+on the state and no such code would exist: that world stays at tier 3, as §13 found for GCML.)
+
+### 18.2 Planning with it
+
+- `op_look` — one-step lookahead in the code: from the current state's code, predict each component's next code (K
+  matrix-vector products, no thought-steps), pick the one whose prediction is nearest the goal under a METRIC, emit its
+  prototype thought (plus small noise), step; chains restarted with ε-greedy choices until the budget is spent. Two
+  metrics: the operator code's own distance (`op_look_own`), and the SR eigenmap's distance after decoding the
+  prediction to its nearest node (`op_look_sr`) — §17.7 found a learned matrix code need not be a metric.
+- `sim_look_sr` — the same lookahead with the TRUE dynamics: simulate all K prototypes (K thought-steps per step) and
+  pick by SR distance. Search with a learned action repertoire and a cheap heuristic: a tier-3 tool.
+- References: tier 0 (`gcml_greedy` on the learned additive code), `grad_greedy`, `mcts_hybrid`.
+
+### 18.3 Pre-registered — the operator-code test (written before any code for it ran)
+
+Worlds: the grid, the heading world (goals "pos" and "any"), S₅ — global keys, the loose regime, d ∈ {64, 256}, 6
+worlds each. Training transitions: the `mcts_hybrid` search on 24 training problems plus 4,096 random-thought
+transitions, as in §15. Codes: the learned additive code (§15's ALS, m = the true dimension: 2 / 4 / 4); the learned
+OPERATOR code (K = 8 components, m ∈ {true, 8, 16}); and, as a reference, the constructed code with only the gate and
+operators learned. Measured: held-out one-step prediction (unexplained share of the code's change); path integration
+along walks of KEY thoughts (each step a thought that selects one edge — the evaluation uses the hidden keys, the model
+never does): decode the node after k = 1…8 predicted steps, over all walks and wall-free walks; R² against position and
+heading on the heading world; how cleanly the prototypes select single actions in the real dynamics; planner success
+at budgets 64 and 256 on 6 held-out problems per mode and world. The planners use the operator code at the m with the
+lowest held-out prediction error (chosen without looking at planning results).
+
+*Expected:*
+- **O1 — learnable without labels:** on the heading world the learned operator code at m = 4 recovers position and
+  heading (R² ≥ 0.9 for both, in at least 4 of 6 worlds per d); the additive code holds no heading (R² ≤ 0.1).
+- **O2 — path integration** (wall-free, k = 8): the operator code ≥ 0.8 on the grid and the heading world at its best m;
+  the additive code ≥ 0.8 on the grid, ≤ 0.2 on the heading world and S₅; on S₅ the operator code ≥ 0.5 at its best m.
+- **O3 — tier 2 plans in thought space where tier 0 cannot:** on heading "pos" goals `op_look_sr` solves ≥ 0.5 at budget
+  64, against ≤ 0.2 for tier 0.
+- **O4 — and cheaply:** `op_look_sr` at budget 64 is at least as good as `grad_greedy` at 64 on the grid and the heading
+  world.
+- **O5 — the metric matters:** on the grid `op_look_own` does worse than `op_look_sr`.
+- **O6 — S₅ stays with search:** `op_look_sr` ≤ 0.3 on S₅ at budget 256, and `sim_look_sr` (true dynamics) does better
+  than it.
+
+*Refuted if:* no operator code can be learned from thoughts (O1 and O2 fail on the heading world — then tier 2 needs
+action labels, which a thinking network does not have); or operator lookahead does not beat tier 0 on the heading world
+(O3).
