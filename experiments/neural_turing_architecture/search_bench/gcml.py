@@ -126,6 +126,37 @@ class InverseModel:
         return _unit(dc @ self.W.T)
 
 
+class GatedInverse:
+    """Tier 1 of §17.5: GCML's inverse model gated by one discrete factor of the state (e.g. the heading) -- one ridge W
+    per value of the factor, fitted on the transitions weighted by the state's marginal over it, and mixed by that
+    marginal at use. The factor is GIVEN (`task.factor`, a value per node); what each W does is learned."""
+
+    def __init__(self, code, lam=1e-2):
+        self.kind, self.code, self.lam = "gated", code, lam
+
+    def _marginal(self, task, X):
+        F = torch.nn.functional.one_hot(task.factor, int(task.factor.max()) + 1).float()
+        return X[:, :task.cfg.N] @ F
+
+    def fit(self, task, X, z, X2):
+        dc = task.code(X2, self.code) - task.code(X, self.code)
+        keep = dc.norm(dim=1) > 1e-3 * task.codes[self.code].norm(dim=1).mean()
+        self.n_used, self.n_seen = int(keep.sum()), int(len(keep))
+        dc, z, w = dc[keep], z[keep], self._marginal(task, X[keep])
+        m = dc.shape[1]
+        self.W = []
+        for v in range(w.shape[1]):
+            wv = w[:, v:v + 1]
+            A = dc.T @ (wv * dc)
+            self.W.append(z.T @ (wv * dc) @ torch.linalg.inv(A + self.lam * (A.trace() / m + 1e-12) * torch.eye(m)))
+        return self
+
+    @torch.no_grad()
+    def propose(self, task, X, dc):
+        w = self._marginal(task, X)
+        return _unit(sum(w[:, v:v + 1] * (dc @ Wv.T) for v, Wv in enumerate(self.W)))
+
+
 # ── where to go ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 def goal_delta(task, X, code, target=None):
     E = task.codes[code]
@@ -247,14 +278,15 @@ def value_gradient_chains(make, seeds, gen, T=8):
     return out
 
 
-def kstep_probe(t0, code, train_chains, test_chains, ks=(1, 2, 3)):
+def kstep_probe(t0, code, train_chains, test_chains, ks=(1, 2, 3), model=None):
     """Fit ridge W on the ONE-step pairs of the training chains; on the test chains, the mean cosine between
     W·(c_{t+k} − c_t) and the first thought z_t, per k. High = a multi-step difference maps linearly to a good first
-    step (what GCML's W(s* − s) needs); near zero = it does not."""
+    step (what GCML's W(s* − s) needs); near zero = it does not. `model` (an unfitted inverse model) replaces the
+    ridge W -- e.g. a `GatedInverse` for the tier-1 probe of §17.5."""
     X = torch.cat([x[:-1] for x, _ in train_chains])
     X2 = torch.cat([x[1:] for x, _ in train_chains])
     Z = torch.cat([z for _, z in train_chains])
-    W = InverseModel("ridge", code).fit(t0, X, Z, X2)
+    W = (model or InverseModel("ridge", code)).fit(t0, X, Z, X2)
     res = {}
     for k in ks:
         cs = []

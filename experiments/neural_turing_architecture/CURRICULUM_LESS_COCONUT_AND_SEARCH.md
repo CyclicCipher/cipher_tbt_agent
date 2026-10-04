@@ -1232,3 +1232,109 @@ code is nearest the goal's). For S₅, a constructed exact matrix code (the perm
 gated W does not recover (E2 fails: factor + transport is not enough); no matrix code — not even the constructed one
 — path-integrates S₅ (E5); or lookahead in the matrix code solves S₅ as often as the grid (E6: then tier 3 is not
 needed there).
+
+### 17.7 The tier test — results (run 2026-10-04, after the pre-registration was committed)
+
+Code: `search_bench/run_tiers.py` (Part A), `matrix_code.py` (Part B), `summarize_tiers.py`; the heading world in
+`structured_task.py`, the gated inverse in `gcml.py`; data `search_bench/runs/tiers_*.json`. About 20 minutes on 4 CPU cores.
+
+**Part A — thought space, "pos" goals on the heading world against the plain grid** (6 worlds × 6 problems per cell,
+standard error up to ~0.08; columns: k-step probe at k = 3, one-step progress, GCML planner at budget 64 / 256):
+
+| inverse model | code | heading, d = 64 | heading, d = 256 | grid (reference), d = 64 | grid, d = 256 |
+|---|---|---|---|---|---|
+| global W (tier 0) | raw | 0.04 · 0.45 · 0.08 / 0.11 | −0.00 · 0.43 · 0.08 / 0.08 | 0.21 · 0.82 · 0.19 / 0.22 | 0.24 · 0.81 · 0.22 / 0.22 |
+| global W (tier 0) | SR | 0.00 · 0.42 · 0.06 / 0.06 | 0.03 · 0.42 · 0.03 / 0.03 | 0.35 · 0.91 · 0.50 / 0.50 | 0.38 · 0.93 · 0.44 / 0.44 |
+| global W (tier 0) | allo / coordinates | 0.00 · 0.44 · 0.14 / 0.17 | 0.04 · 0.44 · 0.19 / 0.19 | 0.37 · 0.95 · 0.72 / 0.78 | 0.45 · 0.94 · 0.64 / 0.67 |
+| global W (tier 0) | learned additive | 0.03 · 0.47 · 0.08 / 0.08 | 0.08 · 0.49 · 0.06 / 0.06 | 0.36 · 0.95 · 0.64 / 0.72 | 0.45 · 0.94 · 0.53 / 0.61 |
+| **gated W (tier 1, factor given)** | SR | 0.17 · 0.80 · 0.33 / 0.36 | 0.22 · 0.81 · 0.31 / 0.36 | — | — |
+| **gated W (tier 1, factor given)** | **allo** | **0.35 · 0.90 · 0.56 / 0.58** | **0.42 · 0.90 · 0.56 / 0.56** | — | — |
+| gated W (tier 1, factor given) | learned additive | 0.04 · 0.48 · 0.06 / 0.08 | 0.08 · 0.50 · 0.06 / 0.06 | — | — |
+| **network W(c, Δc) (tier 1, not told)** | **allo / coordinates** | **0.30 · 0.87 · 0.81 / 0.83** | **0.38 · 0.90 · 0.69 / 0.75** | 0.41 · 1.00 · 0.81 / 0.94 | 0.50 · 1.00 · 0.58 / 0.67 |
+| *baselines* | | `grad_greedy` 0.11 / 0.47; `mcts_hybrid`@256 0.58 | `grad_greedy` 0.22 / 0.47; `mcts_hybrid`@256 0.61 | `grad_greedy` 0.50 / 0.69; `mcts_hybrid` 0.78 | `grad_greedy` 0.31 / 0.72; `mcts_hybrid` 0.72 |
+
+On "any" goals (position and heading) the picture is the same: every global W ≤ 0.11 at either budget; gated W on allo
+0.39–0.58; the network 0.58–0.72. The learned ADDITIVE code holds little position (R² 0.13–0.62, ≤ 0.5 in 9 of 12
+worlds) and no heading (R² ≤ 0.09); on the grid it holds the coordinates (0.98–1.00).
+
+**Part B — codes with discrete actions** (3 seeds; path integration = decoding accuracy after k composed predictions;
+lookahead = one-step lookahead planning in the code, 300 problems at distance 4):
+
+| world | code | m | model | unexplained change | path integration k = 8: all / wall-free | lookahead with the model / with the TRUE next codes |
+|---|---|---|---|---|---|---|
+| grid | constructed (x, y) | 2 | additive or matrix | 0.00 | 0.73–0.78 / 1.00 | 1.00 / 1.00 |
+| grid | learned | 2 | additive | 0.00 | 0.73–0.78 / 1.00 | 1.00 / 1.00 |
+| grid | learned | 2 / 4 / 8 | matrix | 0.00 | 0.50–0.60 / 1.00 | 0.17–0.82 / 0.24–0.84 |
+| grid | learned | 4 / 8 | additive | 0.73 / 0.91 | 0.10–0.19 / 0.11–0.22 | 0.54–1.00 / 0.96–1.00 |
+| heading | constructed (position, heading vector) | 4 | additive | 1.00 | 0.02–0.03 / 0.03 | 0.00–0.01 / 1.00 |
+| heading | constructed (position, heading vector) | 4 | matrix | 0.00 | 0.81–0.86 / 1.00 | 1.00 / 1.00 |
+| heading | learned | 2 / 4 / 8 | additive | 1.00 | 0.01–0.03 / 0.00–0.03 | 0.01–0.07 / 0.90–0.99 |
+| heading | **learned** | **4** | **matrix** | **0.00** | **0.81–0.86 / 1.00** | **1.00 / 1.00** |
+| heading | learned | 8 | matrix | 0.02–0.08 | 0.36–0.53 / 0.44–0.61 | 0.76–1.00 / 0.80–1.00 |
+| S₅ | constructed (the arrangement) | 4 | additive | 1.00 | 0.03–0.06 | 0.02–0.03 / 0.03–0.08 |
+| S₅ | **constructed (the arrangement)** | **4** | **matrix** | **0.00** | **1.00** | **0.03–0.05 / 0.03–0.08** |
+| S₅ | learned | 2 / 4 / 8 | additive | 1.00 | 0.03–0.06 | 0.00–0.01 / 0.35–1.00 |
+| S₅ | learned | 4 / 8 | matrix | 0.08–0.36 | 0.01–0.36 | 0.03–0.07 / 0.11–0.33 |
+| S₅ | learned, exploratory: 10 k steps, 5 restarts (1 seed) | 4 / 5 / 8 / 16 | matrix | 0.36 / 0.13 / 0.09 / 0.07 | 0.02 / 0.05 / 0.28 / **0.86** | 0.01–0.06 / 0.04–0.27 |
+
+The learned 4-dimensional matrix code on the heading world IS the factored code: R² 1.00 against position and 1.00
+against the heading vector, in all 3 seeds. The learned additive codes there hold position (0.99) and no heading
+(0.00). (An additive model that predicts nothing leaves the code where it started; its 0.10–0.14 on S₅ at k = 4 is the
+rate at which a random walk is back at its start.)
+
+**Against the pre-registration (§17.6):**
+- **E1 — tier 0 fails with heading: HELD.** With a global W on the SR, allo and learned codes, progress on "pos" goals
+  is 0.42–0.49 against 0.91–0.95 for the same codes on the grid, and planner success 0.03–0.19 against 0.44–0.78 (under half in every case); the probe
+  reads 0.00–0.08 at k = 3.
+- **E2 — tier 1 recovers it: HELD for the direction, PARTLY for the planner.** The heading-gated W on the allo code makes
+  progress 0.90 (grid with coordinates: 0.94–0.95) and its probe returns (0.35–0.42); planner 0.56–0.58 against the
+  grid's 0.64–0.78 — within 0.15 at d = 256 (gap 0.08–0.11), not at d = 64 (gap 0.16–0.20).
+- **E3 — the network not told the factor lands between: REFUTED, in the good direction.** It matches the gated model's
+  progress (0.87–0.90) and BEATS its planner (0.69–0.83 against 0.56–0.58; better than both baselines at a quarter of
+  their budget). Since every state-independent W fails, it must be reading the heading from its input: it found the
+  gate on its own.
+- **E4 — the learned additive code does not recover position: MOSTLY HELD** (R² ≤ 0.5 in 9 of 12 worlds, up to 0.62;
+  heading ≤ 0.09). Gating it does not help (progress 0.48–0.50): the gate cannot rescue a code that lacks the factor.
+- **E5 — tier 2 represents what tier 0 cannot: HELD for constructed codes; for learned ones, only at the true
+  dimension.** Additive codes path-integrate the grid (wall-free 1.00 at k = 8; over all sequences 0.73–0.78, just under
+  the 0.8 mark, because a move into a wall stays put, which no linear model represents) and fail on the heading world
+  and S₅ (≤ 0.14 at k = 4). Matrix codes: the constructed ones are exact on all three worlds; learned ones are exact
+  on the grid (every m) and on the heading world at m = 4, but at the pre-registered m = 8 they reach only 0.44–0.61
+  (heading, wall-free) and 0.10–0.36 (S₅) at k = 8. Next to the exact constructed S₅ code, that is the optimiser —
+  the exploratory follow-up reached 0.86 at m = 16.
+- **E6 — tier 2 represents S₅ but does not plan it: HELD for S₅; the grid half FAILED for learned codes.** Lookahead in
+  every matrix code solves 0.00–0.07 of S₅ problems, the exact one included, while it path-integrates perfectly. On
+  the grid, lookahead in the constructed code solves 1.00 but in learned matrix codes only 0.17–0.82 (≥ 0.9
+  predicted). The reason: a matrix code is not unique and need not be a METRIC. For example, (x, y + αx²) is exact under
+  translations — but its distances are bent, and lookahead needs distances.
+- **Refutation criteria** — a global W working with heading; the gated W not recovering; no matrix code
+  path-integrating S₅; lookahead solving S₅ as often as the grid — **none met.**
+
+### 17.8 What it adds
+
+1. **The tiers are real and measurable.** Tier 0 collapses on the non-commuting world; a state-dependent inverse brings
+   GCML back (progress 0.87–0.90, planner 0.69–0.81 at budget 64 — where `grad_greedy` gets 0.11–0.22); a matrix code
+   path-integrates where no additive code can; and on S₅ even an exact code does not plan. The gated k-step probe
+   detects tier 1 (0.35–0.42, against 0.00–0.04 ungated), so the measurement ladder of §17.5 works.
+2. **Tier 1 does not need to be engineered.** The state-conditioned network found the gate by itself and did better than
+   the hand-gated linear model; and a 4-dimensional MATRIX code learned from transitions turned out to be exactly the
+   grid-cell plus head-direction code. In a matrix code, "rotate the action by the heading" is just a matrix acting on
+   the heading part of the code: tier 1 is the block-triangular case of tier 2. Learning operators — not vectors — is
+   the general mechanism; the factored code is what it finds when the world is a semidirect product.
+3. **Model, metric and planner are three different things.** A code can be a MODEL (it predicts the next state) without
+   being a METRIC (learned matrix codes on the grid: exact, yet distances bent), or a metric without being a model (the
+   learned additive codes on the heading world and S₅: they predict nothing, yet lookahead with the TRUE next codes
+   solves 0.90–0.99 and, on S₅ at m = 8, 1.00 — the additive objective with whitening is close to a Laplacian eigenmap,
+   the smoothest embedding). GCML's inverse needs both at once; lookahead needs a model plus a metric; search with the
+   true dynamics needs only a metric. For tier 3 that is good news: the cheap additive embedding is a usable distance
+   heuristic for search exactly where it fails as a model.
+4. **For the thought space of the real model:** the practical tier-1 tool is the state-conditioned inverse network
+   (not told any factor); the representation to aim for is an operator code (thoughts acting as matrices on the
+   state), paired with a separately learned metric for planning; dimensionality must be chosen from data (surplus
+   dimensions broke learned codes here too, as in §15); S₅-like structure stays with search.
+
+**Caveats.** Part B uses discrete action labels (as TEM does), not thoughts — matrix codes for continuous thoughts are
+untested. Bounded worlds with walls. m chosen by hand; m = 2 in Part B and the S₅ follow-up (one seed) were added
+after the pre-registration, as stated. Part A has 36 problems per planner cell (standard error up to ~0.08); 3 seeds in
+Part B. One small non-commuting group (S₅, 120 states): at distance 4, greedy search with a good metric still works;
+larger puzzles would separate metric-guided search from planning more sharply.

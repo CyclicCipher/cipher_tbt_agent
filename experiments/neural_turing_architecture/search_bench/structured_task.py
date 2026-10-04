@@ -20,6 +20,11 @@ Added for the geometry test (§14–§15):
   "perm"             the permutation group S5 (N = 120, k = 4: rotate left, rotate right, swap 0-1, swap 1-2) -- a
                      Cayley graph of a NON-commuting group, the negative control: no code makes its actions translations
   code "learned"     not built here: injected per world (`gcml.learn_code_als`) from search experience
+Added for the tier test (§17):
+  "heading"          an S × S grid × 4 headings (N = 4·S², k = 6): forward, back, step left, step right -- moves in the
+                     frame of the heading (off the grid = stay) -- turn left, turn right. Movement with heading: the
+                     actions do not commute. `goal_mode` "pos" (same heading, position differs) | "any"; code "allo"
+                     = (x, y, heading unit vector) -- the grid-cell plus head-direction code; `factor` = the heading
 """
 from __future__ import annotations
 
@@ -78,6 +83,8 @@ class StructuredWalk(GraphWalk):
         for _ in range(1000):
             start = int(torch.randint(c.N, (1,), generator=gp))
             at_L = (self.dist_all[start] == c.L).nonzero().flatten()
+            if graph == "heading" and goal_mode == "pos":
+                at_L = at_L[self.factor[at_L] == self.factor[start]]
             if graph == "grid2" and goal_mode != "any":
                 a_s, b_s = start // 16, start % 16
                 a_t, b_t = at_L // 16, at_L % 16
@@ -118,6 +125,23 @@ class StructuredWalk(GraphWalk):
             b = torch.arange(c.N) % (S * S)
             dest = torch.cat([step1[a] * (S * S) + b[:, None], a[:, None] * (S * S) + step1[b]], 1)
             self.xy = torch.cat([xy[a], xy[b]], 1).float()                                # (N, 4)
+        elif graph == "heading":
+            S = int(round(math.sqrt(c.N // 4)))
+            if 4 * S * S != c.N or c.k != 6:
+                raise ValueError("heading needs N = 4·S² and k = 6")
+            node = torch.arange(c.N)
+            cell, h = node // 4, node % 4                                   # node = (x·S + y)·4 + heading
+            pos = torch.stack([cell // S, cell % S], -1)
+            dirs = torch.tensor([[0, 1], [1, 0], [0, -1], [-1, 0]])          # heading 0 N, 1 E, 2 S, 3 W; right = +1
+            cols = []
+            for turn in (0, 2, 3, 1):                                        # forward, back, step left, step right
+                nxt = pos + dirs[(h + turn) % 4]
+                inside = ((nxt >= 0) & (nxt < S)).all(-1)
+                cols.append(torch.where(inside, (nxt[:, 0] * S + nxt[:, 1]) * 4 + h, node))
+            cols += [cell * 4 + (h + 3) % 4, cell * 4 + (h + 1) % 4]         # turn left, turn right
+            dest = torch.stack(cols, 1)
+            self.xy, self.factor = pos.float(), h
+            heading_vec = dirs[h].float()
         elif graph == "perm":
             import itertools
             perms = list(itertools.permutations(range(5)))
@@ -150,10 +174,14 @@ class StructuredWalk(GraphWalk):
         M = torch.linalg.inv(torch.eye(c.N) - sr_gamma * T_rw)
         ev, U = torch.linalg.eigh((M + M.T) / 2)
         self.codes["sr"] = (U[:, -sr_dim:] * ev[-sr_dim:].clamp_min(0).sqrt()).contiguous()
-        if self.xy is not None:
+        if graph == "heading":
+            self.codes["allo"] = torch.cat([self.xy / (S - 1), heading_vec], 1)
+        elif self.xy is not None:
             self.codes["coord"] = self.xy / (S - 1)
+        if graph != "heading":
+            self.factor = None
         return dict(xy=self.xy, keys=self.keys, P=self.P, Q=self.Q, H=self.H, hack_dir=self.hack_dir, dest=self.dest,
-                    dest_flat=self.dest_flat, dist_all=self.dist_all, codes=self.codes)
+                    dest_flat=self.dest_flat, dist_all=self.dist_all, codes=self.codes, factor=self.factor)
 
     def set_target(self, target, gp):
         c = self.cfg
