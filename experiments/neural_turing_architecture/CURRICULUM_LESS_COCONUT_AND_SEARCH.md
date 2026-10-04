@@ -748,3 +748,54 @@ one); the goal-free form is not ready. If the probe reads near zero, leave GCML 
 flatters random exploration); W is learned per world from 16 problems' experience while the baselines learn nothing
 across problems, so the comparison favours GCML; 40 problems per search cell (standard error up to ~0.08); constants
 set once.
+
+---
+
+## 14. The pipeline these results suggest (discussed 2026-10-04)
+
+**The user's framing:** (1) learn a domain at the start with regular search; (2) then GCML as a large speedup for
+domains whose map is known; (3) over time, compositionality or general structure makes GCML useful on new domains.
+Kept, with these refinements:
+
+**Stage 1 — search learns the domain, and teaches everything else.** The gradient-proposing tree (§11) is the general
+method. Its simulated transitions are also the best data for the inverse model (§13.2: 0.32–0.59 of a full move per
+transition against 0.02–0.04 for random thoughts at d = 256; 256 of them suffice in a geometric world), and its
+outcomes train the value that every method depends on (§11.4 point 6).
+
+**Stage 2 — two speedups, complementary, not one:**
+
+| | general | cost | needs geometry | new goals in a known domain |
+|---|---|---|---|---|
+| search (gradient tree) | yes | high | no | yes, at full cost |
+| distilled policy (search → policy, §11.6) | within its training distribution | low | no | only goals like those it was trained on |
+| GCML inverse model | where geometry exists | lowest | yes | **yes, zero-shot**: `W(s* − s)` for any goal |
+
+GCML's distinctive gain is goal-generality inside a mapped domain; distillation is the speedup available where there
+is no geometry. The switch is decided by MEASUREMENT, per domain: the k-step probe (§13.4) says whether GCML can work;
+a running record of how often its first step makes progress says whether it does. (The brain is thought to arbitrate
+between planning and habit by their reliability — Daw, Niv & Dayan, Nature Neuroscience 2005.) And GCML is a first
+try, not a replacement: it wins at the smallest budgets and plateaus (§13.5 point 3), so search takes over when it
+stalls.
+
+**Stage 3 — general structure. Plausible, with a mechanism and a hard limit.**
+- *Mechanism:* GCML's own forward-model objective, `Q·o_{t+1} ≈ Q·o_t + V·a_t` (its eq. 11), is an objective for
+  LEARNING a state code in which actions add — the property `W(s* − s)` needs. §13 hints it is learnable: the SR code,
+  computed from transition statistics alone, worked with the state-conditioned inverse (0.94–0.96).
+- *Limit — commutativity:* a code in which every action is a fixed translation exists only if the actions (nearly)
+  commute. ZipLearn's E12 found exactly this: commuting action sets compress to coordinates (8.9 bits), non-commuting
+  ones need a word table (1,190 bits). No code makes a random graph or a permutation puzzle GCML-friendly as a whole.
+- *Compositionality as the way past it:* domains built from known parts (objects × operations), each part commutative
+  in its own slice of the code, let a goal decompose into per-part differences, each mapped by a known inverse
+  (GCML's building-block result: trained on 5 blocks, solved 8). The price is a code that factors by part — the
+  binding problem of `experiments/NOTES.md`.
+
+**Pre-registered — the geometry test (§15).** Three worlds: the grid; a PRODUCT of two grids (a compositional world);
+the permutation group S₅ with four generators (non-commuting — the negative control). Codes: raw (one-hot), SR, the
+true coordinates where they exist, and a code LEARNED from search experience with GCML's eq-11 objective (solved by
+alternating least squares, whitened against collapse). In the product world the inverse model learns only from
+problems whose goal changes ONE part, and is tested on goals that change BOTH. Measured: one-step progress of
+`W(goal − state)`, the k-step probe, and the GCML planner's success at budgets 64 and 256.
+*Expected:* the learned code recovers geometry on the grid (progress well above raw); in the product world a
+geometric code (coordinates or learned) generalises from one-part to two-part goals; on S₅ every code fails (progress
+at the level of a random graph, probe near zero). *Refuted if* the learned code does no better than raw on the grid,
+or if S₅ succeeds (then commutativity is not the limit).
