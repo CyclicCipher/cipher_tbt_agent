@@ -20,7 +20,8 @@ being continued (user, 2026-10-03); the Thousand Brains agent in the rest of the
 1. **This file.**
 2. **`CURRICULUM_LESS_COCONUT_AND_SEARCH.md`** — the planning document and lab book. §1–§10 the design of search over
    continuous thoughts; **§11–§18 every experiment**, each with its setup, pre-registered predictions, results tables,
-   verdicts and caveats.
+   verdicts and caveats; **§19 the current plan (2026-10-06): one general method** — the learning-theory lens, the
+   zone of proximal development, Ataraxos, and the 2 × 2 P1(b).
 3. `BRAINSTORM.md` — the architecture questions: §1 AttnRes vs the boundary operator (from ZipLearn's E30), §2
    Spotlight, §3 learning thoughts without a curriculum, §5 decisions still open for the user.
 4. `REFERENCES.md` — every source with a verification status; `refs/` — notes from full reads (EfficientZero V2,
@@ -44,6 +45,11 @@ being continued (user, 2026-10-03); the Thousand Brains agent in the rest of the
 - **2026-10-06 — one general search method, not a set of specialists.** No dispatcher that decides which algorithm a
   piece of data needs (commuting or not, geometric or not): that cannot be classified at scale and overcomplicates
   the architecture. Structure belongs in what is LEARNED (policy, value, representation), under one search.
+- **2026-10-06 — BRAINSTORM §5 and planning §9 answered** (the user agreed to the recommendations): from scratch on
+  synthetic tasks; outcome-only, machine execution states as probes only; pointer chasing first, then Brainfuck;
+  attention first, Spotlight after NTA-M; import `h1_lid.py`; amortise (test-time search optional, the same update as
+  training); partial credit allowed with exact match dominant; a problem-difficulty frontier — yes; candidates = the
+  policy refined by gradient, no GCML; search only on frontier problems.
 
 ## Results so far (one line each — the tables are in the planning document)
 
@@ -63,18 +69,17 @@ before searching; the answer's gradient through the thoughts as the base policy 
 GCML only where the k-step probe says geometry exists; a state-conditioned inverse network for tier 1; explore with a
 learned action repertoire, not isotropic noise; learn an operator code and a metric from that exploration.
 
-## Open threads (candidate next steps)
+## Next steps (2026-10-06 — planning doc §19.5)
 
-1. The heading world's operator code is learned only partly — iterate explore → refit; compare with tier 1's network.
-2. Operator codes when a thought's effect depends on the state (node-specific keys) — the current model class is wrong.
-3. The tree as a teacher (§16.3 point 8): start the search at the policy's own chain, or relabel the states the
-   policy visits (DAgger-style).
-4. Choosing the code's dimension from data (§15.5); goals along many axes (§15.3).
-5. Not yet run from the §11.6 plan: `mcts_guided` and `smc_grad` as training operators; a GCML arm in a geometric world.
-6. **The real model** (planning doc §7, §10.7): P1(b) — Coconut trained by BPTT alone on a looped transformer (base:
-   `experiments/transformers/h1_lid.py`); E-dim2 — the effective dimension of a real thought (Jacobian spectrum); the
-   k-step probe on the real model's value-gradient chains; BRAINSTORM §5's open decisions (starting point, task suite,
-   sequence mixer, where the code lives).
+1. **The real model, now the main line:** P0 (the no-thought ceiling on pointer chasing, `h1_lid.py`) → P1(b) as a
+   2 × 2 (our architecture vs Coconut-faithful × mixed hop counts vs hardest only; pre-register numbers first) →
+   E-dim2 (the effective dimension of a real thought).
+2. Optional, minutes: §16's `bptt` arm on L = 4 only (does the mock leak partial progress?).
+3. Implement §19.4's single method once P1(b) says which learning signal survives.
+
+Deprioritised 2026-10-06 (GCML / tier / operator-code threads; kept for the record): the heading world's operator code;
+state-dependent operator codes; the tree as a teacher by relabelling; choosing the code's dimension; `mcts_guided` and
+`smc_grad` as training operators; a GCML arm in a geometric world; the k-step probe on the real model.
 
 ## Code and data (`search_bench/`)
 

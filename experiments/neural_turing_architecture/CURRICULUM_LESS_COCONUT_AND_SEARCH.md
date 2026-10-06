@@ -251,6 +251,16 @@ V calibration; thoughts per problem against difficulty (does thinking grow with 
 - **Q8 — Where does search run?** At every thought (expensive, dense targets) or only where the policy is uncertain
   (cheap, sparse targets)?
 
+**Answered 2026-10-06** (the user agreed to these recommendations; Q1 was answered 2026-10-03; Q3 awaits P1(b)):
+- **Q2 —** amortise: train the policy to need no search; test-time search is optional extra budget, and is the SAME
+  update as training (§19.3, Ataraxos's update equivalence).
+- **Q4 —** partial credit is allowed, with the exact-match term dominant.
+- **Q5 —** yes: a problem-difficulty frontier is allowed — and by §19.1 it is load-bearing, not optional.
+- **Q6 —** probes only (BRAINSTORM §5 item 2).
+- **Q7 —** the policy, refined by gradient: the answer's gradient at training time, the value's at test time. No GCML
+  proposals (the user, 2026-10-06: GCML and the TBT-related questions are out of the main line).
+- **Q8 —** on problems at the difficulty frontier, not at every thought.
+
 ---
 
 ## 10. The dimensionality problem — search in a continuous thought space (brainstorm, 2026-10-03)
@@ -1530,3 +1540,100 @@ operator code exists; with state-dependent gates the model class is wrong. Explo
 the real model may not have). Six worlds per cell, three for the estimated-SR check; 6 held-out problems per planner
 cell per world (36 per cell; standard error up to ~0.08). Small worlds; walls. m chosen by held-out error among
 {true, 8, 16}. Everything in §18.5 is exploratory — designed after the pre-registered results were seen.
+
+---
+
+## 19. One general method — the learning-theory lens, the zone of proximal development, Ataraxos (discussed 2026-10-06)
+
+**The user's objection to §11–§18.** Four or five algorithms appeared, each for its own structural case — commuting or
+not, geometric or not — which in use needs a dispatcher that knows which case a piece of data is in. That cannot be
+classified at scale and overcomplicates the architecture: one good general method beats several specialised ones that
+fire at the wrong times (STATUS, decisions). This section asks what the one method is, and through which lens to find
+it. It is a plan, not a pre-registration. References are in `REFERENCES.md` §11; the learning-theory ones are cited
+from memory and marked unchecked there.
+
+### 19.1 The lens: computational learning theory, not the complexity of search
+
+- **From the outcome alone, a k-step composition is exponentially hard for gradient-based learners.** The standard
+  case is parity: if any one step is wrong the output is useless, so partial progress produces no gradient, and any
+  learner that sees only noisy averages of gradients (statistical-query learners, which include gradient descent with
+  noise) needs time exponential in k (Shalev-Shwartz, Shamir & Shammah 2017; Kearns's SQ bound). **Pointer chasing is
+  in this class:** one wrong hop and the endpoint is an effectively random node.
+- **Intermediate targets make it polynomial** (Wies, Levine & Shashua 2023; Kim & Suzuki 2024 for transformers with
+  chain of thought). A text trace supplies them; R1 forbids them.
+- **The other escape is a ladder:** data in which each harder instance adds one step to an easier one (Abbe,
+  Boix-Adserà & Misiakiewicz 2023, "leap complexity"; Abbe, Cornacchia & Lotfi 2023, curriculum on parity).
+
+**Consequence.** No search algorithm is the general fix: on the hard instances, finding the first success IS the
+exponential problem. What makes it tractable is a loop — attempt problems just past the policy's reach, train on what
+succeeds, raise the difficulty. Levin Tree Search (Orseau, Lelis, Lattimore & Weber 2018) prices each turn of the loop:
+a solution is found within (its length) ÷ (the probability the policy gives it) expansions, so a rung is cheap exactly
+when its solutions already have non-negligible probability under the current policy. In a continuous thought space,
+gradient refinement means the policy needs to land in a solution's BASIN of attraction rather than on the solution,
+which raises that effective probability. (This also bears on Q3: §16 mixed distances 1–4, which is already a ladder.)
+
+### 19.2 The zone of proximal development — how "just beyond reach" has been measured
+
+Vygotsky's term; in machine learning it appears as:
+- **a success-rate band** — Goal GAN's goals of intermediate difficulty (Florensa et al. 2018); "learnability"
+  p(1 − p) (Foster & Foerster 2025); prioritised level replay (Jiang, Grefenstette & Rocktäschel 2021). Needs a
+  verifier, and reads ZERO when the next rung is still at 0% success — it cannot see a rung before the first success;
+- **learning progress** — Oudeyer, Kaplan & Hafner 2007; Schmidhuber's compression progress; Teacher–Student
+  curriculum (Matiisen et al. 2017); ALP-GMM (Portelas et al. 2019);
+- **asymmetric self-play** — one agent proposes tasks the other cannot yet do (Sukhbaatar et al. 2018);
+- **the self-play paper's reward** (2609.30063 §2, read in full; `experiments/ziplearn/refs/`):
+  `r_i = |⟨∇_θ L(y_i; θ_e), P_e ⊙ (θ_⌊e/2⌋ − θ_e)⟩|` — the absolute, AdamW-preconditioned alignment between the learner's
+  gradient on a program's output and the learner's own parameter movement over the last half of training. Mastered
+  programs give near-zero gradients; unlearnable structure gives gradients not aligned with progress; the frontier
+  gives large, aligned ones. Its ablations (Table 5): a difficulty reward was abandoned (injected noise makes anything
+  hard); the realised loss drop and a one-step window were worse and bimodal across seeds; shuffling rewards across
+  programs was much worse; dropping the absolute value was worse; no generator at all (uniform programs) far worse.
+
+**For us.** Our chosen learning signal is the answer's gradient through the thoughts (`bptt`), which is non-zero before
+the first success. So the self-play reward can be computed directly for each difficulty level of our own generator —
+no RL generator network is needed while the knob is low-dimensional (hops; program length): sample levels in
+proportion to r(level). It sees the next rung before any success appears, where p(1 − p) reads zero.
+
+### 19.3 Ataraxos (Sokota et al., Nature, 30 Sep 2026; `refs/ataraxos_nature_2026.md`)
+
+Its hidden-information machinery (a belief network) does not transfer — thinking is one agent with exact,
+deterministic dynamics (§2). What transfers is its design pattern, which carries the one-method principle through:
+1. **Test-time search is one more step of the training update** ("update equivalence"): estimate candidate values by
+   rollouts of the policy–value net, apply the same regularised update as training to the current decision only, act
+   from the updated policy. Search inherits training's improvement property, and there is no separate search
+   algorithm. The test-time step may be more aggressive than training's (no interference, better estimates).
+2. **Damped learning dynamics:** regularisation toward a fixed "magnet" policy, coordinated with update size (KL to the
+   data policy, ratio clipping, gradient clipping, learning rate), both annealed by power laws — strong and large early,
+   weak and small late. Regularisation as an "energy reserve": annealed too fast, entropy collapses and the capacity to
+   learn is gone. This is a schedule for §3.6's entropy-collapse guard; the magnet plays the role the Solomonoff prior
+   g₀ plays in the self-play paper's generator.
+3. **Advantage filtering:** train only on decisions with large |advantage| — 2.5× faster iterations AND better sample
+   efficiency and asymptote. A zone-of-proximal-development filter at the level of single decisions.
+
+### 19.4 The one method, assembled
+
+One operator — a damped, regularised policy-improvement step on a thought — at three scales:
+- **update:** a policy sample, refined by gradient (the answer's at training time, the value's at test time), and a
+  KL-damped step of the policy toward the refined thought, with a magnet term annealed on a schedule;
+- **decision:** train on the thought-steps whose |advantage| is large;
+- **problem:** sample difficulty levels by §19.2's alignment reward on the answer gradient.
+
+Test-time search is the same step applied at the current state with more rollouts. `pi_grad` (§16) is this; the tree
+drops out as a teacher (§16 point 8: its targets were off-policy; an update-equivalent search is on-policy by
+construction). Nothing in it depends on whether the world commutes or has geometry — structure goes into the learned
+policy and value.
+
+### 19.5 What changes in §7
+
+- **P1(b) becomes a 2 × 2:** architecture {ours — looped core, normalised thought re-entry, boundary operator / AttnRes;
+  Coconut-faithful — no loop, the raw last hidden state fed back} × data {hop counts mixed 1…h; the hardest h only}.
+  The user's hypothesis (2026-10-06): our architecture is less likely to blow up across passes and thoughts, so ours
+  beats faithful in both data columns. The lens predicts: hardest-only fails for BOTH architectures (credit assignment
+  does not depend on the architecture); mixed succeeds for ours. Numbers are pre-registered before it runs.
+- **Optional, minutes on CPU:** §16's `bptt` arm trained on L = 4 only. If it still learns, the mock's soft state leaks
+  partial progress and the mock cannot test this question.
+- **Dropped from the next steps:** the k-step probe (§13.4). It exists only to decide whether GCML can work, and GCML
+  is out of the main line (Q7).
+- **Next, in order:** P0 (the no-thought ceiling on pointer chasing) → P1(b) as the 2 × 2 → E-dim2 (the effective
+  dimension of a real thought).
+

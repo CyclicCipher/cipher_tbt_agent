@@ -153,3 +153,29 @@ All confirmed by web search on 2026-10-04 (title, venue, headline claim); none r
 | **Even & Goldreich** — *The minimum-length generator sequence problem is NP-hard*, Journal of Algorithms (1981); **Jerrum** — *The complexity of finding minimum-length generator sequences*, Theoretical Computer Science 36:265–289 (1985) | web | Shortest generator sequence to a target group element: NP-hard (NP-complete with the length bound in unary), PSPACE-complete with it in binary. Why tier 3 has no cheap inverse in general. |
 | **Demaine, Eisenstat & Rudoy** — *Solving the Rubik's Cube Optimally is NP-complete*, STACS 2018, arXiv [1706.06708](https://arxiv.org/abs/1706.06708) | web | The concrete case: optimal n × n × n cube solving is NP-complete. |
 | **Korf** — *Macro-operators: a weak method for learning*, Artificial Intelligence 26 (1985) | web | Learn macro-operators (operator sequences) that solve problems with non-serialisable subgoals such as Rubik's Cube; "operator decomposability" characterises where it works. What people do at tier 3. |
+
+## 11. One general method — learning theory, the zone of proximal development, Ataraxos (planning doc §19)
+
+Added 2026-10-06. Ataraxos was read in full that day (main text, Methods, Extended Data captions). The entries marked
+**unchecked** were cited from memory — the session's web tools were at their weekly limit — so confirm each before
+quoting it.
+
+| ref | status | what we take from it |
+|---|---|---|
+| **Sokota, Vinitsky, Hu, Fan, Kolter & Farina** — *Scalable decision-making for games of imperfect information* ("Ataraxos"), Nature 658:55–59 (30 Sep 2026), doi:10.1038/s41586-026-11036-y | repo `refs/ataraxos_nature_2026.md` | Self-play RL + test-time search under hidden information; superhuman Stratego at ~1/500 of DeepNash's compute. Test-time search as one more step of the training update; damped dynamics (magnet regularisation coordinated with update size, both annealed); advantage filtering. |
+| **Sokota et al.** — *The update-equivalence framework for decision-time planning*, ICLR 2024 | secondary (title and venue from Ataraxos's reference list) | Decision-time planning as an update step of the learning algorithm; search inherits its improvement properties. |
+| **Sokota et al.** — *A unified approach to reinforcement learning, quantal response equilibria, and two-player zero-sum games* (magnetic mirror descent), ICLR 2023 | secondary (as above) | The regularised update: mirror descent with a KL to the previous policy and a KL to a fixed magnet. |
+| **Self-Play Pretraining with Zero Data** — arXiv 2609.30063, §2 "Generator reward" and Table 5 | repo `experiments/ziplearn/refs/self_play_pretraining_zero_data_2609.30063.txt` | The frontier reward: absolute, preconditioned alignment between the learner's gradient on a sample and its recent parameter movement; ablations against difficulty, realised loss drop, one-step windows, shuffling. |
+| **Shalev-Shwartz, Shamir & Shammah** — *Failures of gradient-based deep learning*, ICML 2017 | unchecked | Parity: the gradient carries exponentially little information about the target. |
+| **Kearns** — *Efficient noise-tolerant learning from statistical queries*, JACM 1998 | unchecked | Statistical-query learners cannot learn parities efficiently. |
+| **Wies, Levine & Shashua** — *Sub-task decomposition enables learning in sequence to sequence tasks*, ICLR 2023 | unchecked | Intermediate supervision turns an intractable composition into a learnable one. |
+| **Kim & Suzuki** — *Transformers provably solve parity efficiently with chain of thought*, arXiv 2410.08633 (ICLR 2025) | unchecked | The same, for transformers with chain of thought. |
+| **Abbe, Boix-Adserà & Misiakiewicz** — *SGD learning on neural networks: leap complexity and saddle-to-saddle dynamics*, COLT 2023 | unchecked | Targets learnable step by step ("staircases") versus ones with a large leap. |
+| **Abbe, Cornacchia & Lotfi** — *Provable advantage of curriculum learning on parity targets with mixed inputs*, NeurIPS 2023 | unchecked | A curriculum over inputs makes parity learnable. |
+| **Orseau, Lelis, Lattimore & Weber** — *Single-agent policy tree search with guarantees* (Levin Tree Search), NeurIPS 2018 | unchecked | Expansions ≤ solution length ÷ the policy's probability of the solution. |
+| **Florensa, Held, Geng & Abbeel** — *Automatic goal generation for reinforcement learning agents* (Goal GAN), ICML 2018 | unchecked | Train on goals of intermediate difficulty (success rate in a band). |
+| **Foster & Foerster** — *Learning to reason at the frontier of learnability*, 2025 | unchecked | Sample LLM-RL prompts by p(1 − p). |
+| **Jiang, Grefenstette & Rocktäschel** — *Prioritized level replay*, ICML 2021 | unchecked | Replay levels by a learning-potential score. |
+| **Oudeyer, Kaplan & Hafner** — *Intrinsic motivation systems for autonomous mental development*, IEEE TEC 2007; **Matiisen, Oliver, Cohen & Schulman** — *Teacher–student curriculum learning*, 2017; **Portelas et al.** — ALP-GMM, CoRL 2019 | unchecked | Learning progress as the curriculum signal. |
+| **Sukhbaatar et al.** — *Intrinsic motivation and automatic curricula via asymmetric self-play*, ICLR 2018 | unchecked | One agent proposes tasks at the edge of the other's ability. |
+

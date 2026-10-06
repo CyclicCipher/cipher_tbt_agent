@@ -284,5 +284,17 @@ changes as the policy trains.
 5. **Code:** a self-contained model file in this folder, or import `experiments/transformers/h1_lid.py`?
 6. The planning document's own questions: `CURRICULUM_LESS_COCONUT_AND_SEARCH.md` §9.
 
+**Answered 2026-10-06** (the user agreed to these recommendations):
+1. **From scratch, on synthetic tasks.** "Semantic drift" (Gemini #4) is therefore not a problem this experiment has.
+2. **Outcome-only.** Machine execution states are PROBES, never training targets: as a target, a tape is a trace, and
+   the learning-theory lens (planning doc §19.1) says intermediate targets are exactly what makes the problem easy —
+   using them would answer a different question.
+3. **Pointer chasing first** — the hop count is the depth knob, and one wrong hop sends the endpoint to an effectively
+   random node, so it is the hard, parity-like case. **Then Brainfuck** from the E46 generator.
+4. **Attention first;** Spotlight once NTA-M validates our implementation. P1(b) tests the learning signal, and changing
+   the sequence mixer at the same time would confound it.
+5. **Import `experiments/transformers/h1_lid.py`** — it already has the loop, the boundary operator and AttnRes (E30).
+6. The planning document's §9 — answered the same day there.
+
 (Resolved 2026-10-03: the Spotlight post and code were read once the network allowed it; the EfficientZero V2
 notes were re-made from the paper as `refs/efficientzero_v2_2403.00564.md`.)
