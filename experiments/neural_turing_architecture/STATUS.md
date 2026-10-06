@@ -37,6 +37,13 @@ being continued (user, 2026-10-03); the Thousand Brains agent in the rest of the
   and the escalating tiers of §17.5 as a division of labour by structural difficulty — both agreed with the user.
 - Working rules: **no background agents (subagents)**; long CPU runs were run as background shell jobs. Commit and
   push to `exp/mdl-vs-ntp`; do not open PRs unless asked.
+- **2026-10-06 — less focus on GCML and the TBT-related questions** (cognitive maps, the tiers, operator codes) in
+  future work. §12–§18 stand as recorded; they are not the main line.
+- **2026-10-06 — no written weights for this architecture until the architecture is settled.** Everything is
+  trained; E46-style weight-writing waits until the design is final.
+- **2026-10-06 — one general search method, not a set of specialists.** No dispatcher that decides which algorithm a
+  piece of data needs (commuting or not, geometric or not): that cannot be classified at scale and overcomplicates
+  the architecture. Structure belongs in what is LEARNED (policy, value, representation), under one search.
 
 ## Results so far (one line each — the tables are in the planning document)
 
