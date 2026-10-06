@@ -65,6 +65,8 @@ real model.
 5. **Outcome-only;** machine execution states are probes, never targets; a problem-difficulty frontier is allowed —
    and load-bearing (item 7). From scratch, synthetic tasks, attention first, `h1_lid.py` (§5, 2026-10-06).
 6. **GCML and the TBT-related questions are out of the main line** (2026-10-06).
+6b. **No Coconut-faithful baselines** — no compute on reproducing or beating Meta's setup; arms test our architecture
+    (2026-10-06).
 
 **Insights (with evidence)**
 7. **Learning-theory lens:** from the outcome alone a k-step composition is exponentially hard for gradient
@@ -76,7 +78,8 @@ real model.
    real test.
 10. **Coconut's no-curriculum failure has two candidate causes:** gradient pathology through a raw, unnormalised
    fed-back state — the user's hypothesis is that our loop's normalisation and input re-injection avoid it — and
-   credit assignment, which no architecture removes. P1(b)'s 2 × 2 separates them (planning §19.5).
+   credit assignment, which no architecture removes. Not tested against a Coconut-faithful arm (item 6b); P1(b) tests
+   the credit-assignment half on our architecture (mixed levels against hardest-only, planning §19.5).
 11. **Training targets must lie on the policy's own path** (§16 point 8: the tree found the best solutions and taught
     worst). Search as one more step of the TRAINING update (Ataraxos's update equivalence) keeps them there by
     construction (§19.3).

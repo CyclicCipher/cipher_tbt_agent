@@ -1625,11 +1625,9 @@ policy and value.
 
 ### 19.5 What changes in §7
 
-- **P1(b) becomes a 2 × 2:** architecture {ours — looped core, normalised thought re-entry, boundary operator / AttnRes;
-  Coconut-faithful — no loop, the raw last hidden state fed back} × data {hop counts mixed 1…h; the hardest h only}.
-  The user's hypothesis (2026-10-06): our architecture is less likely to blow up across passes and thoughts, so ours
-  beats faithful in both data columns. The lens predicts: hardest-only fails for BOTH architectures (credit assignment
-  does not depend on the architecture); mixed succeeds for ours. Numbers are pre-registered before it runs.
+- **P1(b) on our architecture only,** data {levels mixed 1…h; the hardest h only}. ~~A Coconut-faithful architecture
+  arm~~ is dropped (the user, 2026-10-06: no Coconut-faithful baselines). The lens predicts hardest-only fails and mixed
+  succeeds. Numbers are pre-registered before it runs.
 - **Optional, minutes on CPU:** §16's `bptt` arm trained on L = 4 only. If it still learns, the mock's soft state leaks
   partial progress and the mock cannot test this question.
 - **Dropped from the next steps:** the k-step probe (§13.4). It exists only to decide whether GCML can work, and GCML
@@ -1661,8 +1659,8 @@ an exact verifier, fresh data every draw (Brainfuck: pools of 20,000 programs pe
 **Arms** (`thinking/p0_ceiling.py`; one seed each; d = 128, 4 heads, RoPE, `h1_lid` blocks):
 - `loop2`, `loop4`, `loop8` — `h1_lid.LoopedModel`: prelude, ONE tied core block applied K = 2 / 4 / 8 times with the
   boundary operator between passes, coda (4 / 6 / 10 block applications) — our architecture, no thoughts;
-- `plain6` — `h1_lid.Model`, 6 untied blocks (6 block applications, as `loop4`) — the Coconut-faithful baseline, no
-  thoughts.
+- ~~`plain6` — `h1_lid.Model`, 6 untied blocks — the Coconut-faithful baseline~~ — **dropped before any run (the user,
+  2026-10-06): no Coconut-faithful baselines; compute goes to our architecture.**
 Training: every family and every level mixed uniformly (a ladder, §19.1), 32 problems per family per step (192),
 10,000 steps, AdamW (lr 1e-3, weight decay 0.01, betas 0.9/0.98), 5% warmup + cosine, gradient clip 1.0, bf16 on the
 GPU; loss = cross-entropy on the answer at the last position only.
@@ -1682,7 +1680,7 @@ solved; `h_fail` = the shallowest failed level; a failed level is **flat** if it
 - **P0.4 — solvable vs non-solvable (the theory's prediction; uncertain, learnability may dominate):** a fixed-depth
   transformer can shortcut a solvable group's word problem, not S₅'s (NC¹-complete), so `h_fail(aff) > h_fail(s5)` in
   at least 2 of the 3 looped arms.
-- **P0.5 — open, no prediction:** `plain6` against `loop4` at equal block applications.
+- ~~**P0.5** — `plain6` against `loop4`~~ (dropped with the arm).
 
 **Refuted / what changes:** if P0.2 fails, R6 cannot be established at this size on this suite — before P1(b), either
 deepen the levels or shrink the model, and say which. If P0.1 fails, nothing else is read. The P1(b) problem set is

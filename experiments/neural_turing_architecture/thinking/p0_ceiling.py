@@ -18,7 +18,7 @@ shallowest failed level.
 Arms (`--arm`):
     loop  — `h1_lid.LoopedModel`: prelude block, ONE tied core block applied `--loops` times with the boundary operator
             (RMS-norm + re-injected anchor) between passes, coda block — our architecture without thoughts;
-    plain — `h1_lid.Model`: `--layers` untied blocks — the Coconut-faithful baseline without thoughts.
+    plain — `h1_lid.Model`: `--layers` untied blocks (kept as an option; NOT run — no Coconut-faithful baselines).
 
 Usage:
     python p0_ceiling.py --arm loop --loops 4 --json runs/p0/loop4.json --save runs/p0/loop4.pt

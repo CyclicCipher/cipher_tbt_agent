@@ -52,6 +52,8 @@ being continued (user, 2026-10-03); the Thousand Brains agent in the rest of the
   attention first, Spotlight after NTA-M; import `h1_lid.py`; amortise (test-time search optional, the same update as
   training); partial credit allowed with exact match dominant; a problem-difficulty frontier — yes; candidates = the
   policy refined by gradient, no GCML; search only on frontier problems.
+- **2026-10-06 — no Coconut-faithful baselines.** Compute goes to our architecture only (P0's `plain6` arm and
+  P1(b)'s architecture arm dropped before running).
 
 ## Results so far (one line each — the tables are in the planning document)
 
@@ -73,9 +75,9 @@ learned action repertoire, not isotropic noise; learn an operator code and a met
 
 ## Next steps (2026-10-06 — planning doc §19.5)
 
-1. **The real model, now the main line:** P0 (the no-thought ceiling on pointer chasing, `h1_lid.py`) → P1(b) as a
-   2 × 2 (our architecture vs Coconut-faithful × mixed hop counts vs hardest only; pre-register numbers first) →
-   E-dim2 (the effective dimension of a real thought).
+1. **The real model, now the main line:** P0 (the no-thought ceiling on the diverse suite, planning §20) → P1(b) on
+   our architecture (mixed levels vs hardest only; pre-register numbers first) → E-dim2 (the effective dimension of a
+   real thought).
 2. Optional, minutes: §16's `bptt` arm on L = 4 only (does the mock leak partial progress?).
 3. Implement §19.4's single method once P1(b) says which learning signal survives.
 
