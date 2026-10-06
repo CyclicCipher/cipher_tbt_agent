@@ -42,6 +42,58 @@ state"); per problem, up to T thoughts (the OUTER loop, "sequence adds state"). 
 refining (depth) and stop thinking (sequence). The name fits the 2014 original: a controller (the looped core,
 one pass = one clock tick) with read/write access to a memory, learning to compute without being shown how.
 
+
+## 0.1 Standing principles and insights — read before designing anything (kept current)
+
+Each line is one thing this experiment has decided or learned, with where its evidence lives. Add to this list when
+something new is learned; strike through (do not delete) what is overturned. "Mock" = the CPU thought-space mock of
+the planning doc §11–§18: one kind of world, so a mock result is PROVISIONAL until reproduced on the task suite with a
+real model.
+
+**Decisions (the user's)**
+1. **One general method.** No set of specialised algorithms with a dispatcher deciding which one a piece of data
+   needs; case structure (commuting or not, geometric or not) goes into what is LEARNED — policy, value,
+   representation — under one search (2026-10-06; planning §19).
+2. **Trained, not written,** until the architecture is settled (2026-10-06). *Insight (unmeasured):* written weights
+   are nearly flat — an E46 row is driven to −M off its token class, so its gradient is ≈ 0 — so a written machine
+   cannot seed gradient-based search unless its sharpness M is lowered; M acts as a temperature, the same dial as
+   Spotlight's sharp VM kernel against its smooth trained one.
+3. **Diverse training environments.** No conclusion from a single task family or a single mock world; every
+   experiment reports across a suite of structurally different families (2026-10-06; the suite is built in P0,
+   planning §20).
+4. **Thoughts are free vectors in ℝ^d** — no codebook (Q1, 2026-10-03).
+5. **Outcome-only;** machine execution states are probes, never targets; a problem-difficulty frontier is allowed —
+   and load-bearing (item 7). From scratch, synthetic tasks, attention first, `h1_lid.py` (§5, 2026-10-06).
+6. **GCML and the TBT-related questions are out of the main line** (2026-10-06).
+
+**Insights (with evidence)**
+7. **Learning-theory lens:** from the outcome alone a k-step composition is exponentially hard for gradient
+   learners; intermediate targets or a LADDER of difficulty are the escapes. The frontier carries the weight; the
+   search algorithm is secondary (planning §19.1).
+8. **Sampling-only search and outcome-only RL die from d ≈ 64** in a thought space; gradients through the exact
+   dynamics are necessary (§10.2 derivation + toy; §11, §16 — mock).
+9. **The answer's gradient through the thoughts is a strong signal in principle** (`bptt`, §16 — mock). P1(b) is the
+   real test.
+10. **Coconut's no-curriculum failure has two candidate causes:** gradient pathology through a raw, unnormalised
+   fed-back state — the user's hypothesis is that our loop's normalisation and input re-injection avoid it — and
+   credit assignment, which no architecture removes. P1(b)'s 2 × 2 separates them (planning §19.5).
+11. **Training targets must lie on the policy's own path** (§16 point 8: the tree found the best solutions and taught
+    worst). Search as one more step of the TRAINING update (Ataraxos's update equivalence) keeps them there by
+    construction (§19.3).
+12. **The zone of proximal development has measures:** the self-play paper's gradient-alignment reward sees the next
+    rung before any success (where p(1 − p) reads zero); Ataraxos's |advantage| filter is its per-decision form (§19.2–3).
+13. **Damped dynamics:** anneal the pull toward a fixed simple policy together with the step size — regularisation as
+    an "energy reserve"; spent too fast, entropy collapses and learning stops (Ataraxos, §19.3).
+14. **A value is trained on the search's own data by its own backup;** labelling explored-but-unexpanded states as
+    failures collapsed it (§16.2).
+15. **Answer-encoding trap:** a free thought can carry the answer itself; guard with KL-bounded targets and the
+    thought ablation (§10.5, R6).
+16. **Spotlight:** overwritable memory, O(1) work per token, a search fork is a copy-on-write overlay of ≤ 9·H·L
+    cells (§2). Comes in after NTA-M validates it.
+17. **Depth axis:** attention residuals across passes held 0.60–0.77 at 2× the trained passes where the fixed boundary
+    operator collapsed to 0.08; a window over passes failed (E30; §1). The sequence axis still needs its own
+    normaliser on the fed-back thought (§1 gap 4).
+
 ---
 
 ## 1. Do Block Attention Residuals remove the need for the boundary operator?

@@ -18,6 +18,8 @@ being continued (user, 2026-10-03); the Thousand Brains agent in the rest of the
 ## Read in this order
 
 1. **This file.**
+1b. **`BRAINSTORM.md` §0.1 — the standing principles and insights.** Every decision and lesson so far in one list;
+   read it before designing anything, and add to it when something new is learned.
 2. **`CURRICULUM_LESS_COCONUT_AND_SEARCH.md`** — the planning document and lab book. §1–§10 the design of search over
    continuous thoughts; **§11–§18 every experiment**, each with its setup, pre-registered predictions, results tables,
    verdicts and caveats; **§19 the current plan (2026-10-06): one general method** — the learning-theory lens, the
@@ -81,7 +83,15 @@ Deprioritised 2026-10-06 (GCML / tier / operator-code threads; kept for the reco
 state-dependent operator codes; the tree as a teacher by relabelling; choosing the code's dimension; `mcts_guided` and
 `smc_grad` as training operators; a GCML arm in a geometric world; the k-step probe on the real model.
 
-## Code and data (`search_bench/`)
+## Code and data — the real model (`thinking/`)
+
+| file | what |
+|---|---|
+| `tasks.py` | the diverse task suite (§20): six families (`ptr`, `s5`, `bool`, `ca`, `bf`, `aff`) × 8 depth levels, one shared vocabulary, `make_batch` |
+| `p0_ceiling.py` | P0: train a no-thought model (`--arm loop --loops K` or `--arm plain --layers L`) on the suite; per-(family, level) normalised accuracy at mid and end; `h_solved`, `h_fail` |
+| `runs/p0/` | P0 results (`*.json`, `*.log`); Brainfuck pools and checkpoints are `*.pt` (gitignored, rebuilt on demand) |
+
+## Code and data — the mock (`search_bench/`)
 
 | file | what |
 |---|---|

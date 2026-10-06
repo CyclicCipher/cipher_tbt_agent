@@ -1637,3 +1637,60 @@ policy and value.
 - **Next, in order:** P0 (the no-thought ceiling on pointer chasing) → P1(b) as the 2 × 2 → E-dim2 (the effective
   dimension of a real thought).
 
+---
+
+## 20. P0 — the no-thought ceiling on a diverse task suite (pre-registered 2026-10-06, before any training run)
+
+**Why.** R6 (§1): thoughts must be NECESSARY on the problems we test them on, or a model that ignores its thoughts
+looks as good as one that uses them. P0 finds, per task family, the depth at which a model of our size WITHOUT thoughts
+fails while the shallow levels of the same family are solved. Those levels are P1(b)'s problems. And per the user's
+note (2026-10-06; BRAINSTORM §0.1 item 3) the suite is DIVERSE, so no conclusion from here on rests on one kind of world.
+
+**The suite** — `thinking/tasks.py`: six structurally different families, 8 depth levels each, a one-token answer,
+an exact verifier, fresh data every draw (Brainfuck: pools of 20,000 programs per level, eval from a separate pool):
+
+| family | structure | depth levels h |
+|---|---|---|
+| `ptr` | chain lookup — a random permutation of 16 nodes given as pairs; answer π^h(x) | 1, 2, 3, 4, 5, 6, 7, 8 hops |
+| `s5` | composition in a NON-solvable group — a word of h generators of S₅; answer: the item at a queried position | 1, 2, 3, 4, 6, 8, 12, 16 |
+| `bool` | tree evaluation — a prefix AND/OR/NOT formula of depth h (balanced 0/1) | 1 … 8 |
+| `ca` | parallel local dynamics — a random elementary CA rule GIVEN IN CONTEXT, 16 circular cells; one cell after h steps (balanced) | 1 … 8 steps |
+| `bf` | a universal machine — a pure Brainfuck program (E46 semantics, ≤ 36 instructions); answer: a queried cell at the halt | executed steps ≤ 2, 4, 6, 10, 16, 32, 64, 256 |
+| `aff` | arithmetic in a SOLVABLE group — x₀ then h operations `+a` / `×a` mod 17 | 1, 2, 3, 4, 6, 8, 12, 16 |
+
+**Arms** (`thinking/p0_ceiling.py`; one seed each; d = 128, 4 heads, RoPE, `h1_lid` blocks):
+- `loop2`, `loop4`, `loop8` — `h1_lid.LoopedModel`: prelude, ONE tied core block applied K = 2 / 4 / 8 times with the
+  boundary operator between passes, coda (4 / 6 / 10 block applications) — our architecture, no thoughts;
+- `plain6` — `h1_lid.Model`, 6 untied blocks (6 block applications, as `loop4`) — the Coconut-faithful baseline, no
+  thoughts.
+Training: every family and every level mixed uniformly (a ladder, §19.1), 32 problems per family per step (192),
+10,000 steps, AdamW (lr 1e-3, weight decay 0.01, betas 0.9/0.98), 5% warmup + cosine, gradient clip 1.0, bf16 on the
+GPU; loss = cross-entropy on the answer at the last position only.
+
+**Measured,** at step 5,000 and step 10,000, on 512 fresh problems per (family, level): accuracy; chance = the
+majority answer's share of those problems; **normalised accuracy** (acc − chance) / (1 − chance). A level is
+**solved** at ≥ 0.9 and **failed** at ≤ 0.2. `h_solved` = the deepest level such that it and every shallower one are
+solved; `h_fail` = the shallowest failed level; a failed level is **flat** if it gained ≤ 0.05 from step 5,000 to
+10,000 (capacity-limited rather than training-limited).
+
+**Predictions:**
+- **P0.1 — sanity gate:** every arm solves level 1 in at least 5 of the 6 families. If not, the training is too weak
+  and no ceiling below is interpretable — fix training first.
+- **P0.2 — R6 holds on the suite:** `loop4` has a failed level in at least 4 of the 6 families, flat in each.
+- **P0.3 — the depth axis buys depth:** `h_solved(loop8) ≥ h_solved(loop2)` in at least 5 of 6 families, and strictly
+  greater in at least 3.
+- **P0.4 — solvable vs non-solvable (the theory's prediction; uncertain, learnability may dominate):** a fixed-depth
+  transformer can shortcut a solvable group's word problem, not S₅'s (NC¹-complete), so `h_fail(aff) > h_fail(s5)` in
+  at least 2 of the 3 looped arms.
+- **P0.5 — open, no prediction:** `plain6` against `loop4` at equal block applications.
+
+**Refuted / what changes:** if P0.2 fails, R6 cannot be established at this size on this suite — before P1(b), either
+deepen the levels or shrink the model, and say which. If P0.1 fails, nothing else is read. The P1(b) problem set is
+fixed from `loop4`'s results: per family with level 1 solved and a flat failure, levels 1 … h_fail plus the next two.
+
+**Caveats stated in advance.** One seed per arm. A failed level is a fact about this model at this training budget —
+the flat test separates "still learning" from "stuck", not "could never". `bool` has short-circuits (an AND with a 0
+child), so its effective depth is below h for some formulas. The shallow `bf` levels have few distinct programs, so
+train and eval overlap there (sanity levels). Answer balance differs by family; normalisation by the majority rate
+handles it, but a high chance rate leaves less room above it.
+
