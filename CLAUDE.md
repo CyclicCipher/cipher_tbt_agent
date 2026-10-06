@@ -1,6 +1,13 @@
 # CLAUDE.md — Cipher's TBT Agent
 
-## ⚠ ACTIVE WORK (read first) — Phase 2 Step C: objects as column-models, recognized by voting
+## ⚠ CURRENT FOCUS (since 2026-10-03) — the Neural Turing Architecture experiment
+**START HERE:** `experiments/neural_turing_architecture/STATUS.md` — the handoff: what the experiment is, the user's
+decisions, every result so far (one line each), open threads, the code and data map, how to run. Then
+`experiments/neural_turing_architecture/CURRICULUM_LESS_COCONUT_AND_SEARCH.md` (the lab book: §11–§18 hold every
+experiment with pre-registrations, tables and verdicts). The work lives on branch **`exp/mdl-vs-ntp`**. The TBT agent
+below is no longer the main focus, and ZipLearn is not being continued (user, 2026-10-03). No background agents.
+
+## Previous active work (TBT agent, to 2026-06; superseded by the section above) — Phase 2 Step C: objects as column-models, recognized by voting
 **START HERE:** the memory **`reference_tbt_pose_invariant_recognition.md`** (the mechanism + sources) and
 **`src/tbt/RESEARCH.md` R11** (the two "BUILT 2026-06-28" notes). Run `PYTHONPATH=src python -m pytest src/tests` (73 green);
 the agent is one thin shell (`tbt/agent.py`) over a planner; the merge to `src/` is long done.
