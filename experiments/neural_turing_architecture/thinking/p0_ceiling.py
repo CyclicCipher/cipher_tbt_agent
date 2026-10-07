@@ -151,13 +151,15 @@ def main():
     ap.add_argument("--only", default="", help="diagnostics: train AND evaluate only these families (comma list)")
     ap.add_argument("--max_level", type=int, default=-1, help="diagnostics: train only on level indices <= this")
     ap.add_argument("--sample", choices=["uniform", "frontier"], default="uniform", help="level sampling in training")
+    ap.add_argument("--ca_fmt", choices=["index", "marked", "marked_pairs"], default="index")
+    ap.add_argument("--save_every", type=int, default=0, help="checkpoint model + optimiser every N steps (leap probe Test 2)")
     ap.add_argument("--json", default="")
     ap.add_argument("--save", default="")
     args = ap.parse_args()
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(args.seed)
 
-    fams = make_families(bf_seed=0, bf_per_level=args.bf_train, cache_dir=args.cache)
+    fams = make_families(bf_seed=0, bf_per_level=args.bf_train, cache_dir=args.cache, ca_fmt=args.ca_fmt)
     eval_fams = list(fams)
     eval_fams[4] = Brainfuck(seed=1, per_level=args.bf_eval, cache_dir=args.cache)
     if args.only:
@@ -201,6 +203,13 @@ def main():
             log.append(dict(step=step + 1, loss=round(run_loss, 4), s=round(time.time() - t0, 1), frontier=fr))
             print(f"  step {step + 1:6d}  loss {run_loss:.4f}  {time.time() - t0:7.0f}s"
                   + (("  frontier " + " ".join(f"{k}:{v}" for k, v in fr.items())) if fr else ""), flush=True)
+        if args.save_every and (step + 1) % args.save_every == 0:
+            ck = Path(args.save or args.json).with_suffix("")
+            ck = ck.parent / (ck.name + "_ckpt")
+            ck.mkdir(parents=True, exist_ok=True)
+            torch.save(dict(step=step + 1, state=model.state_dict(), opt=opt.state_dict(), lr=sched.get_last_lr()[0],
+                            frontier_acc=[a.tolist() for a in cur.acc] if cur else None, args=vars(args)),
+                       ck / f"step{step + 1:06d}.pt")
         if step + 1 in (args.steps // 2, args.steps):
             tag = "mid" if step + 1 < args.steps else "final"
             evals[tag] = evaluate(model, eval_fams, args.eval_n, dev)

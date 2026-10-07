@@ -1783,6 +1783,16 @@ token per pair: solved in 2,000 steps × 128 problems). `ca` looks like another 
 neighbourhood code, then fetch the rule bit at THAT index. The leap probe (§21) is built to diagnose exactly this, before
 another training run is spent.
 
+
+### 20.4 Run 3 — registered 2026-10-06, before it runs
+
+Changes from run 2: (a) **right padding** (§20.3's bug fix) in training and evaluation; (b) **`ca` as `marked_pairs`**
+(§21.1, L3); (c) **20,000 steps** — `ptr` level 1 alone needed ~275,000 problems (2,147 steps × 128), and at ~26 `ptr`
+problems per step at the frontier that is ~10,600 steps, which left run 2's 10,000 no room above level 1; evaluation at
+10,000 and 20,000 (the "flat" test compares them); (d) `loop4` saves model and optimiser every 1,000 steps (§21 Test 2).
+Arms `loop2`, `loop4`, `loop8`, frontier curriculum, everything else as §20; predictions P0.1–P0.4 stand as registered
+(P0.4's direction was already contradicted by run 2's re-scored numbers, §20.3 — it is kept, not edited).
+
 ---
 
 ## 21. The leap probe (pre-registered 2026-10-06, before any probe ran)
@@ -1825,4 +1835,41 @@ next 2,000 steps.
 - **L4:** the probe's p1 or p2 has Spearman ≥ 0.3 with the gain and is at least as predictive as p(1 − p).
 - No prediction between the probe and the self-play reward (open — Test 2 decides which zone-of-proximal-development
   signal the single method adopts, BRAINSTORM §0.1 item 1).
+
+### 21.1 Test 1 — RAN 2026-10-06 (`thinking/runs/leap/test1.{json,log}`, 22 minutes)
+
+| item | p1 at init | p2 at init | probe's leap | solo, 3,000 steps (normalised) | steps to 0.9 |
+|---|---|---|---|---|---|
+| `ptr` two tokens per pair, h = 1 | −0.03 | −0.02 | > 2 | −0.02 | never |
+| `ptr` one token per pair, h = 1 | −0.01 | +0.05 | > 2 | **+0.99** | 2,147 |
+| `ptr` one token per pair, h = 2 | −0.01 | −0.01 | > 2 | +0.05 | never |
+| `aff` h = 1 | +0.57 | +1.00 | 1 | +1.00 | 255 |
+| `aff` h = 2 | +0.00 | +0.23 | > 2 | +0.03 | never |
+| `s5` h = 1 | +1.00 | +1.00 | 1 | +1.00 | 105 |
+| `s5` h = 4 | +0.19 | +0.59 | 2 | +1.00 | 761 |
+| `ca` `index`, h = 1 | +0.29 | +0.29 | > 2 | +0.91 | 2,246 |
+| `ca` `marked`, h = 1 | +0.27 | +0.34 | > 2 | +0.85 | 2,615 |
+| `ca` `marked_pairs`, h = 1 | +0.30 | +0.42 | > 2 | **+0.99** | **1,226** |
+| `bool` depth 4 | +0.42 | +0.64 | 2 | +0.99 | 369 |
+| `bf` 11–16 steps | +0.54 | +0.70 | 1 | +0.99 | 831 |
+
+**Against the pre-registration.**
+- **L1 — HELD:** Spearman(p2 at init, solo accuracy) = +0.78 (p1: +0.71), ≥ 0.5.
+- **L2 — held on paper only:** p2 of one token per pair (+0.05) > two tokens (−0.02), but both read "leap > 2" — the
+  probe does NOT tell the learnable lookup from the unlearnable one, which is the case it was built for.
+- **L3 — FAILED:** probe ranking `marked_pairs` > `marked` > `index`; training ranking `marked_pairs` > `index` >
+  `marked`. The best format is right; the other two are swapped. As registered, training decides: **`ca` enters run 3
+  as `marked_pairs`** (0.99 at 1,226 steps against `index`'s 0.91 at 2,246).
+
+**What it says.** At initialisation the probe gets the coarse ranking right (memorisable tables and easy items high;
+compositions from scratch — `ptr` h = 2, `aff` h = 2 — low, and indeed never learned) but it has false negatives
+exactly where learning means BUILDING a feature: the one-token lookup and the `ca` rule lookup need an attention head that
+a random network does not have, and gradient descent builds it in ~1,000–2,000 steps. A probe on frozen random features
+measures what is learnable without feature learning (the kernel regime); a transformer learns features. So the probe at
+initialisation is not the zone-of-proximal-development signal; Test 2 (on TRAINED features, where the next level's leap
+is relative to the heads already built) decides whether the probe has a place at all.
+
+Two side observations: (i) `ca` IS learnable at level 1 alone — in run 2's mixture it was not reached in 10,000 steps;
+(ii) h = 2 from scratch fails for both `ptr` and `aff` in 3,000 steps while h = 1 succeeds — the ladder is needed even
+for the second rung (§19.1).
 

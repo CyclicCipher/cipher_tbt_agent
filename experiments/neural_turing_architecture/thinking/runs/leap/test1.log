@@ -1,0 +1,14 @@
+ptr2             h=1    init p1 -0.03 p2 -0.02 (leap >2)  | solo 3000 steps: -0.02, 0.9 at None  | after: p0 -0.03    112s
+ptr              h=1    init p1 -0.01 p2 +0.05 (leap >2)  | solo 3000 steps: +0.99, 0.9 at 2147  | after: p0 +0.99    213s
+ptr              h=2    init p1 -0.01 p2 -0.01 (leap >2)  | solo 3000 steps: +0.05, 0.9 at None  | after: p0 +0.04    336s
+aff              h=1    init p1 +0.57 p2 +1.00 (leap 1)  | solo 3000 steps: +1.00, 0.9 at 255  | after: p0 +1.00    448s
+aff              h=2    init p1 +0.00 p2 +0.23 (leap >2)  | solo 3000 steps: +0.03, 0.9 at None  | after: p0 +0.02    536s
+s5               h=1    init p1 +1.00 p2 +1.00 (leap 1)  | solo 3000 steps: +1.00, 0.9 at 105  | after: p0 +1.00    623s
+s5               h=4    init p1 +0.19 p2 +0.59 (leap 2)  | solo 3000 steps: +1.00, 0.9 at 761  | after: p0 +1.00    711s
+ca-index         h=1    init p1 +0.29 p2 +0.29 (leap >2)  | solo 3000 steps: +0.91, 0.9 at 2246  | after: p0 +0.94    831s
+ca-marked        h=1    init p1 +0.27 p2 +0.34 (leap >2)  | solo 3000 steps: +0.85, 0.9 at 2615  | after: p0 +0.85    955s
+ca-marked_pairs  h=1    init p1 +0.30 p2 +0.42 (leap >2)  | solo 3000 steps: +0.99, 0.9 at 1226  | after: p0 +1.00   1083s
+bool             h=4    init p1 +0.42 p2 +0.64 (leap 2)  | solo 3000 steps: +0.99, 0.9 at 369  | after: p0 +0.99   1220s
+bf               h=16   init p1 +0.54 p2 +0.70 (leap 1)  | solo 3000 steps: +0.99, 0.9 at 831  | after: p0 +0.99   1316s
+
+L1: Spearman(p2 at init, solo accuracy) = +0.78   (p1: +0.71)

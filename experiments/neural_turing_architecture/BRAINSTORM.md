@@ -117,6 +117,10 @@ real model.
 22. **Learnability, not expressivity, ranked the groups:** the solvable affine group mod 17 collapsed at h = 3, the
     non-solvable S₅ held to h = 6 (planning §20.3). Circuit-complexity classes say what a depth CAN express, not what
     gradient descent finds first.
+23. **A probe on a frozen RANDOM network cannot see what gradient descent will build.** At initialisation the leap
+    probe ranked learnability well overall (Spearman +0.78) but called the one-token lookup and the CA rule lookup
+    unlearnable; training built the needed attention heads in 1,000–2,500 steps (planning §21.1). Learnability by a
+    feature-learning model is not the kernel-regime learnability a random-feature probe measures.
 20. **A depth knob must be checked against shortcuts.** Short-circuiting Boolean siblings and counted Brainfuck loops
     both let a no-thought model score well at "depth 8" / "256 steps" (planning §20.1). A family's depth is the depth
     its answer actually REQUIRES, not the size of its generator's knob.

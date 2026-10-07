@@ -287,9 +287,9 @@ class Brainfuck:
         return pool[int(rng.integers(len(pool)))]
 
 
-def make_families(bf_seed=0, bf_per_level=20000, cache_dir=None):
-    return [PointerChase(), S5Word(), BoolFormula(), CellularAutomaton(), Brainfuck(bf_seed, bf_per_level, cache_dir=cache_dir),
-            AffineMod()]
+def make_families(bf_seed=0, bf_per_level=20000, cache_dir=None, ca_fmt="index"):
+    return [PointerChase(), S5Word(), BoolFormula(), CellularAutomaton(ca_fmt),
+            Brainfuck(bf_seed, bf_per_level, cache_dir=cache_dir), AffineMod()]
 
 
 # ------------------------------------------------------------------------------------------------------------ batching
