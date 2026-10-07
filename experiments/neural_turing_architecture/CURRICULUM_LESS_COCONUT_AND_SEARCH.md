@@ -1783,3 +1783,46 @@ token per pair: solved in 2,000 steps × 128 problems). `ca` looks like another 
 neighbourhood code, then fetch the rule bit at THAT index. The leap probe (§21) is built to diagnose exactly this, before
 another training run is spent.
 
+---
+
+## 21. The leap probe (pre-registered 2026-10-06, before any probe ran)
+
+**Why** (§19, BRAINSTORM §0.1 items 7, 18): learning from the outcome alone stalls when the next thing to learn needs
+two or more pieces that pay off only together — a "leap" of 2 or more. One token per pair turned a never-learned lookup
+into one learned in 2,000 steps, but finding that out cost four diagnostic training runs. The low-degree method
+(planning chat 2026-10-06; Brennan, Bresler, Hopkins, Li & Schramm 2021 relate it to statistical-query hardness)
+suggests a cheaper test: does the answer correlate with low-degree functions of what the model already computes?
+
+**The probe** (`thinking/leap_probe.py`). Freeze a model. On n = 10,000 problems of one (family, level, format), take
+the residual stream at the answer position after every block application (prelude, each core pass, coda) and
+concatenate: the FEATURES. Fit ridge classifiers (one-hot targets; λ chosen on a validation split) and score on held-out
+problems (8,000 / 1,000 / 1,000), normalised by the majority-class rate:
+- **p0** — the model's own head (no fitting);
+- **p1** — degree 1: ridge on the standardised features;
+- **p2** — degree 2: ridge on the features plus 4,096 random quadratic features (w·x)².
+A level's **leap** is 0 if p0 ≥ 0.9, else 1 if p1 ≥ 0.5, else 2 if p2 ≥ 0.5, else "> 2".
+
+**Test 1 — at initialisation, does the probe predict what a fresh model learns alone?** Twelve items, each a (family,
+level, format): `ptr` two tokens per pair h = 1 (known: never learned); `ptr` one token per pair h = 1 (known: learned in
+~2,000 steps) and h = 2; `aff` h = 1 (known: learned in 3,000) and h = 2; `s5` h = 1 and h = 4; `ca` h = 1 in three
+formats — `index` (today's), `marked` (the queried cell marked in place), `marked_pairs` (marked, and the rule as 8
+(neighbourhood, bit) tokens in random order); `bool` depth 4; `bf` 11–16 steps. For each: the probe on a freshly
+initialised `loop4` (seed 0); then the SAME initialisation trained on that item alone, 3,000 steps × 128 problems
+(warmup + cosine, lr 1e-3), scored on 1,024 fresh problems (normalised), plus the step at which its running training
+accuracy first reaches 0.9.
+- **L1:** Spearman(p2 at init, normalised accuracy after solo training) ≥ 0.5 over the 12 items. (p1 reported beside it.)
+- **L2:** p2 of `ptr` one-token h = 1 > p2 of `ptr` two-token h = 1 — the known pair.
+- **L3:** the probe ranks the three `ca` formats as solo training does (training decides which format enters run 3).
+- *Refuted if* Spearman < 0.2: the probe at initialisation does not predict learnability; Test 2 then asks whether it
+  does on a TRAINED model's features, where the leap is relative to what has already been learned.
+
+**Test 2 — along a training run, which signal predicts the next progress?** Run 3 (P0 rerun, right-padded, §20.4 to be
+registered) saves `loop4` checkpoints every 1,000 steps with the optimiser state. At each checkpoint, for each family's
+frontier level and the level above it, three signals: the probe (p1, p2); the self-play paper's reward
+|⟨∇θ L_level, P ⊙ (θ_past − θ_now)⟩| (θ_past the checkpoint nearest half the steps; P the Adam step operator from the
+saved state); and the success-rate learnability p(1 − p). Outcome: that level's normalised eval accuracy gain over the
+next 2,000 steps.
+- **L4:** the probe's p1 or p2 has Spearman ≥ 0.3 with the gain and is at least as predictive as p(1 − p).
+- No prediction between the probe and the self-play reward (open — Test 2 decides which zone-of-proximal-development
+  signal the single method adopts, BRAINSTORM §0.1 item 1).
+

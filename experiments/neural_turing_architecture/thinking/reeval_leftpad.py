@@ -59,7 +59,7 @@ def main():
         a = ck["args"]
         # run 1's `ptr` used two tokens per pair; its PointerChase is no longer in tasks.py, so run 1's `ptr` is skipped
         run1 = Path(path).name.startswith("r1_")
-        n_vocab = 288 if run1 else tasks.V
+        n_vocab = ck["state"]["emb.weight"].shape[0]
         model = H1.LoopedModel(d_model=a["d"], n_head=a["heads"], max_len=a["max_len"], pos="rope", n_vocab=n_vocab,
                                loops=a["loops"], tied=True, n_prelude=1, n_coda=1).cuda().eval()
         model.load_state_dict(ck["state"])

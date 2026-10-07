@@ -52,7 +52,9 @@ GEN0 = 15                                            # the four S5 generators: 1
 BF_TOK = {c: 19 + i for i, c in enumerate("><+-[]")}  # 19 .. 24
 NUM = 32
 PAIR0 = NUM + 256                                    # `ptr`: one token per (key, value) pair, 16 x 16 = 256 of them
-V = PAIR0 + 256                                      # 544 tokens
+CA_MARK = (25, 26)                                   # `ca` format "marked": the queried cell, holding 0 / 1
+CA_RULE0 = PAIR0 + 256                               # `ca` format "marked_pairs": one token per (pattern, output bit)
+V = CA_RULE0 + 16                                    # 560 tokens
 
 
 def num(v) -> int:
@@ -83,6 +85,24 @@ class PointerChase:
         for _ in range(h):
             y = int(perm[y])
         return toks + [Q, num(h), num(x), EQ], num(y)
+
+
+class PointerChaseTwoToken:
+    """`ptr` as it was before §20.1: a KEY token (num(a)) and a VALUE token (num(16 + b)) per pair; answer num(16 + y).
+    Not in the suite — kept as the leap probe's known negative (one hop never learned, planning §20.1)."""
+    name, levels, N = "ptr2", [1, 2, 3, 4, 5, 6, 7, 8], 16
+
+    def sample(self, rng, li):
+        h = self.levels[li]
+        perm, order = rng.permutation(self.N), rng.permutation(self.N)
+        toks = [TAG["ptr"]]
+        for a in order:
+            toks += [num(a), num(self.N + perm[a])]
+        x = int(rng.integers(self.N))
+        y = x
+        for _ in range(h):
+            y = int(perm[y])
+        return toks + [Q, num(x), num(h), EQ], num(self.N + y)
 
 
 class S5Word:
@@ -142,8 +162,20 @@ class BoolFormula:
 class CellularAutomaton:
     """A random elementary CA rule (its 8 output bits, neighbourhood 111 first) and a random row of 16 circular cells
     are given; the query is (cell c, steps h); the answer is that cell after h synchronous steps. The rule is IN THE
-    CONTEXT, so it must be read, not memorised. Answers balanced 50/50 by rejection."""
+    CONTEXT, so it must be read, not memorised. Answers balanced 50/50 by rejection.
+
+    `fmt` — how the problem is written (the leap probe compares them, planning §21):
+      "index"        the rule as 8 bits in a fixed order, the row as 16 bits, the query as (c, h): finding cell c means
+                     attending to a position named by a token's VALUE, and the rule bit for a neighbourhood is the bit at
+                     the position that neighbourhood indexes — two computed-position lookups;
+      "marked"       the queried cell is written in place with a marked token (CA_MARK), the query is just h: the cells
+                     that matter are at fixed offsets from the mark;
+      "marked_pairs" as "marked", and the rule as 8 tokens in random order, each holding a (neighbourhood, output bit)
+                     pair — the rule lookup becomes a content match, as one token per pair did for `ptr`."""
     name, levels, W = "ca", [1, 2, 3, 4, 5, 6, 7, 8], 16
+
+    def __init__(self, fmt="index"):
+        self.fmt = fmt
 
     def sample(self, rng, li):
         h, want = self.levels[li], int(rng.integers(2))
@@ -155,8 +187,15 @@ class CellularAutomaton:
             c = int(rng.integers(self.W))
             if int(row[c]) == want:
                 break
-        toks = [TAG["ca"]] + [num((rule >> k) & 1) for k in range(7, -1, -1)] + [num(b) for b in row0]
-        return toks + [Q, num(c), num(h), EQ], num(want)
+        if self.fmt == "index":
+            toks = [TAG["ca"]] + [num((rule >> k) & 1) for k in range(7, -1, -1)] + [num(b) for b in row0]
+            return toks + [Q, num(c), num(h), EQ], num(want)
+        cells = [CA_MARK[int(b)] if i == c else num(b) for i, b in enumerate(row0)]
+        if self.fmt == "marked":
+            ruletoks = [num((rule >> k) & 1) for k in range(7, -1, -1)]
+        else:
+            ruletoks = [CA_RULE0 + 2 * int(k) + ((rule >> int(k)) & 1) for k in rng.permutation(8)]
+        return [TAG["ca"]] + ruletoks + cells + [Q, num(h), EQ], num(want)
 
 
 class AffineMod:
