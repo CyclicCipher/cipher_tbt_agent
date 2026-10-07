@@ -106,8 +106,8 @@ def evaluate(model, fams, n, dev, seed=12345, chunk=256):
             correct, answers = 0, []
             for start in range(0, n, chunk):
                 m = min(chunk, n - start)
-                tok, ans, _, _ = make_batch([fam], rng, m, dev, level=li)
-                pred = model(tok)[:, -1].argmax(-1)
+                tok, ans, _, _, last = make_batch([fam], rng, m, dev, level=li)
+                pred = model(tok)[torch.arange(m, device=dev), last].argmax(-1)
                 correct += int((pred == ans).sum())
                 answers += ans.tolist()
             acc = correct / n
@@ -183,10 +183,10 @@ def main():
     run_loss = None
     cur = Frontier(fams) if args.sample == "frontier" else None
     for step in range(args.steps):
-        tok, ans, fid, lid = make_batch(fams, rng, args.per_family, dev, max_level=args.max_level,
-                                        level_probs=cur.probs() if cur else None)
+        tok, ans, fid, lid, last = make_batch(fams, rng, args.per_family, dev, max_level=args.max_level,
+                                              level_probs=cur.probs() if cur else None)
         with amp:
-            logits = model(tok)[:, -1]
+            logits = model(tok)[torch.arange(len(ans), device=dev), last]
         loss = F.cross_entropy(logits.float(), ans)
         if cur:
             cur.update(fid, lid, logits.argmax(-1) == ans)

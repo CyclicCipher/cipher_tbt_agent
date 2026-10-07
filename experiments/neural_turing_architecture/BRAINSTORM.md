@@ -71,7 +71,13 @@ real model.
 **Insights (with evidence)**
 7. **Learning-theory lens:** from the outcome alone a k-step composition is exponentially hard for gradient
    learners; intermediate targets or a LADDER of difficulty are the escapes. The frontier carries the weight; the
-   search algorithm is secondary (planning §19.1).
+   search algorithm is secondary (planning §19.1). *Scope (2026-10-06):* the hardness is a proven, UNCONDITIONAL
+   theorem about a CLASS of methods — statistical-query learners, which gradient descent with noisy gradients
+   resembles — not about the problem: parity is easy for Gaussian elimination. And finding a shortest program is
+   possible (Levin search) in time exponential in the PROGRAM's length, not the data's: a ladder keeps each new
+   piece short. The cryptographic "learning arbitrary data would break cryptography" claims are a different, CONDITIONAL
+   matter (they assume one-way functions exist, unproven) and concern adversarial data, not the world; nothing in
+   this plan rests on them.
 8. **Sampling-only search and outcome-only RL die from d ≈ 64** in a thought space; gradients through the exact
    dynamics are necessary (§10.2 derivation + toy; §11, §16 — mock).
 9. **The answer's gradient through the thoughts is a strong signal in principle** (`bptt`, §16 — mock). P1(b) is the
@@ -101,8 +107,16 @@ real model.
     10,000); with the pair in ONE token it is learned in ~2,000 steps (planning §20.1). Spotlight's write — a key
     addresses a cell that holds the value — is the one-token form: memory that binds key and value when it writes
     spares attention a leap when it reads.
-19. **Uniform mixing of difficulty blocks even the easy levels** (`aff` level 1: 1.00 alone, 0.04 inside a uniform mix of
-    48 levels). The frontier is load-bearing even with no thoughts (planning §20.1).
+19. **Uniform mixing of difficulty hurts even the easy levels** (`aff` level 1: 0.15–0.47 in a uniform mix of 48
+    levels, 1.00 under the frontier curriculum). ~~0.04 inside the mix~~ — that number was an evaluation bug (item 21);
+    the effect is real but smaller (planning §20.3).
+21. **Evaluate on exactly the input the model trained on.** Left padding put short problems behind ~20–35 PAD tokens in
+    training and none in evaluation: models that had learned `aff` and `s5` scored at chance, and two runs' worth of
+    "failures" were the measurement's (planning §20.3). The tell was a contradiction between the curriculum's TRAINING
+    accuracy and the evaluation. Under causal attention, RIGHT-pad: padding after a problem is invisible to it.
+22. **Learnability, not expressivity, ranked the groups:** the solvable affine group mod 17 collapsed at h = 3, the
+    non-solvable S₅ held to h = 6 (planning §20.3). Circuit-complexity classes say what a depth CAN express, not what
+    gradient descent finds first.
 20. **A depth knob must be checked against shortcuts.** Short-circuiting Boolean siblings and counted Brainfuck loops
     both let a no-thought model score well at "depth 8" / "256 steps" (planning §20.1). A family's depth is the depth
     its answer actually REQUIRES, not the size of its generator's knob.

@@ -27,7 +27,7 @@ separates: a fixed-depth transformer can in principle shortcut the second, not t
 
 One shared vocabulary (`V` tokens): PAD, separators, one TAG per family, operators, S5 generators, Brainfuck
 instructions, and the numbers 0..255 (`num(v)`). A sequence is `[TAG, ...problem..., EQ]` and the answer is the next
-token. Batches are LEFT-padded so the answer is always predicted at the last position.
+token. Batches are RIGHT-padded; `make_batch` returns each problem's last position, where the answer is read.
 
 Usage (smoke test: one example per family and level, pool statistics, timing):
     python experiments/neural_turing_architecture/thinking/tasks.py
@@ -255,13 +255,17 @@ def make_families(bf_seed=0, bf_per_level=20000, cache_dir=None):
 
 # ------------------------------------------------------------------------------------------------------------ batching
 def collate(items, dev="cpu"):
-    """Left-pad a list of (tokens, answer) to one tensor, so the answer is predicted at the last position."""
+    """RIGHT-pad a list of (tokens, answer) to one tensor; `last` is each problem's final position, where its answer is
+    predicted. Under causal attention a problem never sees the padding after it, so its computation cannot depend on
+    how long the other problems in the batch are. (P0 runs 1-2 LEFT-padded: a short problem sat behind ~20-35 PAD
+    tokens in training and none in evaluation, and was scored on an input it had never seen — planning §20.3.)"""
     T = max(len(t) for t, _ in items)
     tok = torch.full((len(items), T), PAD, dtype=torch.long)
     for i, (t, _) in enumerate(items):
-        tok[i, T - len(t):] = torch.tensor(t)
+        tok[i, :len(t)] = torch.tensor(t)
     ans = torch.tensor([a for _, a in items], dtype=torch.long)
-    return tok.to(dev), ans.to(dev)
+    last = torch.tensor([len(t) - 1 for t, _ in items], dtype=torch.long)
+    return tok.to(dev), ans.to(dev), last.to(dev)
 
 
 def make_batch(fams, rng, n_per_family, dev="cpu", level=None, max_level=-1, level_probs=None):
@@ -281,8 +285,8 @@ def make_batch(fams, rng, n_per_family, dev="cpu", level=None, max_level=-1, lev
             items.append(fam.sample(rng, li))
             fid.append(f)
             lid.append(li)
-    tok, ans = collate(items, dev)
-    return tok, ans, torch.tensor(fid, device=dev), torch.tensor(lid, device=dev)
+    tok, ans, last = collate(items, dev)
+    return tok, ans, torch.tensor(fid, device=dev), torch.tensor(lid, device=dev), last
 
 
 if __name__ == "__main__":

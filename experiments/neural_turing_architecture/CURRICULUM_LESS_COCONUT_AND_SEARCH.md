@@ -1710,7 +1710,9 @@ whether level 1 counts as solved (≥ 0.9):
 **Four causes, each measured (diagnostic runs, one family at a time, `loop4` unless stated):**
 1. **Uniform mixing blocks even the easy levels.** `aff` level 1 trained ALONE: 1.00 in 3,000 steps. In the uniform mix
    of 6 families × 8 levels, 7 of every 8 of a family's problems were levels it could not yet learn: 0.03–0.04 after
-   10,000 steps. The frontier is load-bearing even without thoughts (§19.1).
+   10,000 steps. The frontier is load-bearing even without thoughts (§19.1). **[Corrected in §20.3: the 0.03–0.04 was
+   an evaluation bug (padding). Re-scored, uniform mixing gives `aff` h=1 0.15–0.47 against 1.00 under the frontier —
+   it hurts, but far less than this line said.]**
 2. **`ptr` was stuck at "copy the query".** The three arms' `ptr` numbers agree to two decimals at every depth, and
    they equal the accuracy of answering x itself (π^h(x) = x for a random permutation of 16: 1/16, 2/16, 3/16 or 4/16
    depending on h) — the self-play paper's "copy" stage. A lookup across TWO tokens per pair (key, then value) never
@@ -1733,4 +1735,51 @@ successor) pair** (cause 2). (c) **`bool`: the shallow sibling is neutral (1 und
 0.9** (cause 3), so the first short-circuit from the top is ~10 levels down on average. (d) **`bf` unchanged** — cause 4
 is recorded; `bf` enters P1(b) only if some level fails. Everything else as §20: arms `loop2`, `loop4`, `loop8`;
 10,000 steps; the same evaluation, thresholds and predictions P0.1–P0.4.
+
+### 20.3 Run 2 — RAN 2026-10-06 — and an evaluation bug that voids the reported numbers of runs 1 and 2
+
+**What `p0_ceiling.py` reported:** level 1 solved in 2 of 6 families in every arm — and a contradiction. The frontier
+curriculum's own TRAINING accuracy had marked `aff` h = 1 and `s5` h ≤ 6 as mastered (the frontier moved past them),
+while evaluation scored them at chance (`aff` h = 1: +0.02) or near it.
+
+**The bug.** Training batches mix all six families, LEFT-padded to the longest problem in the batch (~40 tokens), so a
+short problem (`aff`, `s5`: 5–20 tokens) was always seen behind ~20–35 PAD tokens. Evaluation batched one family at a
+time and padded only to that family's length, so the same problem was scored with NO padding — an input never seen in
+training. Attention reads PAD tokens, so the two differ. The run-2 `loop4` model: `aff` h = 1 0.08 unpadded, **1.00**
+padded to 40; `s5` h = 1 0.44 → **1.00**; `s5` h = 4 0.59 → **0.998**.
+
+**Re-scored** — every checkpoint, every problem left-padded to 40 tokens (the training regime; `thinking/reeval_leftpad.py`,
+`runs/p0/reeval_leftpad.json`). The scoring changed AFTER the results were seen; it is a fix to the measurement, not a
+change in what is measured, and is stated as such. Normalised accuracy:
+
+| family | run 1 (uniform), level 1 | run 2 (frontier), level 1 | run 2: deepest solved / where it collapses |
+|---|---|---|---|
+| `s5` | 1.00 (all arms) | 1.00 (all arms) | solved to h = 6 in every arm; h = 16: 0.20 / 0.15 / 0.24 (`loop2/4/8`) |
+| `aff` | 0.42 / 0.47 / 0.15 | **1.00** (all arms) | solved at h = 1; h = 2: 0.28–0.41; chance from h = 3 |
+| `bool` | 1.00 (random siblings) | 1.00 | no failed level: 0.76–0.82 at depth 8 (neutral siblings) |
+| `bf` | 1.00 | 1.00 | no failed level: 0.39–0.55 at 65–256 steps |
+| `ca` | 0.24–0.27 | 0.32–0.33 | never solved |
+| `ptr` | — (two-token format, not re-scorable) | 0.20–0.30 (pair tokens) | never solved |
+
+**Against the pre-registration (§20), on the re-scored numbers.**
+- **P0.1 (sanity gate) — FAILED in both runs:** run 2 solves level 1 in 4 of 6 families (`s5`, `bool`, `bf`, `aff`);
+  `ptr` and `ca` do not. P0.2–P0.4 are therefore not formally read.
+- Two things are visible anyway and are recorded as observations, not verdicts: (i) **`s5` and `aff` already show the
+  clean, flat ceilings R6 needs** — solved shallow, collapsing deep, in every arm; (ii) **P0.4's direction is
+  contradicted:** the SOLVABLE group (`aff`) collapses at h = 3 while the non-solvable one (`s5`) holds to h = 6 in every
+  arm. At this scale what decides is how hard each is to LEARN (mod-17 arithmetic tables composed vs. a 120-state machine
+  with 4 fixed generators), not what a fixed-depth circuit can express — the uncertainty P0.4 flagged.
+- **Cause 1 of §20.1 is corrected:** uniform mixing hurts (`aff` h = 1: 0.15–0.47 uniform, 1.00 with the frontier), but
+  the 0.03–0.04 reported in §20.1 was the padding bug.
+- `bool` (even with neutral siblings) and `bf` never fail within their ranges: a 6-block no-thought model handles them
+  to the top level at 0.4–0.8. Their knobs are not deep enough for R6 at this model size.
+
+**The fix,** for every run from here: RIGHT padding — `tasks.collate` puts padding after each problem and returns its
+last position, where the answer is read. Under causal attention a problem never sees the padding after it, so its
+computation cannot depend on the batch.
+
+**Open before run 3:** `ptr` and `ca` are not learned at level 1 inside the mixture in 10,000 steps (`ptr` alone, one
+token per pair: solved in 2,000 steps × 128 problems). `ca` looks like another two-part leap: compute a cell's 3-cell
+neighbourhood code, then fetch the rule bit at THAT index. The leap probe (§21) is built to diagnose exactly this, before
+another training run is spent.
 

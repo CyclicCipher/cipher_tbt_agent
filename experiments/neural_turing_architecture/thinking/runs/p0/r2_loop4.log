@@ -1,0 +1,53 @@
+device cuda | arm loop loops 4 | block applications 6 | d 128 | params 734,881 | steps 10000 x 192 | sampling frontier
+  step    250  loss 1.6022       11s  frontier ptr:1 s5:1 bool:2 ca:1 bf:4 aff:1
+  step    500  loss 1.3317       23s  frontier ptr:1 s5:2 bool:3 ca:1 bf:4 aff:1
+  step    750  loss 1.2565       35s  frontier ptr:1 s5:3 bool:3 ca:1 bf:4 aff:1
+  step   1000  loss 1.2311       47s  frontier ptr:1 s5:3 bool:3 ca:1 bf:4 aff:1
+  step   1250  loss 1.1428       59s  frontier ptr:1 s5:3 bool:4 ca:1 bf:6 aff:1
+  step   1500  loss 0.9739       71s  frontier ptr:1 s5:4 bool:3 ca:1 bf:6 aff:1
+  step   1750  loss 1.0216       84s  frontier ptr:1 s5:4 bool:5 ca:1 bf:6 aff:2
+  step   2000  loss 1.1169       96s  frontier ptr:1 s5:4 bool:5 ca:1 bf:6 aff:2
+  step   2250  loss 1.1091      109s  frontier ptr:1 s5:4 bool:5 ca:1 bf:6 aff:2
+  step   2500  loss 1.0819      122s  frontier ptr:1 s5:4 bool:4 ca:1 bf:6 aff:2
+  step   2750  loss 1.0570      135s  frontier ptr:1 s5:4 bool:5 ca:1 bf:6 aff:2
+  step   3000  loss 1.0589      148s  frontier ptr:1 s5:4 bool:5 ca:1 bf:6 aff:2
+  step   3250  loss 1.0785      162s  frontier ptr:1 s5:6 bool:6 ca:1 bf:6 aff:2
+  step   3500  loss 1.0755      176s  frontier ptr:1 s5:4 bool:5 ca:1 bf:6 aff:2
+  step   3750  loss 1.0775      189s  frontier ptr:1 s5:6 bool:7 ca:1 bf:16 aff:2
+  step   4000  loss 1.0876      203s  frontier ptr:1 s5:6 bool:7 ca:1 bf:16 aff:2
+  step   4250  loss 1.0632      218s  frontier ptr:1 s5:6 bool:6 ca:1 bf:16 aff:2
+  step   4500  loss 1.0347      232s  frontier ptr:1 s5:6 bool:6 ca:1 bf:16 aff:2
+  step   4750  loss 1.0326      246s  frontier ptr:1 s5:6 bool:6 ca:1 bf:16 aff:2
+  step   5000  loss 0.9986      260s  frontier ptr:1 s5:6 bool:6 ca:1 bf:6 aff:2
+  [mid eval at step 5000]
+  step   5250  loss 0.9911      278s  frontier ptr:1 s5:6 bool:6 ca:1 bf:16 aff:2
+  step   5500  loss 0.9872      292s  frontier ptr:1 s5:6 bool:8 ca:1 bf:32 aff:2
+  step   5750  loss 0.9627      306s  frontier ptr:1 s5:6 bool:7 ca:1 bf:32 aff:2
+  step   6000  loss 0.9593      320s  frontier ptr:1 s5:6 bool:8 ca:1 bf:32 aff:2
+  step   6250  loss 0.9257      335s  frontier ptr:1 s5:6 bool:None ca:1 bf:6 aff:2
+  step   6500  loss 0.9356      349s  frontier ptr:1 s5:6 bool:8 ca:1 bf:16 aff:2
+  step   6750  loss 0.9315      363s  frontier ptr:1 s5:6 bool:None ca:1 bf:32 aff:2
+  step   7000  loss 0.8963      377s  frontier ptr:1 s5:6 bool:7 ca:1 bf:32 aff:2
+  step   7250  loss 0.9064      391s  frontier ptr:1 s5:8 bool:7 ca:1 bf:32 aff:2
+  step   7500  loss 0.8907      405s  frontier ptr:1 s5:8 bool:None ca:1 bf:32 aff:2
+  step   7750  loss 0.8648      419s  frontier ptr:1 s5:6 bool:8 ca:1 bf:32 aff:2
+  step   8000  loss 0.8904      433s  frontier ptr:1 s5:8 bool:8 ca:1 bf:64 aff:2
+  step   8250  loss 0.8721      447s  frontier ptr:1 s5:8 bool:None ca:1 bf:32 aff:2
+  step   8500  loss 0.8724      461s  frontier ptr:1 s5:6 bool:None ca:1 bf:16 aff:2
+  step   8750  loss 0.8936      474s  frontier ptr:1 s5:8 bool:None ca:1 bf:64 aff:2
+  step   9000  loss 0.8997      488s  frontier ptr:1 s5:8 bool:None ca:1 bf:64 aff:2
+  step   9250  loss 0.8352      502s  frontier ptr:1 s5:6 bool:None ca:1 bf:32 aff:2
+  step   9500  loss 0.8590      515s  frontier ptr:1 s5:8 bool:None ca:1 bf:6 aff:2
+  step   9750  loss 0.8333      529s  frontier ptr:1 s5:6 bool:8 ca:1 bf:16 aff:2
+  step  10000  loss 0.8605      542s  frontier ptr:1 s5:8 bool:None ca:1 bf:64 aff:2
+  [final eval at step 10000]
+
+trained in 546s
+
+normalised accuracy per level (final; mid in brackets). solved >= 0.9, failed <= 0.2
+  ptr   h_solved    0  h_fail    1  | 1:+0.12(+0.00)  2:-0.01(-0.01)  3:-0.01(-0.03)  4:+0.00(+0.01)  5:-0.02(-0.02)  6:+0.01(-0.01)  7:-0.01(-0.00)  8:-0.02(-0.04)
+  s5    h_solved    0  h_fail   16  | 1:+0.30(+0.16)  2:+0.40(+0.29)  3:+0.30(+0.34)  4:+0.41(+0.47)  6:+0.42(+0.42)  8:+0.34(+0.36)  12:+0.22(+0.16)  16:+0.06(+0.03)
+  bool  h_solved    6  h_fail None  | 1:+1.00(+0.84)  2:+1.00(+0.90)  3:+0.99(+0.94)  4:+0.98(+0.94)  5:+0.98(+0.92)  6:+0.94(+0.82)  7:+0.88(+0.72)  8:+0.81(+0.62)
+  ca    h_solved    0  h_fail    6  | 1:+0.33(+0.29)  2:+0.29(+0.23)  3:+0.31(+0.27)  4:+0.25(+0.27)  5:+0.36(+0.28)  6:+0.10(+0.08)  7:+0.36(+0.30)  8:+0.22(+0.15)
+  bf    h_solved   10  h_fail None  | 2:+1.00(+1.00)  4:+0.98(+0.97)  6:+0.93(+0.91)  10:+0.93(+0.90)  16:+0.83(+0.79)  32:+0.86(+0.67)  64:+0.67(+0.41)  256:+0.43(+0.28)
+  aff   h_solved    0  h_fail    1  | 1:+0.02(+0.02)  2:-0.01(+0.03)  3:-0.02(+0.00)  4:-0.03(-0.01)  6:-0.02(-0.00)  8:-0.02(-0.01)  12:-0.02(-0.04)  16:-0.02(-0.03)
