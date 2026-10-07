@@ -121,6 +121,14 @@ real model.
     probe ranked learnability well overall (Spearman +0.78) but called the one-token lookup and the CA rule lookup
     unlearnable; training built the needed attention heads in 1,000–2,500 steps (planning §21.1). Learnability by a
     feature-learning model is not the kernel-regime learnability a random-feature probe measures.
+24. **A law read off a latent must beat a control.** JEPA-Anything's "Keplerian slope −1.4991, R² 0.9999999" pairs
+    latent frequencies with orbit sizes — but anything that tracks a periodic orbit oscillates at its period, so the
+    raw coordinates would pass too (`refs/jepa_anything_opf_2609.20800.md`). The test of "a factored latent aligns
+    with laws" is whether factors are CONSERVED along the orbit while one advances (action-angle), against a dense
+    model and a random encoder.
+25. **Orthogonal factorisation of the prediction TARGET is rotation-invariant in the loss** — with P orthogonal, OPF's
+    loss is the ordinary JEPA loss; its effect lives in the predictor being split into separate heads (a modularity
+    prior) and in variance floors. The floors force every factor active, which blocks a varying number of factors.
 20. **A depth knob must be checked against shortcuts.** Short-circuiting Boolean siblings and counted Brainfuck loops
     both let a no-thought model score well at "depth 8" / "256 steps" (planning §20.1). A family's depth is the depth
     its answer actually REQUIRES, not the size of its generator's knob.

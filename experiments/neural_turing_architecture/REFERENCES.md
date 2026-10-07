@@ -178,4 +178,5 @@ quoting it.
 | **Jiang, Grefenstette & Rocktäschel** — *Prioritized level replay*, ICML 2021 | unchecked | Replay levels by a learning-potential score. |
 | **Oudeyer, Kaplan & Hafner** — *Intrinsic motivation systems for autonomous mental development*, IEEE TEC 2007; **Matiisen, Oliver, Cohen & Schulman** — *Teacher–student curriculum learning*, 2017; **Portelas et al.** — ALP-GMM, CoRL 2019 | unchecked | Learning progress as the curriculum signal. |
 | **Sukhbaatar et al.** — *Intrinsic motivation and automatic curricula via asymmetric self-play*, ICLR 2018 | unchecked | One agent proposes tasks at the edge of the other's ability. |
+| **Cui et al.** — *JEPA-Anything: Learning Predictive Models across Different Worlds* (Orthogonal Predictive Factorization), arXiv 2609.20800 (Sep 2026); code github.com/Gen-Verse/JEPA-Anything | repo `refs/jepa_anything_opf_2609.20800.md` | A JEPA whose predictor is split into K heads, each predicting one block of a learned orthonormal rotation of the target; −34.8% single-intervention error on Interventional Pong vs a capacity-matched dense JEPA. Its Kepler result (slope −1.4991) is a frequency read-back with no control. |
 
