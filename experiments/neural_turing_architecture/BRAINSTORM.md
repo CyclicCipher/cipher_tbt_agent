@@ -96,6 +96,16 @@ real model.
 17. **Depth axis:** attention residuals across passes held 0.60–0.77 at 2× the trained passes where the fixed boundary
     operator collapsed to 0.08; a window over passes failed (E30; §1). The sequence axis still needs its own
     normaliser on the fed-back thought (§1 gap 4).
+18. **The leap shows up inside a single hop.** A lookup with key and value on separate tokens needs two attention
+    steps that pay off only together and never left chance (our model 12,000 steps; a plain 2-layer transformer
+    10,000); with the pair in ONE token it is learned in ~2,000 steps (planning §20.1). Spotlight's write — a key
+    addresses a cell that holds the value — is the one-token form: memory that binds key and value when it writes
+    spares attention a leap when it reads.
+19. **Uniform mixing of difficulty blocks even the easy levels** (`aff` level 1: 1.00 alone, 0.04 inside a uniform mix of
+    48 levels). The frontier is load-bearing even with no thoughts (planning §20.1).
+20. **A depth knob must be checked against shortcuts.** Short-circuiting Boolean siblings and counted Brainfuck loops
+    both let a no-thought model score well at "depth 8" / "256 steps" (planning §20.1). A family's depth is the depth
+    its answer actually REQUIRES, not the size of its generator's knob.
 
 ---
 

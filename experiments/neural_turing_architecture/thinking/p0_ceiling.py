@@ -43,6 +43,48 @@ import h1_lid as H1  # noqa: E402
 from tasks import V, Brainfuck, make_batch, make_families  # noqa: E402
 
 SOLVED, FAILED = 0.9, 0.2
+MASTERED = 0.9          # frontier curriculum: a level counts as mastered at this running TRAINING accuracy (raw)
+
+
+class Frontier:
+    """A staircase curriculum over each family's levels (planning §19.1: the frontier carries the weight; Q5 allows a
+    problem-difficulty frontier). Per (family, level) a running accuracy is kept from the training batches themselves
+    (EMA, rate 0.05 per batch that contains the level). The FRONTIER is the lowest level not yet mastered; it gets half
+    of the family's problems, the mastered levels below share 0.3 (replay), the next level up 0.15, everything higher
+    0.05 — with no level below, the frontier takes 0.8; with every level mastered, sampling is uniform."""
+
+    def __init__(self, fams, rate=0.05):
+        self.acc = [np.zeros(len(f.levels)) for f in fams]
+        self.rate = rate
+
+    def frontier(self, f):
+        a = self.acc[f]
+        below = np.nonzero(a < MASTERED)[0]
+        return int(below[0]) if len(below) else None
+
+    def probs(self):
+        out = []
+        for f, a in enumerate(self.acc):
+            n, fr = len(a), self.frontier(f)
+            if fr is None:
+                out.append(np.full(n, 1.0 / n))
+                continue
+            p = np.zeros(n)
+            p[fr] = 0.5 if fr > 0 else 0.8
+            if fr > 0:
+                p[:fr] = 0.3 / fr
+            if fr + 1 < n:
+                p[fr + 1] = 0.15
+                if fr + 2 < n:
+                    p[fr + 2:] = 0.05 / (n - fr - 2)
+            out.append(p / p.sum())
+        return out
+
+    def update(self, fid, lid, correct):
+        for f in fid.unique().tolist():
+            for l in lid[fid == f].unique().tolist():
+                m = (fid == f) & (lid == l)
+                self.acc[f][l] += self.rate * (float(correct[m].float().mean()) - self.acc[f][l])
 
 
 def build_model(args):
@@ -106,6 +148,9 @@ def main():
     ap.add_argument("--bf_train", type=int, default=20000)
     ap.add_argument("--bf_eval", type=int, default=1000)
     ap.add_argument("--cache", default=str(HERE / "runs" / "p0"))
+    ap.add_argument("--only", default="", help="diagnostics: train AND evaluate only these families (comma list)")
+    ap.add_argument("--max_level", type=int, default=-1, help="diagnostics: train only on level indices <= this")
+    ap.add_argument("--sample", choices=["uniform", "frontier"], default="uniform", help="level sampling in training")
     ap.add_argument("--json", default="")
     ap.add_argument("--save", default="")
     args = ap.parse_args()
@@ -115,11 +160,17 @@ def main():
     fams = make_families(bf_seed=0, bf_per_level=args.bf_train, cache_dir=args.cache)
     eval_fams = list(fams)
     eval_fams[4] = Brainfuck(seed=1, per_level=args.bf_eval, cache_dir=args.cache)
+    if args.only:
+        keep = args.only.split(",")
+        fams = [f for f in fams if f.name in keep]
+        eval_fams = [f for f in eval_fams if f.name in keep]
     model = build_model(args).to(dev)
     n_params = sum(p.numel() for p in model.parameters())
     blocks = (args.loops + 2) if args.arm == "loop" else args.layers
     print(f"device {dev} | arm {args.arm} " + (f"loops {args.loops}" if args.arm == "loop" else f"layers {args.layers}")
-          + f" | block applications {blocks} | d {args.d} | params {n_params:,} | steps {args.steps} x {6 * args.per_family}",
+          + f" | block applications {blocks} | d {args.d} | params {n_params:,} | steps {args.steps} x {len(fams) * args.per_family}"
+          + (f" | only {args.only}" if args.only else "") + (f" | levels <= {args.max_level}" if args.max_level >= 0 else "")
+          + f" | sampling {args.sample}",
           flush=True)
 
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01, betas=(0.9, 0.98))
@@ -130,11 +181,15 @@ def main():
     rng = np.random.default_rng(args.seed)
     log, evals, t0 = [], {}, time.time()
     run_loss = None
+    cur = Frontier(fams) if args.sample == "frontier" else None
     for step in range(args.steps):
-        tok, ans, _, _ = make_batch(fams, rng, args.per_family, dev)
+        tok, ans, fid, lid = make_batch(fams, rng, args.per_family, dev, max_level=args.max_level,
+                                        level_probs=cur.probs() if cur else None)
         with amp:
             logits = model(tok)[:, -1]
         loss = F.cross_entropy(logits.float(), ans)
+        if cur:
+            cur.update(fid, lid, logits.argmax(-1) == ans)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -142,8 +197,10 @@ def main():
         sched.step()
         run_loss = loss.item() if run_loss is None else 0.98 * run_loss + 0.02 * loss.item()
         if (step + 1) % 250 == 0:
-            log.append(dict(step=step + 1, loss=round(run_loss, 4), s=round(time.time() - t0, 1)))
-            print(f"  step {step + 1:6d}  loss {run_loss:.4f}  {time.time() - t0:7.0f}s", flush=True)
+            fr = {f.name: (None if cur.frontier(i) is None else f.levels[cur.frontier(i)]) for i, f in enumerate(fams)} if cur else None
+            log.append(dict(step=step + 1, loss=round(run_loss, 4), s=round(time.time() - t0, 1), frontier=fr))
+            print(f"  step {step + 1:6d}  loss {run_loss:.4f}  {time.time() - t0:7.0f}s"
+                  + (("  frontier " + " ".join(f"{k}:{v}" for k, v in fr.items())) if fr else ""), flush=True)
         if step + 1 in (args.steps // 2, args.steps):
             tag = "mid" if step + 1 < args.steps else "final"
             evals[tag] = evaluate(model, eval_fams, args.eval_n, dev)

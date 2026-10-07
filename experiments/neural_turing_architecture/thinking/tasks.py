@@ -8,7 +8,7 @@ drawn from large pre-built pools, see `Brainfuck`).
 | family | structure                                   | depth knob h                     | answer classes |
 |--------|---------------------------------------------|----------------------------------|----------------|
 | ptr    | chain lookup: a random permutation of 16    | hops: pi^h(x)                    | 16             |
-|        | nodes listed as pairs, follow it h times    |                                  |                |
+|        | nodes, one token per (node, successor) pair  |                                  |                |
 | s5     | composition in a NON-SOLVABLE group: a word | word length                      | 5              |
 |        | of h generators of S5 acting on 5 items     |                                  |                |
 | bool   | tree evaluation: a prefix Boolean formula   | formula depth                    | 2 (balanced)   |
@@ -51,7 +51,8 @@ AND, OR, NOT, PLUS, TIMES = 10, 11, 12, 13, 14
 GEN0 = 15                                            # the four S5 generators: 15 .. 18
 BF_TOK = {c: 19 + i for i, c in enumerate("><+-[]")}  # 19 .. 24
 NUM = 32
-V = NUM + 256                                        # 288 tokens
+PAIR0 = NUM + 256                                    # `ptr`: one token per (key, value) pair, 16 x 16 = 256 of them
+V = PAIR0 + 256                                      # 544 tokens
 
 
 def num(v) -> int:
@@ -60,21 +61,28 @@ def num(v) -> int:
 
 # ------------------------------------------------------------------------------------------------------------ families
 class PointerChase:
-    """A random permutation of N nodes, written as N (a, pi(a)) pairs in random order; the query is (x, h); the answer
-    is pi^h(x). One wrong hop sends the walk to an effectively random node — no partial credit (planning §19.1)."""
+    """A random permutation of N = 16 nodes, written as 16 PAIR TOKENS in random order — token `PAIR0 + 16a + pi(a)`
+    holds a node and where it points; the query is (h, x); the answer is pi^h(x) as a number token. One wrong hop sends
+    the walk to an effectively random node — no partial credit (planning §19.1).
+
+    Why one token per pair (planning §20.1). Written as two tokens per pair — key then value, with or without separate
+    key/value vocabularies, one query or eight per context, query last or not — ONE hop never left chance: 12,000 steps
+    for our looped model, 10,000 for a plain 2-layer transformer (loss stuck at ln 16). Finding "the position after key
+    x" needs two attention steps that are useful only TOGETHER (copy each key onto its value; match the query against
+    it) — a leap of 2 from the outcome alone (§19.1). With the pair in one token a hop is one attention step (match the
+    key part, read the value part): both models solve one hop in ~2,000 steps. The depth is untouched — h hops are still
+    h dependent lookups."""
     name, levels, N = "ptr", [1, 2, 3, 4, 5, 6, 7, 8], 16
 
     def sample(self, rng, li):
         h = self.levels[li]
         perm, order = rng.permutation(self.N), rng.permutation(self.N)
-        toks = [TAG["ptr"]]
-        for a in order:
-            toks += [num(a), num(perm[a])]
+        toks = [TAG["ptr"]] + [PAIR0 + self.N * int(a) + int(perm[a]) for a in order]
         x = int(rng.integers(self.N))
         y = x
         for _ in range(h):
             y = int(perm[y])
-        return toks + [Q, num(x), num(h), EQ], num(y)
+        return toks + [Q, num(h), num(x), EQ], num(y)
 
 
 class S5Word:
@@ -97,9 +105,12 @@ class S5Word:
 
 class BoolFormula:
     """A prefix Boolean formula of depth exactly h: each AND/OR node has one child of depth h-1 and one of depth 0 or 1
-    (order random); NOT with probability 0.15. Leaves are 0/1. Answers balanced 50/50 by rejection. Short-circuits
-    exist (an AND with a 0 child), so the EFFECTIVE depth is below h for some formulas — stated in §20's caveats."""
-    name, levels = "bool", [1, 2, 3, 4, 5, 6, 7, 8]
+    (order random); NOT with probability 0.15. Leaves are 0/1. Answers balanced 50/50 by rejection.
+    The shallow sibling is NEUTRAL (1 under AND, 0 under OR — it lets the deep child decide) with probability 0.9. In
+    P0's first run siblings were random, so half of them short-circuited their node and the answer was usually fixed
+    within the top two levels: every arm scored 0.84-0.90 normalised at depth 8 without thoughts. With 0.9 neutral, the
+    first short-circuit from the top is ~10 levels down on average, so depth h is real depth."""
+    name, levels, NEUTRAL = "bool", [1, 2, 3, 4, 5, 6, 7, 8], 0.9
 
     def _f(self, rng, d):
         if d == 0:
@@ -111,7 +122,12 @@ class BoolFormula:
             return [NOT] + t, 1 - v
         op = AND if r < 0.575 else OR
         dt, dv = self._f(rng, d - 1)
-        st, sv = self._f(rng, int(rng.integers(0, min(1, d - 1) + 1)))
+        neutral = 1 if op == AND else 0                     # the sibling value that lets the deep child decide
+        want = neutral if rng.random() < self.NEUTRAL else 1 - neutral
+        while True:
+            st, sv = self._f(rng, int(rng.integers(0, min(1, d - 1) + 1)))
+            if sv == want:
+                break
         t = [op] + (dt + st if rng.random() < 0.5 else st + dt)
         return t, (dv & sv) if op == AND else (dv | sv)
 
@@ -248,13 +264,20 @@ def collate(items, dev="cpu"):
     return tok.to(dev), ans.to(dev)
 
 
-def make_batch(fams, rng, n_per_family, dev="cpu", level=None):
-    """n_per_family examples from every family, levels uniform (or all at level index `level`). Returns tokens,
-    answers, family index, level index."""
+def make_batch(fams, rng, n_per_family, dev="cpu", level=None, max_level=-1, level_probs=None):
+    """n_per_family examples from every family, levels uniform (or all at level index `level`, or uniform over the
+    level indices <= `max_level` when that is >= 0, or drawn from `level_probs[f]` — one probability vector per
+    family, e.g. a frontier curriculum). Returns tokens, answers, family index, level index."""
     items, fid, lid = [], [], []
     for f, fam in enumerate(fams):
+        top = len(fam.levels) if max_level < 0 else max_level + 1
         for _ in range(n_per_family):
-            li = int(rng.integers(len(fam.levels))) if level is None else level
+            if level is not None:
+                li = level
+            elif level_probs is not None:
+                li = int(rng.choice(len(fam.levels), p=level_probs[f]))
+            else:
+                li = int(rng.integers(top))
             items.append(fam.sample(rng, li))
             fid.append(f)
             lid.append(li)

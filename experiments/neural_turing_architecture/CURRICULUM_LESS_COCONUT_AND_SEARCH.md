@@ -1692,3 +1692,45 @@ child), so its effective depth is below h for some formulas. The shallow `bf` le
 train and eval overlap there (sanity levels). Answer balance differs by family; normalisation by the majority rate
 handles it, but a high chance rate leaves less room above it.
 
+### 20.1 Run 1 — RAN 2026-10-06: the sanity gate P0.1 FAILED, so no ceiling is read
+
+`thinking/runs/p0/r1_loop{2,4,8}.{json,log}`; 6.5 / 8 / 11 minutes on the 3050 Ti. Normalised accuracy at level 1, and
+whether level 1 counts as solved (≥ 0.9):
+
+| family | `loop2` | `loop4` | `loop8` | deepest level, `loop4` |
+|---|---|---|---|---|
+| `ptr` | −0.01 | −0.02 | −0.02 | +0.14 |
+| `s5` | +0.26 | +0.15 | +0.08 | +0.09 |
+| `bool` | **+1.00** | +0.78 | **+1.00** | +0.84 (depth 8, no thoughts) |
+| `ca` | +0.14 | +0.18 | +0.14 | +0.26 |
+| `bf` | **+1.00** | **+1.00** | **+1.00** | +0.61 (65–256 steps, no thoughts) |
+| `aff` | +0.03 | +0.04 | +0.04 | −0.01 |
+| level 1 solved | 2 / 6 | 1 / 6 | 2 / 6 | P0.1 needs ≥ 5 / 6 |
+
+**Four causes, each measured (diagnostic runs, one family at a time, `loop4` unless stated):**
+1. **Uniform mixing blocks even the easy levels.** `aff` level 1 trained ALONE: 1.00 in 3,000 steps. In the uniform mix
+   of 6 families × 8 levels, 7 of every 8 of a family's problems were levels it could not yet learn: 0.03–0.04 after
+   10,000 steps. The frontier is load-bearing even without thoughts (§19.1).
+2. **`ptr` was stuck at "copy the query".** The three arms' `ptr` numbers agree to two decimals at every depth, and
+   they equal the accuracy of answering x itself (π^h(x) = x for a random permutation of 16: 1/16, 2/16, 3/16 or 4/16
+   depending on h) — the self-play paper's "copy" stage. A lookup across TWO tokens per pair (key, then value) never
+   left chance: one hop trained alone for 12,000 steps (`loop4`); keyed vocabularies; a 4 → 8 → 16-pair size ladder
+   (100% at 4 pairs by positional enumeration, chance the moment the table grew); 8 queries per context; the query
+   placed last; and a plain 2-layer transformer for 10,000 steps (0.062–0.077, chance 0.0625). Finding "the position
+   after key x" needs two attention steps that pay off only together — a leap of 2 from the outcome. **One token per
+   (key, value) pair: one hop solved (0.997–0.998) in ~2,000 steps by both models.**
+3. **`bool` had a shortcut.** Random siblings short-circuit their node (an AND with a 0), so the answer was usually
+   fixed near the top: 0.83–0.97 normalised at depth 8 with no thoughts.
+4. **`bf`'s step count is not depth.** Counted loops make a cell's value a product of loop counts — a formula a
+   fixed-depth model approximates without simulating: 0.57–0.63 at 65–256 executed steps with no thoughts.
+
+### 20.2 Run 2 — changes registered before it runs (2026-10-06)
+
+(a) **A frontier curriculum** (`p0_ceiling.py --sample frontier`, class `Frontier`): per family, the lowest level whose
+running training accuracy is below 0.9 gets half the problems (0.8 if it is level 1), the mastered levels below share
+0.3, the next level up 0.15, the rest 0.05 — allowed by Q5, motivated by cause 1. (b) **`ptr`: one token per (node,
+successor) pair** (cause 2). (c) **`bool`: the shallow sibling is neutral (1 under AND, 0 under OR) with probability
+0.9** (cause 3), so the first short-circuit from the top is ~10 levels down on average. (d) **`bf` unchanged** — cause 4
+is recorded; `bf` enters P1(b) only if some level fails. Everything else as §20: arms `loop2`, `loop4`, `loop8`;
+10,000 steps; the same evaluation, thresholds and predictions P0.1–P0.4.
+

@@ -1,0 +1,18 @@
+seed 1: 17.7s, 127699 draws: [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000]
+   0 (1, 2) majority 0.50 distinct answers 5 distinct programs 102 len 5-39
+   1 (3, 4) majority 0.42 distinct answers 9 distinct programs 366 len 7-40
+   2 (5, 6) majority 0.43 distinct answers 10 distinct programs 758 len 9-40
+   3 (7, 10) majority 0.51 distinct answers 7 distinct programs 732 len 11-40
+   4 (11, 16) majority 0.42 distinct answers 9 distinct programs 864 len 11-40
+   5 (17, 32) majority 0.33 distinct answers 18 distinct programs 902 len 13-40
+   6 (33, 64) majority 0.28 distinct answers 32 distinct programs 970 len 16-40
+   7 (65, 256) majority 0.25 distinct answers 60 distinct programs 991 len 20-40
+seed 0: 375.3s, 2519130 draws: [20000, 20000, 20000, 20000, 20000, 20000, 20000, 20000]
+   0 (1, 2) majority 0.51 distinct answers 5 distinct programs 690 len 5-40
+   1 (3, 4) majority 0.44 distinct answers 9 distinct programs 2675 len 7-40
+   2 (5, 6) majority 0.42 distinct answers 11 distinct programs 5149 len 9-40
+   3 (7, 10) majority 0.49 distinct answers 9 distinct programs 7813 len 11-40
+   4 (11, 16) majority 0.40 distinct answers 10 distinct programs 12770 len 11-40
+   5 (17, 32) majority 0.31 distinct answers 23 distinct programs 14333 len 13-40
+   6 (33, 64) majority 0.27 distinct answers 46 distinct programs 16202 len 16-40
+   7 (65, 256) majority 0.24 distinct answers 102 distinct programs 18716 len 20-40

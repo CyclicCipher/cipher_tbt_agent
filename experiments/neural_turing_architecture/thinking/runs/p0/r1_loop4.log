@@ -1,0 +1,53 @@
+device cuda | arm loop loops 4 | block applications 6 | d 128 | params 669,089 | steps 10000 x 192
+  step    250  loss 1.8586       10s
+  step    500  loss 1.5833       20s
+  step    750  loss 1.5152       29s
+  step   1000  loss 1.4789       45s
+  step   1250  loss 1.4176       58s
+  step   1500  loss 1.3805       74s
+  step   1750  loss 1.3647       85s
+  step   2000  loss 1.3512       96s
+  step   2250  loss 1.3287      106s
+  step   2500  loss 1.3171      117s
+  step   2750  loss 1.2980      127s
+  step   3000  loss 1.2885      146s
+  step   3250  loss 1.2885      158s
+  step   3500  loss 1.2650      173s
+  step   3750  loss 1.2575      185s
+  step   4000  loss 1.2391      199s
+  step   4250  loss 1.2409      211s
+  step   4500  loss 1.2272      224s
+  step   4750  loss 1.2176      235s
+  step   5000  loss 1.2141      246s
+  [mid eval at step 5000]
+  step   5250  loss 1.2004      260s
+  step   5500  loss 1.1922      270s
+  step   5750  loss 1.1860      281s
+  step   6000  loss 1.1765      292s
+  step   6250  loss 1.1677      303s
+  step   6500  loss 1.1641      314s
+  step   6750  loss 1.1591      325s
+  step   7000  loss 1.1482      335s
+  step   7250  loss 1.1393      346s
+  step   7500  loss 1.1333      358s
+  step   7750  loss 1.1292      369s
+  step   8000  loss 1.1209      380s
+  step   8250  loss 1.1172      391s
+  step   8500  loss 1.1158      402s
+  step   8750  loss 1.1113      413s
+  step   9000  loss 1.1097      424s
+  step   9250  loss 1.1125      435s
+  step   9500  loss 1.1090      447s
+  step   9750  loss 1.1122      459s
+  step  10000  loss 1.1129      471s
+  [final eval at step 10000]
+
+trained in 475s
+
+normalised accuracy per level (final; mid in brackets). solved >= 0.9, failed <= 0.2
+  ptr   h_solved    0  h_fail    1  | 1:-0.02(-0.01)  2:+0.02(+0.02)  3:+0.04(+0.04)  4:+0.13(+0.13)  5:+0.03(+0.03)  6:+0.16(+0.16)  7:+0.06(+0.06)  8:+0.14(+0.14)
+  s5    h_solved    0  h_fail    1  | 1:+0.15(+0.55)  2:+0.36(+0.47)  3:+0.32(+0.33)  4:+0.20(+0.26)  6:+0.15(+0.19)  8:+0.16(+0.17)  12:+0.12(+0.14)  16:+0.09(+0.08)
+  bool  h_solved    0  h_fail None  | 1:+0.78(+0.63)  2:+0.89(+0.85)  3:+0.94(+0.85)  4:+0.97(+0.84)  5:+0.91(+0.78)  6:+0.91(+0.77)  7:+0.90(+0.76)  8:+0.84(+0.79)
+  ca    h_solved    0  h_fail    1  | 1:+0.18(+0.16)  2:+0.28(+0.26)  3:+0.26(+0.29)  4:+0.27(+0.23)  5:+0.30(+0.28)  6:+0.27(+0.19)  7:+0.38(+0.34)  8:+0.26(+0.26)
+  bf    h_solved   10  h_fail None  | 2:+1.00(+1.00)  4:+1.00(+0.99)  6:+0.95(+0.88)  10:+0.94(+0.92)  16:+0.87(+0.77)  32:+0.86(+0.80)  64:+0.78(+0.62)  256:+0.61(+0.45)
+  aff   h_solved    0  h_fail    1  | 1:+0.04(+0.04)  2:-0.01(-0.00)  3:-0.01(-0.02)  4:+0.01(-0.01)  6:-0.01(+0.00)  8:-0.02(+0.00)  12:-0.02(-0.01)  16:-0.01(-0.01)
