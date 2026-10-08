@@ -118,7 +118,14 @@ step input (decisive for rotation), the query head (+0.5) and depth (+0.25–0.5
 
 **Open:** (1) far ahead the model is still ~2.7 bits below the Bayesian reference on circles; (2) rotation needs
 per-horizon slots, which the query head lacks (hybrid recovers it but loses the far gain); (3) on pure noise the model
-is over-confident by 0.7–1.0 bit at worst; (4) with 2–4 points in context the far gain is only 1–2 bits.
+is over-confident by 0.7–1.0 bit at worst — fixed by x13; (4) with 2–4 points in context the far gain is only 1–2 bits.
+
+## x13 — a learned uniform component in the mixture (`--unif 1`), on the best configuration
+
+Per (position, horizon), one more output: the weight u of a uniform density over the square, density = (1 − u)·mixture
++ u. One seed: on pure noise the worst gain at n ≥ 2 goes from −1.04 to **−0.16** bits (inside P6's ±0.2), the mean from
+−0.31 to −0.02; 4-fam far n = 16 6.17 → 6.42, n = 32 7.12 → 7.40; pen far 1.26 → 1.45. Calibration fixed at no cost; open
+item (3) is closed for this configuration (one seed). 95 s.
 
 **Ideas not yet tried:** a frontier curriculum over the horizon k (train near horizons first, extend as they are
 mastered — the zone-of-proximal-development idea); future-time QUERY TOKENS that pass through the transformer (each

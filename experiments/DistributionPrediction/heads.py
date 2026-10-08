@@ -14,6 +14,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[0] / "transformers"))
@@ -82,9 +83,9 @@ class QueryMixtureHead(nn.Module):
     """Candidate 3 with the horizon as an INPUT: an MLP over (state, code of k) gives the mixture for horizon k, so one
     network answers any k (the density is queryable in time as well as space). Same outputs as MixtureHead(K)."""
 
-    def __init__(self, d, C=8, hidden=128, kfreq=(1, 2, 4, 8), hybrid=False, past=False):
+    def __init__(self, d, C=8, hidden=128, kfreq=(1, 2, 4, 8), hybrid=False, past=False, unif=False):
         super().__init__()
-        self.C = C
+        self.C, self.unif = C, unif
         self.linear = nn.Linear(d, K * C * 5) if hybrid else None
         # with `past`, the head also answers k = -K..-1 (where the marks WERE), trained on the context itself; the
         # future horizons are always the LAST K entries
@@ -95,11 +96,15 @@ class QueryMixtureHead(nn.Module):
         self.register_buffer("kcode", torch.cat([ks / K, ang.sin(), ang.cos()], 1), persistent=False)   # (K, 1+2F)
         self.net = nn.Sequential(nn.Linear(d + self.kcode.shape[1], hidden), nn.GELU(), nn.Linear(hidden, hidden), nn.GELU(),
                                  nn.Linear(hidden, C * 5))
+        # with `unif`, one more output per (position, horizon): the log-odds of a uniform component over the square
+        self.unif_net = nn.Linear(d + self.kcode.shape[1], 1) if unif else None
+        self.last_log_u = None
 
     def forward(self, h, p):
         B, Lh, _ = h.shape
         x = torch.cat([h[:, :, None].expand(-1, -1, self.nk, -1), self.kcode.to(h.dtype)[None, None].expand(B, Lh, -1, -1)], -1)
         o = self.net(x).view(B, Lh, self.nk, self.C, 5)
+        self.last_log_u = F.logsigmoid(self.unif_net(x).squeeze(-1) - 3.0) if self.unif_net is not None else None
         if self.linear is not None:                         # hybrid: plus a separate linear output per horizon
             o = o + self.linear(h).view(B, Lh, K, self.C, 5)
         logw = o[..., 0].log_softmax(-1)
@@ -113,6 +118,13 @@ def mixture_logpdf(logw, mu, logs, y):
     z = (y[..., None, :] - mu) / logs.exp()
     comp = -0.5 * (z ** 2).sum(-1) - logs.sum(-1) - math.log(2 * math.pi)
     return torch.logsumexp(logw + comp, -1)
+
+
+def with_uniform(lp, log_u):
+    """log of (1 - u) * mixture + u * 1 (the uniform density on the unit square is 1)."""
+    if log_u is None:
+        return lp
+    return torch.logaddexp(lp + torch.log1p(-log_u.exp().clamp(max=1 - 1e-6)), log_u)
 
 
 def mixture_sample(logw, mu, logs, gen=None):

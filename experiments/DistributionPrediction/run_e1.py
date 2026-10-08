@@ -18,7 +18,7 @@ import torch
 import torch.nn.functional as F
 
 import generators as G
-from heads import K, Backbone, MixtureHead, ParticleHead, QueryMixtureHead, past_targets, energy_score, features, mixture_logpdf, mixture_sample, targets
+from heads import K, Backbone, MixtureHead, ParticleHead, QueryMixtureHead, past_targets, with_uniform, energy_score, features, mixture_logpdf, mixture_sample, targets
 
 HERE = Path(__file__).resolve().parent
 L, PER_FAMILY = 48, 18
@@ -29,14 +29,14 @@ LN2, LOG_FLOOR = math.log(2), math.log(0.01)
 
 
 class Model(torch.nn.Module):
-    def __init__(self, arm, d, layers, diff=False, head="linear", C=8, past=False, loops=0):
+    def __init__(self, arm, d, layers, diff=False, head="linear", C=8, past=False, loops=0, unif=False):
         super().__init__()
         self.arm, self.past = arm, past
         self.bb = Backbone(d=d, layers=layers, diff=diff, loops=loops)
         if arm == "A1":
             self.head = ParticleHead(d)
         elif arm != "A0" and head in ("query", "hybrid"):
-            self.head = QueryMixtureHead(d, C=C, hybrid=head == "hybrid", past=past)
+            self.head = QueryMixtureHead(d, C=C, hybrid=head == "hybrid", past=past, unif=unif)
         else:
             self.head = MixtureHead(d, 1 if arm == "A0" else K, C=C)
         self.particles = 8
@@ -55,7 +55,7 @@ class Model(torch.nn.Module):
         if self.past:                                        # the context itself as extra targets (k = -K..-1)
             Z, mz = past_targets(p)
             Y, m = torch.cat([Z, Y], 2), torch.cat([mz, m], 2)
-        lp = mixture_logpdf(logw.float(), mu.float(), logs.float(), Y)
+        lp = with_uniform(mixture_logpdf(logw.float(), mu.float(), logs.float(), Y), getattr(self.head, "last_log_u", None))
         return -(lp * m).sum() / m.sum()
 
 
@@ -78,8 +78,10 @@ def predict(model, p, n, M=32):
     y = p[:, n:n + K]
     if model.arm in ("A2", "A2shuf"):
         logw, mu, logs = model.head(model.bb(p[:, :n]), p[:, :n])
+        lu = getattr(model.head, "last_log_u", None)
+        lu = lu[:, -1, -K:].float() if lu is not None else None
         logw, mu, logs = logw[:, -1, -K:], mu[:, -1, -K:], logs[:, -1, -K:]          # the future horizons
-        out = ("density", mixture_logpdf(logw.float(), mu.float(), logs.float(), y))
+        out = ("density", with_uniform(mixture_logpdf(logw.float(), mu.float(), logs.float(), y), lu))
     elif model.arm == "A1":
         X = model.head(model.bb(p[:, :n]), p[:, :n], P=M)
         out = ("samples", X[:, -1].float())
@@ -160,6 +162,7 @@ def main():
     ap.add_argument("--C", type=int, default=8, help="mixture components")
     ap.add_argument("--past", type=int, default=0, help="query head also predicts the PAST (k = -16..-1) from the state")
     ap.add_argument("--loops", type=int, default=0, help="> 0: a looped backbone (one tied core block applied this many times)")
+    ap.add_argument("--unif", type=int, default=0, help="query head: a learned uniform component in the mixture")
     ap.add_argument("--json", default="")
     args = ap.parse_args()
     dev = "cuda"
@@ -173,7 +176,7 @@ def main():
     val, _ = G.batch(32, L, ge, dev, split="eval")
     probe, probe_f = G.batch(32, L, ge, dev, split="eval")
     ood, ood_f = G.batch(64, L, ge, dev, ood=True, split="eval")
-    model = Model(args.arm, args.d, args.layers, diff=bool(args.diff), head=args.head, C=args.C, past=bool(args.past), loops=args.loops).to(dev)
+    model = Model(args.arm, args.d, args.layers, diff=bool(args.diff), head=args.head, C=args.C, past=bool(args.past), loops=args.loops, unif=bool(args.unif)).to(dev)
     n_params = sum(q.numel() for q in model.parameters())
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01, betas=(0.9, 0.98))
     sched = torch.optim.lr_scheduler.LambdaLR(
