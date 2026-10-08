@@ -66,6 +66,16 @@ AdamW (lr 1e-3, 100 warmup steps, cosine), bf16 on the GPU. The step count S is 
 run, as the largest multiple of 500 at which the slowest arm trains in ≤ 75 s, and is the same for every arm; it is
 written here when fixed.
 
+**Fixed from the smoke runs (200–300 steps each, numbers not read), before any full run:**
+- **S = 1,500 steps for every arm.** The slowest arm, A1, trains at ~40 ms/step (75 s → 1,875 steps → 1,500 is the
+  largest multiple of 500). A0 trains fastest (~23 ms/step) but its evaluation runs autoregressive rollouts; with a k/v
+  cache (checked equal to a full pass to 10⁻⁶) its whole run is ~1.5 minutes.
+- **A1 uses 8 particles per position in training,** not 16 (pairwise cost; 16 did not fit), and 32 at evaluation as
+  planned.
+- **The energy score is the unbiased form,** averaging the spread term over pairs i ≠ j. The first version averaged over
+  all pairs including i = j, which shrinks that term and so rewards particle sets that are too narrow — a scoring rule
+  that is not strictly proper. Fixed before any full run.
+
 ## Measures
 
 Bits gained per point, **log₂ of the predicted density at the true point** (the uniform density on the square is 1, so
