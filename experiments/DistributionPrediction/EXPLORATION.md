@@ -127,8 +127,10 @@ Per (position, horizon), one more output: the weight u of a uniform density over
 −0.31 to −0.02; 4-fam far n = 16 6.17 → 6.42, n = 32 7.12 → 7.40; pen far 1.26 → 1.45. Calibration fixed at no cost; open
 item (3) is closed for this configuration (one seed). 95 s.
 
-**Ideas not yet tried:** a frontier curriculum over the horizon k (train near horizons first, extend as they are
-mastered — the zone-of-proximal-development idea); future-time QUERY TOKENS that pass through the transformer (each
+**Tried since:** a frontier curriculum (Experiment 2) — uniform weighting beat learning progress, gradient alignment and
+advantage filtering by 0.37–0.59 bits; see EXPERIMENT_2.md.
+
+**Ideas not yet tried:** future-time QUERY TOKENS that pass through the transformer (each
 horizon gets the network's full depth and attends to the context at the right relative time — needs custom attention
 masks and positions in `h1_lid`, so design first); a multiplicative (bilinear) state × k interaction in the query head
 for jagged rules like rotation; a learned uniform component in the mixture for calibration on noise.

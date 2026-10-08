@@ -1,0 +1,13 @@
+  step   135  t   7.0s  loss -2.1029  4-fam far n=8 +1.41  rotation k1 n=8 -0.12  c_family cir1.00 spi1.00 lis1.00 bil1.00 pen1.00 rot1.00 uni1.00
+  step   292  t  14.0s  loss -2.0357  4-fam far n=8 +1.92  rotation k1 n=8 -1.07  c_family cir1.00 spi1.00 lis1.00 bil1.00 pen1.00 rot1.00 uni1.00
+  step   451  t  21.0s  loss -2.5751  4-fam far n=8 +2.31  rotation k1 n=8 -0.57  c_family cir1.00 spi1.00 lis1.00 bil1.00 pen1.00 rot1.00 uni1.00
+  step   610  t  28.0s  loss -2.9391  4-fam far n=8 +2.78  rotation k1 n=8 -0.35  c_family cir1.00 spi1.00 lis1.00 bil1.00 pen1.00 rot1.00 uni1.00
+  step   770  t  35.0s  loss -3.0572  4-fam far n=8 +3.10  rotation k1 n=8 -0.69  c_family cir1.00 spi1.00 lis1.00 bil1.00 pen1.00 rot1.00 uni1.00
+  step   929  t  42.0s  loss -3.2446  4-fam far n=8 +3.36  rotation k1 n=8 -0.16  c_family cir1.00 spi1.00 lis1.00 bil1.00 pen1.00 rot1.00 uni1.00
+  step  1087  t  49.0s  loss -3.4993  4-fam far n=8 +3.59  rotation k1 n=8 -0.08  c_family cir1.00 spi1.00 lis1.00 bil1.00 pen1.00 rot1.00 uni1.00
+  step  1247  t  56.0s  loss -3.1932  4-fam far n=8 +3.67  rotation k1 n=8 +0.10  c_family cir1.00 spi1.00 lis1.00 bil1.00 pen1.00 rot1.00 uni1.00
+  step  1406  t  63.0s  loss -3.3808  4-fam far n=8 +3.81  rotation k1 n=8 +0.37  c_family cir1.00 spi1.00 lis1.00 bil1.00 pen1.00 rot1.00 uni1.00
+  step  1565  t  70.0s  loss -3.3814  4-fam far n=8 +3.85  rotation k1 n=8 +0.47  c_family cir1.00 spi1.00 lis1.00 bil1.00 pen1.00 rot1.00 uni1.00
+
+AF seed 2: 1565 steps in 70s (GA bookkeeping 0.0s) | total 74s
+  4-fam far: n=8 +3.84  n=16 +5.75  n=32 +6.78  | rotation k1 n=16 -0.06 | uniform worst n>=2 -1.24 | pen far n=16 +1.07
