@@ -8,10 +8,12 @@ objective — predict the extrapolated distribution, then the next token — wit
 | file | what |
 |---|---|
 | `EXPERIMENT_1.md` | the first experiment, designed and pre-registered: sampled continuations vs a queryable density vs next-step rollouts, plus a time-shuffled arm |
+| `EXPLORATION.md` | exploratory runs after Experiment 1: what improves in-context extrapolation within 2-minute runs |
 | `TRANSCRIPT.md` | the notes, verbatim, with descriptions of the drawings |
 | `IDEA.md` | my rewording of the idea, with connections and open questions |
 | `refs/ctm_2505.05522.md` | the Continuous Thought Machine paper, read for what it shows about the usefulness of time |
 | `refs/what_when_spiking_2026.md` | Yamada & Chao 2026: a spiking network that predicts what, when and how likely — a minimal predicted distribution with time first-class |
+| `generators.py`, `heads.py`, `run_e1.py`, `bayes_circle.py` | Experiment 1 code: the seven families; the backbone and heads; the runner; a Bayesian reference for circles |
 | `make_figures.py` | recreates the notes' figures from the rules they describe (`figures/*.png`) |
 | `notes/page{1,2,3}.webp` | the original photographs (page 4's photo was not saved as a file — add it as `notes/page4.*`) |
 

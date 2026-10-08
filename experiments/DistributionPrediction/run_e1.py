@@ -18,7 +18,7 @@ import torch
 import torch.nn.functional as F
 
 import generators as G
-from heads import K, Backbone, MixtureHead, ParticleHead, energy_score, features, mixture_logpdf, mixture_sample, targets
+from heads import K, Backbone, MixtureHead, ParticleHead, QueryMixtureHead, past_targets, energy_score, features, mixture_logpdf, mixture_sample, targets
 
 HERE = Path(__file__).resolve().parent
 L, PER_FAMILY = 48, 18
@@ -29,11 +29,16 @@ LN2, LOG_FLOOR = math.log(2), math.log(0.01)
 
 
 class Model(torch.nn.Module):
-    def __init__(self, arm, d, layers):
+    def __init__(self, arm, d, layers, diff=False, head="linear", C=8, past=False, loops=0):
         super().__init__()
-        self.arm = arm
-        self.bb = Backbone(d=d, layers=layers)
-        self.head = ParticleHead(d) if arm == "A1" else MixtureHead(d, 1 if arm == "A0" else K)
+        self.arm, self.past = arm, past
+        self.bb = Backbone(d=d, layers=layers, diff=diff, loops=loops)
+        if arm == "A1":
+            self.head = ParticleHead(d)
+        elif arm != "A0" and head in ("query", "hybrid"):
+            self.head = QueryMixtureHead(d, C=C, hybrid=head == "hybrid", past=past)
+        else:
+            self.head = MixtureHead(d, 1 if arm == "A0" else K, C=C)
         self.particles = 8
 
     def loss(self, p):
@@ -47,6 +52,9 @@ class Model(torch.nn.Module):
         if self.arm == "A0":
             lp = mixture_logpdf(logw[:, :, 0].float(), mu[:, :, 0].float(), logs[:, :, 0].float(), Y[:, :, 0])
             return -(lp * m[:, :, 0]).sum() / m[:, :, 0].sum()
+        if self.past:                                        # the context itself as extra targets (k = -K..-1)
+            Z, mz = past_targets(p)
+            Y, m = torch.cat([Z, Y], 2), torch.cat([mz, m], 2)
         lp = mixture_logpdf(logw.float(), mu.float(), logs.float(), Y)
         return -(lp * m).sum() / m.sum()
 
@@ -70,7 +78,8 @@ def predict(model, p, n, M=32):
     y = p[:, n:n + K]
     if model.arm in ("A2", "A2shuf"):
         logw, mu, logs = model.head(model.bb(p[:, :n]), p[:, :n])
-        out = ("density", mixture_logpdf(logw[:, -1].float(), mu[:, -1].float(), logs[:, -1].float(), y))
+        logw, mu, logs = logw[:, -1, -K:], mu[:, -1, -K:], logs[:, -1, -K:]          # the future horizons
+        out = ("density", mixture_logpdf(logw.float(), mu.float(), logs.float(), y))
     elif model.arm == "A1":
         X = model.head(model.bb(p[:, :n]), p[:, :n], P=M)
         out = ("samples", X[:, -1].float())
@@ -78,7 +87,8 @@ def predict(model, p, n, M=32):
         tf = model.bb.tf
         cur = p[:, :n].repeat_interleave(M, 0)
         caches = tf.new_caches()
-        h = tf.norm(tf.forward_embedded(model.bb.inp(features(cur)), caches, 0))
+        h = tf.norm(tf.forward_embedded(model.bb.embed(cur), caches, 0))
+        prev = cur[:, -1:]
         new = []
         for k in range(K):
             logw, mu, logs = model.head(h[:, -1:], cur[:, -1:])
@@ -86,7 +96,9 @@ def predict(model, p, n, M=32):
             new.append(nxt)
             cur = nxt[:, None]
             if k + 1 < K:
-                h = tf.norm(tf.forward_embedded(model.bb.inp(features(cur)), caches, n + k))
+                pair = torch.cat([prev, cur], 1)                # the step input needs the previous point
+                h = tf.norm(tf.forward_embedded(model.bb.embed(pair)[:, 1:], caches, n + k))
+            prev = cur
         out = ("samples", torch.stack(new, 1).view(p.shape[0], M, K, 2))
     model.train()
     return out, y
@@ -143,6 +155,11 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--probes", type=int, default=10)
+    ap.add_argument("--diff", type=int, default=0, help="1 = also feed the step since the previous mark (exploratory)")
+    ap.add_argument("--head", choices=["linear", "query", "hybrid"], default="linear", help="A2: linear per-horizon head, an MLP over (state, k), or their sum")
+    ap.add_argument("--C", type=int, default=8, help="mixture components")
+    ap.add_argument("--past", type=int, default=0, help="query head also predicts the PAST (k = -16..-1) from the state")
+    ap.add_argument("--loops", type=int, default=0, help="> 0: a looped backbone (one tied core block applied this many times)")
     ap.add_argument("--json", default="")
     args = ap.parse_args()
     dev = "cuda"
@@ -156,7 +173,7 @@ def main():
     val, _ = G.batch(32, L, ge, dev, split="eval")
     probe, probe_f = G.batch(32, L, ge, dev, split="eval")
     ood, ood_f = G.batch(64, L, ge, dev, ood=True, split="eval")
-    model = Model(args.arm, args.d, args.layers).to(dev)
+    model = Model(args.arm, args.d, args.layers, diff=bool(args.diff), head=args.head, C=args.C, past=bool(args.past), loops=args.loops).to(dev)
     n_params = sum(q.numel() for q in model.parameters())
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01, betas=(0.9, 0.98))
     sched = torch.optim.lr_scheduler.LambdaLR(

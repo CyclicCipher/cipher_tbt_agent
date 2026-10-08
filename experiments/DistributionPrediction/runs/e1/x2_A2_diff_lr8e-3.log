@@ -1,0 +1,21 @@
+  step   150  loss  -0.8261  n=8 gain (structured): k1 +3.52  k9-16 +0.39  [  8.1s]
+  step   300  loss  -1.3028  n=8 gain (structured): k1 +5.81  k9-16 +0.77  [ 12.0s]
+  step   450  loss  -1.7447  n=8 gain (structured): k1 +6.60  k9-16 +1.18  [ 15.9s]
+  step   600  loss  -2.0522  n=8 gain (structured): k1 +6.39  k9-16 +1.50  [ 19.7s]
+  step   750  loss  -2.0699  n=8 gain (structured): k1 +6.92  k9-16 +1.81  [ 23.5s]
+  step   900  loss  -2.2793  n=8 gain (structured): k1 +7.47  k9-16 +2.04  [ 27.3s]
+  step  1050  loss  -2.3946  n=8 gain (structured): k1 +7.70  k9-16 +2.21  [ 31.1s]
+  step  1200  loss  -2.8675  n=8 gain (structured): k1 +8.12  k9-16 +2.33  [ 35.0s]
+  step  1350  loss  -2.4990  n=8 gain (structured): k1 +8.30  k9-16 +2.38  [ 38.9s]
+  step  1500  loss  -2.6974  n=8 gain (structured): k1 +8.37  k9-16 +2.39  [ 43.0s]
+
+A2: 194,050 params | train 39s | total 43s | bandwidths None
+bits gained over uniform, mean of structured families, by context size n (rows) and horizon (cols)
+   n      k1    k2-4    k5-8   k9-16
+   1   +3.67   +1.68   +0.54   +0.06
+   2   +6.95   +4.14   +2.00   +0.84
+   4   +7.72   +5.20   +2.92   +1.50
+   8   +8.27   +6.29   +4.17   +2.56
+  16   +8.71   +7.11   +5.38   +3.72
+  32   +8.84   +7.54   +6.03   +4.46
+per family, n=16:  circle k1 +10.06 far +5.75  spiral k1 +9.75 far +4.74  lissajous k1 +8.77 far +2.55  billiard k1 +10.06 far +5.76  pen k1 +6.80 far +1.14  rotation k1 +4.88 far -0.18  uniform k1 -0.58 far -0.23

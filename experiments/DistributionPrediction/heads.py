@@ -24,20 +24,42 @@ FREQS = (1.0, 2.0, 4.0, 8.0)
 LOG_S_MIN, LOG_S_MAX = math.log(0.002), math.log(0.5)
 
 
-def features(p):
-    """(B, L, 2) points -> coordinates plus sin/cos at frequencies 1, 2, 4, 8 (same for every arm)."""
+def features(p, diff=False):
+    """(B, L, 2) points -> coordinates plus sin/cos at frequencies 1, 2, 4, 8 (same for every arm). With `diff`, also
+    the STEP since the previous mark, Δ_t = p_t − p_{t−1} (0 at t = 0), and sin/cos(2π f Δ) for f = 1, 2, 4 — the time
+    derivative as a first-class input (the notes: time as a first-class quantity); sin/cos(2πΔ) also see through a
+    wrap-around modulo 1."""
     ang = 2 * math.pi * p[..., None] * torch.tensor(FREQS, device=p.device)
-    return torch.cat([p, ang.sin().flatten(-2), ang.cos().flatten(-2)], -1)
+    out = [p, ang.sin().flatten(-2), ang.cos().flatten(-2)]
+    if diff:
+        d = torch.cat([torch.zeros_like(p[:, :1]), p[:, 1:] - p[:, :-1]], 1)
+        dang = 2 * math.pi * d[..., None] * torch.tensor(FREQS[:3], device=p.device)
+        out += [d, dang.sin().flatten(-2), dang.cos().flatten(-2)]
+    return torch.cat(out, -1)
+
+
+def n_features(diff=False):
+    return 2 + 4 * len(FREQS) + (2 + 4 * 3 if diff else 0)
 
 
 class Backbone(nn.Module):
-    def __init__(self, d=64, layers=3, heads=4, max_len=64):
+    """`loops` > 0: an h1_lid LoopedModel (prelude block, ONE tied core block applied `loops` times with the boundary
+    operator, coda block) in place of `layers` untied blocks — the same depth from fewer weights."""
+
+    def __init__(self, d=64, layers=3, heads=4, max_len=64, diff=False, loops=0):
         super().__init__()
-        self.inp = nn.Linear(2 + 4 * len(FREQS), d)
-        self.tf = H1.Model(d_model=d, n_layer=layers, n_head=heads, max_len=max_len, pos="rope", n_vocab=2)
+        self.diff = diff
+        self.inp = nn.Linear(n_features(diff), d)
+        if loops:
+            self.tf = H1.LoopedModel(d_model=d, n_head=heads, max_len=max_len, pos="rope", n_vocab=2, loops=loops, tied=True)
+        else:
+            self.tf = H1.Model(d_model=d, n_layer=layers, n_head=heads, max_len=max_len, pos="rope", n_vocab=2)
+
+    def embed(self, p):
+        return self.inp(features(p, self.diff))
 
     def forward(self, p):
-        return self.tf.norm(self.tf.forward_embedded(self.inp(features(p))))
+        return self.tf.norm(self.tf.forward_embedded(self.embed(p)))
 
 
 class MixtureHead(nn.Module):
@@ -50,6 +72,36 @@ class MixtureHead(nn.Module):
 
     def forward(self, h, p):
         o = self.out(h).view(*h.shape[:2], self.H, self.C, 5)
+        logw = o[..., 0].log_softmax(-1)
+        mu = p[:, :, None, None, :] + o[..., 1:3]
+        logs = (o[..., 3:5] - 2.5).clamp(LOG_S_MIN, LOG_S_MAX)
+        return logw, mu, logs
+
+
+class QueryMixtureHead(nn.Module):
+    """Candidate 3 with the horizon as an INPUT: an MLP over (state, code of k) gives the mixture for horizon k, so one
+    network answers any k (the density is queryable in time as well as space). Same outputs as MixtureHead(K)."""
+
+    def __init__(self, d, C=8, hidden=128, kfreq=(1, 2, 4, 8), hybrid=False, past=False):
+        super().__init__()
+        self.C = C
+        self.linear = nn.Linear(d, K * C * 5) if hybrid else None
+        # with `past`, the head also answers k = -K..-1 (where the marks WERE), trained on the context itself; the
+        # future horizons are always the LAST K entries
+        klist = list(range(-K, 0)) + list(range(1, K + 1)) if past else list(range(1, K + 1))
+        self.nk = len(klist)
+        ks = torch.tensor(klist, dtype=torch.float32)[:, None]
+        ang = 2 * math.pi * ks * torch.tensor(kfreq, dtype=torch.float32) / (2 * K)
+        self.register_buffer("kcode", torch.cat([ks / K, ang.sin(), ang.cos()], 1), persistent=False)   # (K, 1+2F)
+        self.net = nn.Sequential(nn.Linear(d + self.kcode.shape[1], hidden), nn.GELU(), nn.Linear(hidden, hidden), nn.GELU(),
+                                 nn.Linear(hidden, C * 5))
+
+    def forward(self, h, p):
+        B, Lh, _ = h.shape
+        x = torch.cat([h[:, :, None].expand(-1, -1, self.nk, -1), self.kcode.to(h.dtype)[None, None].expand(B, Lh, -1, -1)], -1)
+        o = self.net(x).view(B, Lh, self.nk, self.C, 5)
+        if self.linear is not None:                         # hybrid: plus a separate linear output per horizon
+            o = o + self.linear(h).view(B, Lh, K, self.C, 5)
         logw = o[..., 0].log_softmax(-1)
         mu = p[:, :, None, None, :] + o[..., 1:3]
         logs = (o[..., 3:5] - 2.5).clamp(LOG_S_MIN, LOG_S_MAX)
@@ -94,6 +146,18 @@ def targets(p):
         Y[:, :L - k, k - 1] = p[:, k:]
         m[:, :L - k, k - 1] = 1
     return Y, m
+
+
+def past_targets(p):
+    """Z[b, t, j] = p[b, t - (K - j)] for j = 0..K-1 (k = -K..-1) and its validity mask (t + k >= 0)."""
+    B, L, _ = p.shape
+    Z = torch.zeros(B, L, K, 2, device=p.device)
+    m = torch.zeros(B, L, K, device=p.device)
+    for j in range(K):
+        k = K - j
+        Z[:, k:, j] = p[:, :L - k]
+        m[:, k:, j] = 1
+    return Z, m
 
 
 def energy_score(X, y, m):
