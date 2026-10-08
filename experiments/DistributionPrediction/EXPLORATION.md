@@ -107,10 +107,10 @@ looped backbone), 1,500 steps, ~90 s. Against Experiment 1's A2 (lr 1e-3, positi
 
 | | Experiment 1 A2 | best now (3-seed mean) | Bayesian reference (circles only) |
 |---|---|---|---|
-| far, n = 8, 4-fam | 1.4 | 4.06 | — |
-| far, n = 16, 4-fam | 2.2 | 5.98 | — |
-| far, n = 32, 4-fam | 2.6 | 7.02 | — |
-| circle far, n = 16 / 32 | 2.2 / 2.5 | 6.98 / 8.09 | 9.65 / 10.83 |
+| far, n = 8, 4-fam | 1.44 | 4.06 | — |
+| far, n = 16, 4-fam | 2.06 | 5.98 | — |
+| far, n = 32, 4-fam | 2.40 | 7.03 | — |
+| circle far, n = 16 / 32 | 2.23 / 2.52 | 6.98 / 8.09 | 9.65 / 10.83 |
 
 (Experiment 1's 4-fam figures recomputed from `runs/e1/A2.json`.) Roughly **+4 bits per point** of in-context far
 extrapolation from the same 1,500 steps and the same 2-minute budget: the learning rate (the largest single factor), the
