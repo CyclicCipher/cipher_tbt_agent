@@ -123,3 +123,51 @@ transformer has been measured with each head.
 
 `generators.py` (the seven families), `heads.py` (input features, the shared backbone, the three heads and their
 losses), `run_e1.py` (one arm per invocation: train, periodic M3 probes, final M1/M2/M4; writes `runs/e1/<arm>.json`).
+
+## Results — RAN 2026-10-08 (`runs/e1/{A0,A1,A2,A2shuf}.{json,log}`)
+
+Wall-clock per arm: A2 42 s, A1 58 s, A0 93 s, A2-shuffled 41 s — all inside the 2-minute budget. Bits gained over
+uniform, mean of the structured families (circle, spiral, lissajous, billiard, rotation), at n = 16:
+
+| arm | k = 1 | k = 2–4 | k = 5–8 | k = 9–16 |
+|---|---|---|---|---|
+| A0 next-step, scored by its rollouts | +5.45 | +3.33 | +1.48 | +0.41 |
+| A0, its exact next-step density (exploratory re-run, `A0_exactk1`) | +6.83 | — | — | — |
+| A1 particles | +5.15 | +3.83 | +2.37 | **+1.72** |
+| A2 density | **+6.92** | **+5.08** | **+3.27** | +1.59 |
+| A2-shuffled | +2.15 | +0.10 | −1.06 | −0.95 |
+| (ceiling: the true rule and parameters) | ≈ 11.2 | ≈ 11.2 | ≈ 11.2 | ≈ 11.2 |
+
+The in-context curve, A2, k = 9–16: n = 1 −0.45, 2 +0.26, 4 +0.60, 8 +1.08, 16 +1.59, 32 +1.85 (A1: −0.57, +0.22,
++0.64, +1.26, +1.72, +1.99; A0: −0.29, −0.01, +0.22, +0.39, +0.41, +0.40).
+
+**Against the predictions.**
+- **P1 — HELD.** At k = 9–16, n = 16: A2 +1.18 and A1 +1.31 bits per point above A0's rollouts (≥ 1 required).
+  Predicting the far future directly beats rolling a next-step model forward, whose errors compound.
+- **P2 — FAILED, narrowly, at the far horizon.** A2 beats A1 at k = 1 (+1.8), 2–4 (+1.3), 5–8 (+0.9), but A1 is ahead at
+  k = 9–16 (+0.13; also at n = 32, +0.14) — on circle (2.78 vs 2.23), billiard (2.66 vs 2.13) and lissajous (1.44 vs
+  1.21). Particles commit to whole continuations; that seems to pay at long range.
+- **P3 — FAILED on its first clause, HELD strongly on its second.** No arm learned the rotation rule at all (A2 −0.32 at
+  k = 1, n = 16), so "order makes the rule recoverable" could not be shown there. On circles, order is worth **+6.7 bits**
+  at the next step (A2 +9.04 vs shuffled +2.33): without time the model knows the ring but not where on it the next mark
+  falls.
+- **P4 — FAILED as registered, and the measure was badly chosen.** n½ is relative to each arm's OWN n = 32 gain; A0's
+  far gain is small and saturates by n ≈ 4, so its n½ looks good for the wrong reason (A2 ≤ A0 on 2 of 5 families, A1
+  on 1). No arm reached 2 bits at n = 8. In absolute terms A1 and A2 extract more from the same context at every
+  n ≥ 2. **Steps:** A2's far-horizon gain at n = 8 is positive from the first probe (150 steps) and rises smoothly with
+  no plateau; A1 crosses zero at ~600 steps; A0 stays negative at n = 8 for most families throughout.
+- **P5 — FAILED, in the good direction:** every arm keeps 0.59–1.06 of its in-range gain on the out-of-range sets.
+  These sets were milder than intended, and the measure averages over horizons, where short horizons dominate.
+- **P6 — FAILED:** no arm stays within 0.2 bit of uniform on pure noise. A2 at n ≥ 2 is −0.2 to −0.4 (slightly
+  over-confident); A0 and A1 reach −6 bits: 32 samples smoothed by a narrow kernel cannot represent a broad
+  distribution — a real cost of sample-based outputs.
+- **Exploratory:** the extrapolation objective does NOT improve next-step prediction (A0's exact next-step density +6.83
+  vs A2's +6.92); the 1.5-bit gap seen first was rollout smoothing.
+
+**What it says.** Predicting the distribution of the continuation directly is the right objective for extrapolation
+(P1), and the density form learns it from the start of training without a plateau. But the absolute level shows the
+models are NOT inferring the generating rule: on a circle, after 16 points, a rule-inferrer would place the 16th future
+point within the noise (~11 bits); the models get 2–3 bits. In-context extrapolation improves with context (the curve
+keeps rising to n = 32) but stays far below what the rule allows, and the simplest rule of all — rotation, add a
+constant step modulo 1 — is not learned by any arm in 1,500 steps.
+

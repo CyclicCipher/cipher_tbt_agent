@@ -104,10 +104,17 @@ def gain_table(model, p, fam, bw=None, ns=NS, preds=None):
         else:
             lp = v
         b = bits(lp)
+        exact = None
+        if model.arm == "A0":                               # A0's own next-step density, exact (no rollout smoothing)
+            with torch.no_grad():
+                logw, mu, logs = model.head(model.bb(p[:, :n]), p[:, :n])
+                exact = bits(mixture_logpdf(logw[:, -1, 0].float(), mu[:, -1, 0].float(), logs[:, -1, 0].float(), y[:, 0]))
         for i, f in enumerate(G.FAMILIES):
             sel = fam == i
             if sel.any():
                 res.setdefault(f, {})[n] = {name: round(float(b[sel][:, lo - 1:hi].mean()), 3) for name, (lo, hi) in BUCKETS.items()}
+                if exact is not None:
+                    res[f][n]["k1_exact"] = round(float(exact[sel].mean()), 3)
     return res
 
 
