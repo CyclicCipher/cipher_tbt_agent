@@ -9,6 +9,7 @@ objective — predict the extrapolated distribution, then the next token — wit
 |---|---|
 | `TRANSCRIPT.md` | the notes, verbatim, with descriptions of the drawings |
 | `IDEA.md` | my rewording of the idea, with connections and open questions |
+| `refs/ctm_2505.05522.md` | the Continuous Thought Machine paper, read for what it shows about the usefulness of time |
 | `make_figures.py` | recreates the notes' figures from the rules they describe (`figures/*.png`) |
 | `notes/page{1,2,3}.webp` | the original photographs (page 4's photo was not saved as a file — add it as `notes/page4.*`) |
 

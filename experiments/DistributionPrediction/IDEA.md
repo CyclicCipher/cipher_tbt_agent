@@ -154,5 +154,8 @@ geometry exists, §13–§15; here the map would come out of the training object
    through the others. On Geiping et al.'s recurrent-depth model (Huginn) it replaces 32 unrolled training iterations
    with single-pass training and does better (MAUVE 0.70 vs 0.49; perplexity under Llama-2 16.08 vs 17.04). So the
    obstacle may be removable: a CTM's internal ticks could be trained the same way, one denoising step per tick
-   (my extrapolation, not something the paper tests). Is the CTM line (`docs/extra papers/ctm.pdf`, not yet read) meant
-   to be the substrate, or one of several?
+   (my extrapolation, not something the paper tests). The CTM paper is now read (`refs/ctm_2505.05522.md`): it
+   supports three of the notes' premises — time is a useful computational resource; a model can build its own
+   coordinates by moving (its maze solver uses NO positional encoding); statistics of a trajectory beat snapshots as
+   a representation — but its time is internal, not the order of observations, and it is not data-efficient
+   (~10^6 iterations for mazes). Is the CTM line meant to be the substrate, or one of several?
