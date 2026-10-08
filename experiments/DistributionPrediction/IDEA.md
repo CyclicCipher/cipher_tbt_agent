@@ -32,7 +32,7 @@ in the list. The notes ask for more — time as a coordinate OF the generating p
 pen's state now, and how it moves to its next state". That is a dynamical law, not a lookup over list positions. The
 notes point to the user's 2D+1T RoPE work and to Sakana AI's Continuous Thought Machine (a network with its own
 internal time axis) as supporting this, and to the cost of training through time (BPTT, stiff neural ODEs) as the
-obstacle.
+obstacle — with DiffusionBlocks (Sakana AI) as one way around it (see question 3 at the end).
 
 ## 2. "Noise" can be a rule that has spread itself out
 
@@ -148,6 +148,11 @@ geometry exists, §13–§15; here the map would come out of the training object
 2. What counts as success: generalising sooner (fewer steps before the rule appears), or with less data, or
    extrapolating further?
 3. The notes name BPTT and stiff neural ODEs as the obstacle for models with a real time axis, and point to HRM-Text's
-   training method and Block Diffusion (attributed to Sakana AI in the notes; the Block Diffusion I know is a 2025
-   paper by Arriola et al., so it is worth pinning down which is meant) as possible ways around it. Is the CTM line
-   meant to be the substrate, or one of several?
+   training method and DiffusionBlocks as ways around it. DiffusionBlocks (Shing, Koyama & Akiba, Sakana AI, ICLR
+   2026; `docs/extra papers/DiffusionBlocks.pdf`) reads each residual update as one step of a denoising process, so
+   every block — or every pass of a looped model — has its own target and trains independently, with no gradient
+   through the others. On Geiping et al.'s recurrent-depth model (Huginn) it replaces 32 unrolled training iterations
+   with single-pass training and does better (MAUVE 0.70 vs 0.49; perplexity under Llama-2 16.08 vs 17.04). So the
+   obstacle may be removable: a CTM's internal ticks could be trained the same way, one denoising step per tick
+   (my extrapolation, not something the paper tests). Is the CTM line (`docs/extra papers/ctm.pdf`, not yet read) meant
+   to be the substrate, or one of several?

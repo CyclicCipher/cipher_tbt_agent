@@ -34,6 +34,10 @@ However, new approaches may get around the problem, like HRM-Text's training met
 If this hurdle can be overcome, it is worth doing experiments on improving CTMs to see if they are better able to
 discern rules from noise and thus generalize.
 
+*[Correction from the user, 2026-10-08: "BlockDiffusion" means **DiffusionBlocks** — Shing, Koyama & Akiba (Sakana AI),
+"DiffusionBlocks: Block-wise Neural Network Training via Diffusion Interpretation", ICLR 2026, arXiv 2506.14202; PDF in
+`docs/extra papers/DiffusionBlocks.pdf`. The CTM paper is in the same folder, `docs/extra papers/ctm.pdf`.]*
+
 Something I did right away without understanding the problem is narrow the search to a shape/cloud around the
 distribution. I would imagine a noise function could make itself look like noise by spreading this distribution as
 wide and dispersed (non-concentrated) as possible, for example:
