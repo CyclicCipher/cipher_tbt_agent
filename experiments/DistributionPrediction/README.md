@@ -7,6 +7,7 @@ objective — predict the extrapolated distribution, then the next token — wit
 
 | file | what |
 |---|---|
+| `EXPERIMENT_1.md` | the first experiment, designed and pre-registered: sampled continuations vs a queryable density vs next-step rollouts, plus a time-shuffled arm |
 | `TRANSCRIPT.md` | the notes, verbatim, with descriptions of the drawings |
 | `IDEA.md` | my rewording of the idea, with connections and open questions |
 | `refs/ctm_2505.05522.md` | the Continuous Thought Machine paper, read for what it shows about the usefulness of time |
