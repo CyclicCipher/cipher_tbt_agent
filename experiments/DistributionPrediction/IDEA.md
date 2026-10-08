@@ -4,6 +4,13 @@ My rewording of the handwritten notes (verbatim in `TRANSCRIPT.md`), written 202
 before anything is designed (pages 1–4). Where I add something of my own or connect to other work, I say so. Figures are in
 `figures/` (made by `make_figures.py`).
 
+## Decisions so far (the user's)
+
+- **2026-10-08 — the experiment starts from a TRANSFORMER and modifies it** (rather than from a CTM, a spiking network
+  or a new substrate). The papers read so far (`refs/`) become candidate MODIFICATIONS: an internal time axis with
+  statistics-of-trajectory read-outs (CTM), per-step denoising targets instead of backpropagation through time
+  (DiffusionBlocks), separate predictors per factor (JEPA-Anything; the what/when readouts of the spiking-network paper).
+
 ## Where it comes from
 
 Our experiments keep stalling at the same place: a model sits at chance for thousands of steps, then suddenly gets the
