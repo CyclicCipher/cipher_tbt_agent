@@ -84,3 +84,71 @@ little, which is why Experiment 3 is the real test.
 3. If it fails, the failure says which ingredient is missing, for example longer-horizon effects.
 
 Code: `proxy.py`. Results: `runs/proxy/`.
+
+## Version 1 — RESULT (2026-10-10, `runs/proxy/`, `runs/proxy/validation.json`)
+
+**How it was computed.** On the GPU, for speed: 2–6 s per arm. On the CPU the same takes ~45 s per arm: 8 estimator calls
+of ~287 partial forward passes each.
+
+| proxy | Kendall τ-b with the outcome | key arms right |
+|---|---|---|
+| cos (per-batch, all parameters as one vector) | **+0.543** (p 0.003) | 4/5 (misses local128) |
+| P_sgd | +0.022 | 2/5 |
+| P_adam | +0.157 | 2/5 |
+
+**FAILED: neither P passes, and neither beats cos.** cos itself misses criterion 2 (local128 ranked mid-table).
+
+**Why P fails.** A one-step quadratic model, with each method's own best step size, rewards any update that avoids sharp
+directions, even a biased one. So O3_top, lr_pca and guided "beat" backprop on P_sgd. Training does not work that way:
+300 Adam steps at one shared schedule. The curvature reading of the guided/O3 failures (`EXPERIMENT_2B.md`) is
+therefore NOT supported by this.
+
+**What it did teach.**
+- **Which cosine.** The cosine over all parameters at once ranks arms far better than the per-matrix mean used in
+  Experiments 1–2. Guided is 0.28 against the baseline's 0.60 by the former, but looked better by the latter. So
+  "cosine misled us" was partly a choice of WHICH cosine.
+- **The two remaining blind spots differ.**
+  - cos rates ent50 high (0.70), but it trained worst. Dropping half the tokens removes signal, which a cosine cannot
+    see.
+  - cos rates local128 mid-table, but it trained best.
+
+## Version 2 — declared 2026-10-10, after version 1 failed and before any v2 value was computed
+
+**A short-horizon probe.** From each checkpoint (bp60, bp300), train each arm for 25 steps with the real optimiser:
+- Adam (0.9, 0.99), fresh state;
+- lr 1e-2 with 5 warm-up steps;
+- the arm's own estimator, on the same 25 training batches for every arm;
+- auxiliary heads fitted first for local arms, as in M1.
+
+**Measured:** the drop in validation loss (8 held-out batches). An arm's proxy rank is its average rank over the two
+checkpoints.
+
+**Same pass mark as version 1:**
+1. τ-b ≥ 0.5;
+2. all 5 key arms right;
+3. τ-b above cos's 0.543.
+
+The 17 arms are no longer unseen, so Experiment 3 is the real test. Code: `probe.py`. Cost: ~5–10 s per arm per
+checkpoint on the GPU.
+
+## Version 2 — RESULT (`runs/probe/`, `runs/proxy/validation.json`)
+
+The probe's τ-b with the outcome is **+0.573** (p 0.0015).
+- **Criterion 1:** ✓ (τ ≥ 0.5).
+- **Criterion 3:** ✓ (above cos's 0.543).
+- **Criterion 2:** ✗. Only 4 of 5 key arms are right: it ranks **local128** 10.5 of 17, but it trained best. cos made the
+  same miss.
+
+**By the declared mark it FAILS, narrowly.** Both proxies are recorded for Experiment 3 as an out-of-sample test of
+themselves. Neither gates anything: every Experiment 3 arm still trains.
+
+**Observations, NOT used to change the declared proxy:**
+- **The late checkpoint carries the signal.** Ranked from bp300 alone, τ-b = +0.721; from bp60 alone, +0.353.
+- **The probe catches what cos missed.** It puts ent50 last, where cos put it near the top. It also ranks combo and
+  guided_w low.
+- **Both proxies miss local scoring's gain.** That gain is probably made very early in training from scratch, or it is
+  partly seed luck: its seeds differed by 0.07–0.09 in both runs. A probe from initialisation would test the first
+  explanation.
+
+**Timing:** 4–10 s per arm per checkpoint on the GPU. A CPU version would be about 25× slower at this batch size, so
+the "seconds on the CPU" goal is not met by this design.

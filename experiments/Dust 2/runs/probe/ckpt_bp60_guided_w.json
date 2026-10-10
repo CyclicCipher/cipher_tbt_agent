@@ -1,0 +1,8 @@
+{
+ "arm": "guided_w",
+ "ckpt": "runs/ckpt_bp60.pt",
+ "v0": 2.6036,
+ "v1": 2.4738,
+ "drop": 0.1299,
+ "secs": 9.3
+}

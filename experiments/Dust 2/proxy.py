@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import torch
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 import data
 from e1_m1 import fit_aux
@@ -62,6 +63,10 @@ def make_hvp(m, params, batches):
 
     def hvp(v):
         acc = torch.zeros_like(v)
+        with sdpa_kernel(SDPBackend.MATH):                             # the fused CPU kernel has no double backward
+            return _hvp(v, acc)
+
+    def _hvp(v, acc):
         for idx, tgt in batches:
             loss = m.forward_cache(idx, tgt)["loss"].mean()
             gr = torch.autograd.grad(loss, params, create_graph=True)

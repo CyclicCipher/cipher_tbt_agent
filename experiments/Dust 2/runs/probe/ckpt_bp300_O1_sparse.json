@@ -1,0 +1,8 @@
+{
+ "arm": "O1_sparse",
+ "ckpt": "runs/ckpt_bp300.pt",
+ "v0": 2.3404,
+ "v1": 2.3552,
+ "drop": -0.0148,
+ "secs": 4.0
+}

@@ -1,0 +1,8 @@
+{
+ "arm": "sobol",
+ "ckpt": "runs/ckpt_bp60.pt",
+ "v0": 2.6036,
+ "v1": 2.461,
+ "drop": 0.1426,
+ "secs": 8.0
+}

@@ -1,0 +1,14 @@
+latin  T1_sig01       mean cos 0.505  gain  0.98  cost  287.0  | fc0 0.371 out0 0.640 proj0 0.618 qkv0 0.334 wte 0.427 head 0.919
+latin  T1_sig04       mean cos 0.508  gain  0.99  cost  287.0  | fc0 0.361 out0 0.647 proj0 0.588 qkv0 0.328 wte 0.438 head 0.919
+latin  T2_boltz1      mean cos 0.458  gain  0.74  cost  287.0  | fc0 0.313 out0 0.576 proj0 0.549 qkv0 0.304 wte 0.386 head 0.919
+latin  T2_boltz03     mean cos 0.342  gain  0.37  cost  287.0  | fc0 0.208 out0 0.419 proj0 0.401 qkv0 0.231 wte 0.272 head 0.919
+latin  T2_rank        mean cos 0.501  gain  0.95  cost  287.0  | fc0 0.361 out0 0.633 proj0 0.603 qkv0 0.335 wte 0.427 head 0.919
+latin  T3_simul_s02   mean cos 0.212  gain  0.17  cost  286.0  | fc0 0.219 out0 0.129 proj0 0.705 qkv0 0.227 wte 0.575 head 0.676
+latin  T3_simul_s01   mean cos 0.212  gain  0.17  cost  286.0  | fc0 0.204 out0 0.117 proj0 0.684 qkv0 0.208 wte 0.550 head 0.859
+recall T1_sig01       mean cos 0.349  gain  0.97  cost  286.6  | fc0 0.161 out0 0.341 proj0 0.141 qkv0 0.121 wte 0.072 head 0.899
+recall T1_sig04       mean cos 0.352  gain  0.99  cost  286.6  | fc0 0.161 out0 0.348 proj0 0.143 qkv0 0.123 wte 0.059 head 0.899
+recall T2_boltz1      mean cos 0.312  gain  0.72  cost  286.6  | fc0 0.132 out0 0.282 proj0 0.131 qkv0 0.110 wte 0.062 head 0.899
+recall T2_boltz03     mean cos 0.230  gain  0.34  cost  286.6  | fc0 0.077 out0 0.185 proj0 0.087 qkv0 0.070 wte 0.039 head 0.899
+recall T2_rank        mean cos 0.347  gain  0.96  cost  286.6  | fc0 0.158 out0 0.339 proj0 0.137 qkv0 0.116 wte 0.070 head 0.899
+recall T3_simul_s02   mean cos 0.117  gain  0.09  cost  286.0  | fc0 0.049 out0 0.067 proj0 0.100 qkv0 0.093 wte 0.098 head 0.518
+recall T3_simul_s01   mean cos 0.129  gain  0.11  cost  286.0  | fc0 0.045 out0 0.057 proj0 0.104 qkv0 0.090 wte 0.097 head 0.769

@@ -1,0 +1,8 @@
+{
+ "arm": "combo_K56",
+ "ckpt": "runs/ckpt_bp60.pt",
+ "v0": 2.6036,
+ "v1": 2.4592,
+ "drop": 0.1445,
+ "secs": 5.9
+}

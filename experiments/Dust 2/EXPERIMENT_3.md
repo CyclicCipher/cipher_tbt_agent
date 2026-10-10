@@ -51,3 +51,36 @@ The rules are Experiment 1's:
 
 - Code: `estimators.py` (`shaping`, `lam`, `simul`), `simul.py`, `train.py` (`--sig_sched`; the train-batch loss).
 - Results: `runs/e3/`.
+
+## Recorded before Experiment 3 trained (2026-10-10)
+
+### M1 (gradient quality, gain over the baseline; `runs/e3/m1/`, `runs/e3_m1_log.txt`)
+
+| arm | Latin | recall |
+|---|---|---|
+| T1_sig01 / T1_sig04 | 0.98 / 0.99 | 0.97 / 0.99 |
+| T2_boltz1 / T2_boltz03 / T2_rank | 0.74 / 0.37 / 0.95 | 0.72 / 0.34 / 0.96 |
+| T3_simul σ 0.2 / σ 0.1 | 0.17 / 0.17 (0.2123 vs 0.2124) | 0.09 / 0.11 |
+
+**T3's σ.** The rule picks **σ = 0.1**, on a near-tie on task 1; recall agrees.
+
+**Deviation, forced by the 2-minute rule.** T3 at matched cost (K = 286) takes ~220 s per run: its full noisy passes are
+not compiled, and they draw noise at every site. It trains at **K = 143, half the cost (~110 s)**, and is reported at its
+own cost.
+
+### Proxy predictions (neither gates anything; `PROXY.md` versions 1–2 both narrowly failed validation)
+
+Probe drop (bp300 / bp60) and cosine (bp300 / bp60), against the baseline's −0.0157 / +0.1442 and 0.600 / 0.894:
+
+| arm | probe | cos | predicted vs the baseline (± 0.02 = "same") |
+|---|---|---|---|
+| T1_sig01 | −0.0155 / +0.1461 | 0.599 / 0.893 | same |
+| T1_sig04 | −0.0162 / +0.1429 | 0.597 / 0.895 | same |
+| T2_boltz1 | −0.0319 / +0.1378 | 0.580 / 0.886 | worse |
+| T2_boltz03 | −0.0406 / +0.1263 | 0.582 / 0.889 | worse |
+| T2_rank | −0.0165 / +0.1448 | 0.600 / 0.895 | same |
+| T3_simul (σ 0.1) | −0.0278 / +0.1117 | 0.225 / 0.383 | worse (and at half the cost) |
+| T1_anneal | — (no fixed-σ probe) | — | no prediction |
+
+**The probe's predicted order, best to worst:** T1_sig01 ≈ base ≈ T2_rank ≈ T1_sig04 > T2_boltz1 > T3 > T2_boltz03.
+After training, it is scored by Kendall τ-b over these 6 arms plus the baseline, and by its same/worse calls.

@@ -1,0 +1,150 @@
+{
+ "val": {
+  "anti": 2.38675,
+  "base": 2.3687,
+  "ent50": 2.4926500000000003,
+  "guided": 2.3771,
+  "local128": 2.2815000000000003,
+  "lr_pca": 2.37935,
+  "lr_rand": 2.38855,
+  "orth": 2.3554000000000004,
+  "sobol": 2.37465,
+  "bp_aux": 2.20305,
+  "combo_K56": 2.52175,
+  "combo_local_K128": 2.51035,
+  "O1_sparse": 2.3659999999999997,
+  "O3_top": 2.4322,
+  "O4_hubT_K56": 2.3329,
+  "top10_base": 2.3836500000000003,
+  "top10_O1": 2.3662,
+  "combo_w_K56": 2.4076,
+  "guided_w": 2.4007,
+  "O4_local_K128": 2.2815,
+  "O4_orth_K56": 2.29695,
+  "top_w": 2.3761
+ },
+ "ranks": {
+  "cos": {
+   "O4_orth_K56": 0.0,
+   "O4_hubT_K56": 1.0,
+   "local128": 7.5,
+   "ent50": 3.0,
+   "orth": 3.0,
+   "O1_sparse": 4.5,
+   "base": 5.5,
+   "sobol": 6.5,
+   "anti": 7.5,
+   "top_w": 9.0,
+   "O3_top": 12.5,
+   "lr_rand": 9.5,
+   "combo_w_K56": 11.0,
+   "combo_K56": 14.5,
+   "guided": 13.0,
+   "lr_pca": 14.5,
+   "guided_w": 13.5
+  },
+  "sgd": {
+   "local128": 4.5,
+   "lr_pca": 3.0,
+   "O3_top": 1.0,
+   "guided_w": 5.0,
+   "orth": 8.0,
+   "sobol": 9.0,
+   "top_w": 4.0,
+   "O1_sparse": 10.5,
+   "guided": 4.5,
+   "base": 12.0,
+   "combo_w_K56": 6.5,
+   "anti": 10.5,
+   "O4_hubT_K56": 10.0,
+   "O4_orth_K56": 9.5,
+   "lr_rand": 12.5,
+   "combo_K56": 9.5,
+   "ent50": 16.0
+  },
+  "adam": {
+   "local128": 2.5,
+   "O3_top": 2.0,
+   "orth": 6.0,
+   "O4_orth_K56": 6.0,
+   "sobol": 7.5,
+   "lr_pca": 10.0,
+   "combo_K56": 7.0,
+   "top_w": 3.5,
+   "O4_hubT_K56": 6.0,
+   "guided": 11.5,
+   "O1_sparse": 11.0,
+   "base": 12.0,
+   "combo_w_K56": 6.5,
+   "guided_w": 7.5,
+   "anti": 10.5,
+   "lr_rand": 10.5,
+   "ent50": 16.0
+  }
+ },
+ "result": {
+  "cos": {
+   "tau": 0.543,
+   "p": 0.003,
+   "keys": {
+    "guided_below": true,
+    "O3_below": true,
+    "combo_below": true,
+    "O4_above": true,
+    "local_above": false
+   }
+  },
+  "sgd": {
+   "tau": 0.022,
+   "p": 0.901,
+   "keys": {
+    "guided_below": false,
+    "O3_below": false,
+    "combo_below": false,
+    "O4_above": true,
+    "local_above": true
+   }
+  },
+  "adam": {
+   "tau": 0.157,
+   "p": 0.385,
+   "keys": {
+    "guided_below": false,
+    "O3_below": false,
+    "combo_below": false,
+    "O4_above": true,
+    "local_above": true
+   }
+  }
+ },
+ "probe": {
+  "ranks": {
+   "O4_orth_K56": 0.0,
+   "O4_hubT_K56": 1.0,
+   "orth": 2.0,
+   "top_w": 7.0,
+   "O1_sparse": 3.5,
+   "sobol": 6.5,
+   "local128": 10.5,
+   "lr_rand": 8.0,
+   "base": 7.0,
+   "lr_pca": 11.0,
+   "anti": 8.5,
+   "guided": 10.5,
+   "O3_top": 8.0,
+   "guided_w": 13.5,
+   "combo_w_K56": 13.0,
+   "combo_K56": 10.0,
+   "ent50": 16.0
+  },
+  "tau": 0.573,
+  "p": 0.0015,
+  "keys": {
+   "guided_below": true,
+   "O3_below": true,
+   "combo_below": true,
+   "O4_above": true,
+   "local_above": false
+  }
+ }
+}

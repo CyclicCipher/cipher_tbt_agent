@@ -1,0 +1,8 @@
+{
+ "arm": "lr_pca",
+ "ckpt": "runs/ckpt_bp60.pt",
+ "v0": 2.6036,
+ "v1": 2.4735,
+ "drop": 0.1301,
+ "secs": 5.8
+}
