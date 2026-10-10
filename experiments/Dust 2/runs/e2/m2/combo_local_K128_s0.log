@@ -1,0 +1,32 @@
+step     0  val 3.6372
+step    10  t    4.5s  cost      1528 fwd  val 2.9249
+step    20  t    7.8s  cost      3055 fwd  val 2.6793
+step    30  t   11.1s  cost      4583 fwd  val 2.5913
+step    40  t   14.4s  cost      6111 fwd  val 2.5561
+step    50  t   17.6s  cost      7638 fwd  val 2.5348
+step    60  t   21.0s  cost      9166 fwd  val 2.5742
+step    70  t   24.4s  cost     10694 fwd  val 2.5881
+step    80  t   27.9s  cost     12221 fwd  val 2.5772
+step    90  t   31.3s  cost     13749 fwd  val 2.5756
+step   100  t   34.8s  cost     15277 fwd  val 2.5650
+step   110  t   38.2s  cost     16804 fwd  val 2.5751
+step   120  t   41.6s  cost     18332 fwd  val 2.6103
+step   130  t   45.1s  cost     19860 fwd  val 2.5595
+step   140  t   48.5s  cost     21387 fwd  val 2.5526
+step   150  t   51.9s  cost     22915 fwd  val 2.5435
+step   160  t   55.4s  cost     24443 fwd  val 2.5420
+step   170  t   58.8s  cost     25970 fwd  val 2.5394
+step   180  t   62.2s  cost     27498 fwd  val 2.5343
+step   190  t   65.7s  cost     29026 fwd  val 2.5259
+step   200  t   69.1s  cost     30553 fwd  val 2.5261
+step   210  t   72.5s  cost     32081 fwd  val 2.5254
+step   220  t   76.0s  cost     33609 fwd  val 2.5238
+step   230  t   79.4s  cost     35136 fwd  val 2.5125
+step   240  t   82.9s  cost     36664 fwd  val 2.5105
+step   250  t   86.3s  cost     38192 fwd  val 2.5146
+step   260  t   89.7s  cost     39719 fwd  val 2.5114
+step   270  t   93.1s  cost     41247 fwd  val 2.5110
+step   280  t   96.5s  cost     42775 fwd  val 2.5104
+step   290  t  100.0s  cost     44302 fwd  val 2.5098
+step   300  t  103.4s  cost     45830 fwd  val 2.5097
+done: dust K=128 amp=fp16 noise=guided rank=8 beta=0.5 sparse_c=2 top_guide=0.3 hub_T=1 exact_head=1 local=1 | val 2.5097 | 103s | 45830 fwd-equiv

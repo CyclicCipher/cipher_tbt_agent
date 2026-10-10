@@ -1,0 +1,128 @@
+{
+ "args": {
+  "method": "bp",
+  "steps": 100,
+  "lr": 0.02,
+  "B": 32,
+  "T": 64,
+  "task": "latin",
+  "d": 64,
+  "L": 4,
+  "H": 4,
+  "aux_every": 0,
+  "aux_weight": 0.0,
+  "topk": 0.0,
+  "amp": "bf16",
+  "seed": 0,
+  "eval_every": 10,
+  "set": [],
+  "sig_sched": "",
+  "save": "",
+  "json": "runs/e2/v/bp_s0.json"
+ },
+ "cfg": {
+  "K": 32,
+  "chunk": 16,
+  "sig": {
+   "emb": 0.2,
+   "o": 0.2,
+   "proj": 0.2,
+   "fc": 0.2,
+   "out": 0.2,
+   "qkv": 0.2,
+   "loc": 0.05,
+   "head": 0.05,
+   "aux": 0.05
+  },
+  "gamma": 0.0,
+  "gamma_loc": 0.98,
+  "qkv_mode": "hub",
+  "head_mult": 4,
+  "noise": "gauss",
+  "rank": 8,
+  "beta": 0.5,
+  "ema": 0.1,
+  "ent_frac": 1.0,
+  "local": false,
+  "exact_head": false,
+  "amp": "",
+  "sparse_c": 0.0,
+  "top_guide": 0.0,
+  "hub_T": false,
+  "act_K": 4,
+  "shaping": "",
+  "lam": 1.0,
+  "simul": false
+ },
+ "log": [
+  {
+   "step": 0,
+   "t": 0.0,
+   "cost": 0.0,
+   "val": 3.6372
+  },
+  {
+   "step": 10,
+   "t": 1.4,
+   "cost": 30,
+   "val": 2.8162
+  },
+  {
+   "step": 20,
+   "t": 1.5,
+   "cost": 60,
+   "val": 2.6161
+  },
+  {
+   "step": 30,
+   "t": 1.6,
+   "cost": 90,
+   "val": 2.4941
+  },
+  {
+   "step": 40,
+   "t": 1.7,
+   "cost": 120,
+   "val": 2.4644
+  },
+  {
+   "step": 50,
+   "t": 1.8,
+   "cost": 150,
+   "val": 2.4291
+  },
+  {
+   "step": 60,
+   "t": 2.0,
+   "cost": 180,
+   "val": 2.4156
+  },
+  {
+   "step": 70,
+   "t": 2.1,
+   "cost": 210,
+   "val": 2.4126
+  },
+  {
+   "step": 80,
+   "t": 2.3,
+   "cost": 240,
+   "val": 2.4036
+  },
+  {
+   "step": 90,
+   "t": 2.4,
+   "cost": 270,
+   "val": 2.396
+  },
+  {
+   "step": 100,
+   "t": 2.5,
+   "cost": 300,
+   "val": 2.3954
+  }
+ ],
+ "secs": 2.5,
+ "cost": 300,
+ "val": 2.3954
+}

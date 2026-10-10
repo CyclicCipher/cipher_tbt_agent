@@ -1,0 +1,32 @@
+step     0  val 3.6387
+step    10  t    1.3s  cost        30 fwd  val 2.8378
+step    20  t    1.4s  cost        60 fwd  val 2.6069
+step    30  t    1.5s  cost        90 fwd  val 2.4965
+step    40  t    1.6s  cost       120 fwd  val 2.4588
+step    50  t    1.8s  cost       150 fwd  val 2.4448
+step    60  t    1.9s  cost       180 fwd  val 2.4417
+step    70  t    2.0s  cost       210 fwd  val 2.4251
+step    80  t    2.1s  cost       240 fwd  val 2.4165
+step    90  t    2.2s  cost       270 fwd  val 2.4082
+step   100  t    2.3s  cost       300 fwd  val 2.3984
+step   110  t    2.4s  cost       330 fwd  val 2.3950
+step   120  t    2.5s  cost       360 fwd  val 2.3846
+step   130  t    2.6s  cost       390 fwd  val 2.3530
+step   140  t    2.7s  cost       420 fwd  val 2.3264
+step   150  t    2.8s  cost       450 fwd  val 2.3104
+step   160  t    2.9s  cost       480 fwd  val 2.2908
+step   170  t    3.1s  cost       510 fwd  val 2.2708
+step   180  t    3.2s  cost       540 fwd  val 2.2479
+step   190  t    3.3s  cost       570 fwd  val 2.2286
+step   200  t    3.4s  cost       600 fwd  val 2.2125
+step   210  t    3.5s  cost       630 fwd  val 2.1970
+step   220  t    3.6s  cost       660 fwd  val 2.1955
+step   230  t    3.7s  cost       690 fwd  val 2.1871
+step   240  t    3.8s  cost       720 fwd  val 2.1768
+step   250  t    4.0s  cost       750 fwd  val 2.1725
+step   260  t    4.1s  cost       780 fwd  val 2.1695
+step   270  t    4.2s  cost       810 fwd  val 2.1668
+step   280  t    4.3s  cost       840 fwd  val 2.1657
+step   290  t    4.4s  cost       870 fwd  val 2.1647
+step   300  t    4.5s  cost       900 fwd  val 2.1646
+done: bp  | val 2.1646 | 5s | 900 fwd-equiv

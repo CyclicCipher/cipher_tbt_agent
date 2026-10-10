@@ -1,0 +1,12 @@
+step     0  val 3.6372
+step    10  t    8.5s  cost     11451 fwd  val 2.9183
+step    20  t   16.2s  cost     22902 fwd  val 2.6562
+step    30  t   23.9s  cost     34353 fwd  val 2.5693
+step    40  t   31.7s  cost     45804 fwd  val 2.5064
+step    50  t   39.6s  cost     57255 fwd  val 2.4617
+step    60  t   47.4s  cost     68705 fwd  val 2.4482
+step    70  t   55.2s  cost     80156 fwd  val 2.4335
+step    80  t   62.8s  cost     91607 fwd  val 2.4282
+step    90  t   70.5s  cost    103058 fwd  val 2.4235
+step   100  t   78.2s  cost    114509 fwd  val 2.4228
+done: dust K=128 amp=fp16 | val 2.4228 | 78s | 114509 fwd-equiv

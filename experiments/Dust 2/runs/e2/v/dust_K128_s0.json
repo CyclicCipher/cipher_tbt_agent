@@ -1,0 +1,131 @@
+{
+ "args": {
+  "method": "dust",
+  "steps": 100,
+  "lr": 0.01,
+  "B": 32,
+  "T": 64,
+  "task": "latin",
+  "d": 64,
+  "L": 4,
+  "H": 4,
+  "aux_every": 0,
+  "aux_weight": 0.0,
+  "topk": 0.0,
+  "amp": "bf16",
+  "seed": 0,
+  "eval_every": 10,
+  "set": [
+   "K=128",
+   "amp=fp16"
+  ],
+  "sig_sched": "",
+  "save": "",
+  "json": "runs/e2/v/dust_K128_s0.json"
+ },
+ "cfg": {
+  "K": 128,
+  "chunk": 16,
+  "sig": {
+   "emb": 0.2,
+   "o": 0.2,
+   "proj": 0.2,
+   "fc": 0.2,
+   "out": 0.2,
+   "qkv": 0.2,
+   "loc": 0.05,
+   "head": 0.05,
+   "aux": 0.05
+  },
+  "gamma": 0.0,
+  "gamma_loc": 0.98,
+  "qkv_mode": "hub",
+  "head_mult": 4,
+  "noise": "gauss",
+  "rank": 8,
+  "beta": 0.5,
+  "ema": 0.1,
+  "ent_frac": 1.0,
+  "local": false,
+  "exact_head": false,
+  "amp": "fp16",
+  "sparse_c": 0.0,
+  "top_guide": 0.0,
+  "hub_T": false,
+  "act_K": 4,
+  "shaping": "",
+  "lam": 1.0,
+  "simul": false
+ },
+ "log": [
+  {
+   "step": 0,
+   "t": 0.0,
+   "cost": 0.0,
+   "val": 3.6372
+  },
+  {
+   "step": 10,
+   "t": 8.5,
+   "cost": 11451,
+   "val": 2.9183
+  },
+  {
+   "step": 20,
+   "t": 16.2,
+   "cost": 22902,
+   "val": 2.6562
+  },
+  {
+   "step": 30,
+   "t": 23.9,
+   "cost": 34353,
+   "val": 2.5693
+  },
+  {
+   "step": 40,
+   "t": 31.7,
+   "cost": 45804,
+   "val": 2.5064
+  },
+  {
+   "step": 50,
+   "t": 39.6,
+   "cost": 57255,
+   "val": 2.4617
+  },
+  {
+   "step": 60,
+   "t": 47.4,
+   "cost": 68705,
+   "val": 2.4482
+  },
+  {
+   "step": 70,
+   "t": 55.2,
+   "cost": 80156,
+   "val": 2.4335
+  },
+  {
+   "step": 80,
+   "t": 62.8,
+   "cost": 91607,
+   "val": 2.4282
+  },
+  {
+   "step": 90,
+   "t": 70.5,
+   "cost": 103058,
+   "val": 2.4235
+  },
+  {
+   "step": 100,
+   "t": 78.2,
+   "cost": 114509,
+   "val": 2.4228
+  }
+ ],
+ "secs": 78.2,
+ "cost": 114509,
+ "val": 2.4228
+}
