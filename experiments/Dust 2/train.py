@@ -53,6 +53,7 @@ def main():
     ap.add_argument("--aux_every", type=int, default=0)
     ap.add_argument("--aux_weight", type=float, default=0.0, help="bp only: weight of the auxiliary losses")
     ap.add_argument("--topk", type=float, default=0.0)
+    ap.add_argument("--fast", action="store_true", help="torch.compile the rerun path (apparatus)")
     ap.add_argument("--amp", default="bf16", help="bp only: '', 'bf16' or 'fp16' autocast (dust: --set amp=bf16)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--eval_every", type=int, default=50)
@@ -69,14 +70,18 @@ def main():
         tr, va = data.load(dev)
         vb = [data.batch(va, 64, args.T, gv) for _ in range(8)]
         get = lambda: data.batch(tr, args.B, args.T, g)
+        gtb = torch.Generator(device=dev).manual_seed(4242)
+        tb = [data.batch(tr, 64, args.T, gtb) for _ in range(8)]
         V = data.V
     else:
         vb = [recall.batch(64, args.T, gv) for _ in range(8)]
         get = lambda: recall.batch(args.B, args.T, g)
+        tb = []
         V = recall.V
     model = TinyGPT(V, d=args.d, L=args.L, H=args.H, T=args.T, aux_every=args.aux_every,
                     topk_frac=args.topk).to(dev)
     cfg = parse_cfg(args.set)
+    TinyGPT.fast = args.fast
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.99))
     state, log, cost = {}, [], 0.0
     t0 = time.time()
@@ -109,7 +114,8 @@ def main():
         if step % args.eval_every == 0 or step == args.steps:
             torch.cuda.synchronize()
             v = val_loss(model, vb)
-            log.append(dict(step=step, t=round(time.time() - t0, 1), cost=round(cost), val=round(v, 4)))
+            trl = round(val_loss(model, tb), 4) if tb else None
+            log.append(dict(step=step, t=round(time.time() - t0, 1), cost=round(cost), val=round(v, 4), train=trl))
             print(f"step {step:5d}  t {time.time() - t0:6.1f}s  cost {cost:9.0f} fwd  val {v:.4f}", flush=True)
     total = time.time() - t0
     print(f"done: {args.method} {' '.join(args.set)} | val {log[-1]['val']:.4f} | {total:.0f}s | {cost:.0f} fwd-equiv")

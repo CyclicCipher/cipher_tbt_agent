@@ -1,0 +1,8 @@
+latin  guided_w       mean cos 0.274  K_eq    7.7  matched K  32.0  gain  0.24  cost  287.0  | fc0 0.154 out0 0.331 proj0 0.288 qkv0 0.173 wte 0.239
+latin  top_w          mean cos 0.307  K_eq    9.5  matched K  32.0  gain  0.30  cost  287.0  | fc0 0.365 out0 0.190 proj0 0.280 qkv0 0.350 wte 0.262
+latin  combo_w_K56    mean cos 0.231  K_eq    5.9  matched K  30.7  gain  0.19  cost  275.0  | fc0 0.226 out0 0.160 proj0 0.253 qkv0 0.252 wte 0.226
+latin  O4_orth_K56    mean cos 0.795  K_eq  187.0  matched K  30.7  gain  6.10  cost  275.0  | fc0 0.784 out0 0.933 proj0 0.924 qkv0 0.587 wte 0.607
+recall guided_w       mean cos 0.209  K_eq    8.5  matched K  32.0  gain  0.27  cost  286.6  | fc0 0.067 out0 0.226 proj0 0.154 qkv0 0.046 wte 0.049
+recall top_w          mean cos 0.206  K_eq    8.2  matched K  32.0  gain  0.26  cost  286.6  | fc0 0.155 out0 0.103 proj0 0.083 qkv0 0.133 wte 0.061
+recall combo_w_K56    mean cos 0.168  K_eq    5.4  matched K  30.6  gain  0.18  cost  274.7  | fc0 0.107 out0 0.134 proj0 0.103 qkv0 0.071 wte 0.052
+recall O4_orth_K56    mean cos 0.571  K_eq  167.1  matched K  30.6  gain  5.46  cost  274.7  | fc0 0.380 out0 0.576 proj0 0.258 qkv0 0.225 wte 0.078

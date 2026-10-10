@@ -48,6 +48,7 @@ class Cfg:
     shaping: str = ""           # T2: "" (linear, Dust), "boltz" (weights softmax(z/lam)), "rank" (centred ranks)
     lam: float = 1.0            # T2: Boltzmann temperature, in units of each token's reward spread
     simul: bool = False         # T3: every site perturbed in every pass, no clean pass, no cache (simul.py)
+    whiten: bool = False        # E2b: estimate g (Σ^-1 times the average) rather than Σg, for guided/oracle/top_guide
 
 
 def discount(T, gamma, dev):
@@ -125,6 +126,39 @@ def draws(key, K, B, T, D, cfg, state, g, dev, v0=None, dt=torch.float32, guide=
             yield torch.randn(kc, B, T, D, generator=g, device=dev, dtype=dt)
 
 
+def subspace(key, cfg, state):
+    """The shared subspace U (D, rank) the draws of `key` use this step (guided / oracle), or None."""
+    if cfg.noise == "oracle":
+        return state[("O", key)][:, -cfg.rank:].float()
+    if cfg.noise == "guided":
+        C = state.get(("C", key))
+        return None if C is None else torch.linalg.eigh(C)[1][:, -cfg.rank:].float()
+    return None
+
+
+def whiten(gh, key, cfg, state, guide=None):
+    """Σ^-1 gh per token, with Σ = α I + V diag(c) Vᵀ (V = [U, the token's guide]), by the Woodbury identity."""
+    B, T, D = gh.shape
+    U = subspace(key, cfg, state)
+    has_g = guide is not None and cfg.top_guide > 0
+    if U is None and not has_g:
+        return gh
+    bt = cfg.top_guide if has_g else 0.0
+    alpha = (1 - bt) * ((1 - cfg.beta) if U is not None else 1.0)
+    cols, cs = [], []
+    if U is not None:
+        cols.append(U[None, None].expand(B, T, D, U.shape[1]))
+        cs += [(1 - bt) * cfg.beta * D / cfg.rank] * U.shape[1]
+    if has_g:
+        cols.append(guide.float()[..., None])
+        cs.append(bt * D)
+    V = torch.cat(cols, -1)
+    Vt = V.transpose(-1, -2)
+    M = alpha * torch.diag(1.0 / torch.tensor(cs, device=gh.device)) + Vt @ V
+    y = torch.linalg.solve(M, Vt @ gh[..., None])
+    return (gh - (V @ y)[..., 0]) / alpha
+
+
 def update_guided(key, ghat, cfg, state):
     if cfg.noise != "guided":
         return
@@ -179,6 +213,8 @@ def rerun_site(model, c, site, K, sig, gamma, cfg, state, g, mask, stop=None, gu
         ghat = -torch.einsum("kbt,kbtd->btd", coef.to(A.dtype), A).float() / (K * sig)
     else:
         ghat = -(Sra - (rsum / K)[..., None] * Sa) / (K * sig)
+    if cfg.whiten and site[0] not in ("head", "aux"):
+        ghat = whiten(ghat, site, cfg, state, guide)
     update_guided(site, ghat, cfg, state)
     return ghat, K * model.resume_cost(site, stop)
 
@@ -213,6 +249,8 @@ def hub_local(model, c, b, g_o, cfg, state, g, mask):
             Sa += ah.sum(0).float()
             rsum += r.sum(0)
         gh = -(Sra - (rsum / cfg.K)[..., None] * Sa) / (cfg.K * sig)
+        if cfg.whiten:
+            gh = whiten(gh.reshape(B, T, d), (kind, b), cfg, state).reshape(gh.shape)
         out[..., sl] = gh.reshape(B, T, d)
         update_guided((kind, b), gh.reshape(B, T, d), cfg, state)
     f = model.flops_tok()

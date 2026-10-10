@@ -101,6 +101,7 @@ def main():
     ap.add_argument("--B", type=int, default=32)
     ap.add_argument("--aux_every", type=int, default=0)
     ap.add_argument("--topk", type=float, default=0.0)
+    ap.add_argument("--fast", action="store_true", help="torch.compile the rerun path (apparatus)")
     ap.add_argument("--batches", type=int, default=4)
     ap.add_argument("--warm", type=int, default=0, help="estimator calls before measuring (builds guided's covariance)")
     ap.add_argument("--seed", type=int, default=0)
@@ -110,6 +111,7 @@ def main():
     dev = "cuda"
     torch.manual_seed(args.seed)
     model = build(args, dev)
+    TinyGPT.fast = args.fast
     cfg = parse_cfg(["amp=fp16"] + args.set)
     gb = torch.Generator(device=dev).manual_seed(123)
     if args.task == "latin":

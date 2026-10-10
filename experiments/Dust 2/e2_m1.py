@@ -21,6 +21,7 @@ from model import TinyGPT
 from train import parse_cfg
 
 OUT = Path("runs/e2/m1")
+TinyGPT.fast = True                                  # compiled rerun path (apparatus; same maths)
 COMBO = ["noise=guided", "rank=8", "beta=0.5", "sparse_c=2", "top_guide=0.3", "hub_T=1", "exact_head=1"]
 ARMS = [  # name, cfg overrides, model kind (the ReLU² baseline is Experiment 1's runs/e1/m1/<task>_base.json: not re-run)
     ("O1_sparse", ["sparse_c=2"], "relu2"),
@@ -33,6 +34,11 @@ ARMS = [  # name, cfg overrides, model kind (the ReLU² baseline is Experiment 1
     ("combo_K56", COMBO + ["K=56"], "relu2"),
     ("top10_O1", ["sparse_c=2"], "top10"),       # the top-10% model's baseline is its curve's K = 32 point
     ("combo_local", COMBO + ["local=1", "K=56"], "relu2_aux"),
+    # Experiment 2b (whitened guides)
+    ("guided_w", ["noise=guided", "rank=8", "beta=0.5", "whiten=1"], "relu2"),
+    ("top_w", ["top_guide=0.3", "exact_head=1", "whiten=1"], "relu2"),
+    ("combo_w_K56", COMBO + ["K=56", "whiten=1"], "relu2"),
+    ("O4_orth_K56", ["hub_T=1", "K=56", "noise=orth"], "relu2"),
 ]
 
 

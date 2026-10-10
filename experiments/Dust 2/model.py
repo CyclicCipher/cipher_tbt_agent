@@ -28,7 +28,39 @@ def rms(x):
     return F.rms_norm(x, (x.shape[-1],))
 
 
+def _attn_half(x, Wqkv, Wproj, H):
+    N, T, d = x.shape
+    q, k, v = (rms(x) @ Wqkv.T).view(N, T, 3, H, d // H).permute(2, 0, 3, 1, 4)
+    o = F.scaled_dot_product_attention(q, k, v, is_causal=True).transpose(1, 2).reshape(N, T, d)
+    return x + o @ Wproj.T
+
+
+def _mlp_half(x, Wfc, Wout, topk_frac):
+    h = rms(x) @ Wfc.T
+    z = F.relu(h).square()
+    if topk_frac:
+        k = max(1, int(round(topk_frac * h.shape[-1])))
+        z = z * (h >= h.topk(k, dim=-1).values[..., -1:])
+    return x + z @ Wout.T
+
+
+_COMPILED = {}
+
+
+def _halves(fast):
+    if not fast:
+        return _attn_half, _mlp_half
+    if not _COMPILED:
+        import torch._dynamo
+        torch._dynamo.config.cache_size_limit = 64
+        _COMPILED["a"] = torch.compile(_attn_half, dynamic=False)
+        _COMPILED["m"] = torch.compile(_mlp_half, dynamic=False)
+    return _COMPILED["a"], _COMPILED["m"]
+
+
 class TinyGPT(nn.Module):
+    fast = False                                   # torch.compile the rerun path (apparatus; same maths)
+
     def __init__(self, V, d=64, L=4, H=4, T=64, mlp=4, act="relu2", aux_every=0, topk_frac=0.0):
         super().__init__()
         self.V, self.d, self.L, self.H, self.T, self.m = V, d, L, H, T, mlp * d
@@ -163,12 +195,13 @@ class TinyGPT(nn.Module):
         else:
             raise ValueError(site)
         b = b0
+        ah, mh = _halves(self.fast)
         while b < self.L:
             if half == "a":
-                x = x + self.attend(rms(x) @ self.Wqkv[b].T) @ self.Wproj[b].T
+                x = ah(x, self.Wqkv[b], self.Wproj[b], self.H)
                 half = "m"
             if half == "m":
-                x = x + self.act(rms(x) @ self.Wfc[b].T) @ self.Wout[b].T
+                x = mh(x, self.Wfc[b], self.Wout[b], self.topk_frac)
                 half = "end"
             if stop_aux is not None and b == stop_aux:
                 return self.tok_loss(rms(x) @ self.Waux[str(b)].T, c["tgt"])
