@@ -1,5 +1,9 @@
 # Dust — pretraining transformers without backpropagation (qlabs, 2026)
 
+**Superseded (2026-10-10): the full record, the ideas and the experiments now live in `experiments/Dust 2/`** (the
+user: "if it works, it has far-reaching consequences for every future architecture experiment"). This note is kept as
+the first read.
+
 Source: the web write-up https://qlabs.sh/research/dust (no PDF exists) and the code https://github.com/qlabs-eng/dust
 (MIT; `model.py`, `dust.py`, `baselines/backprop.py`). Read 2026-10-10 through WebFetch, which returns summaries of the
 page and of `dust.py`, not the full text. The user brought it with their own training-method plan and five cost-cutting
