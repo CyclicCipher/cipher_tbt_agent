@@ -38,6 +38,16 @@ class Cfg:
     local: bool = False         # score each site by the next auxiliary head's loss (model built with aux_every > 0)
     exact_head: bool = False    # (own idea O2) head error in closed form: softmax - one-hot, no draws
     amp: str = ""               # "" (fp32), "bf16" or "fp16": precision of the clean pass and every rerun
+    # ---- own ideas (Experiment 2) ----
+    sparse_c: float = 0.0       # O1: at the MLP hidden, perturb only units within sparse_c*σ of being active (0 = off)
+    top_guide: float = 0.0      # O3: share of each writer draw along the exact top-of-stream error (needs exact_head)
+    hub_T: bool = False         # O4: hub and hidden errors from their own block's writer estimate through the local
+                                #     linear map (W_proj^T, W_out^T); the hidden's activation slope by per-unit draws
+    act_K: int = 4              # O4: per-unit draws for the activation slope
+    # ---- thermodynamics (Experiment 3) ----
+    shaping: str = ""           # T2: "" (linear, Dust), "boltz" (weights softmax(z/lam)), "rank" (centred ranks)
+    lam: float = 1.0            # T2: Boltzmann temperature, in units of each token's reward spread
+    simul: bool = False         # T3: every site perturbed in every pass, no clean pass, no cache (simul.py)
 
 
 def discount(T, gamma, dev):
@@ -53,8 +63,15 @@ def _orthonormal(D, k, g, dev):
     return q                                                  # (D, k)
 
 
-def draws(key, K, B, T, D, cfg, state, g, dev, v0=None, dt=torch.float32):
-    """Yields chunks (Kc, B, T, D) of directions, dtype dt, with E[a a^T] = I (or Σ for `guided`)."""
+def draws(key, K, B, T, D, cfg, state, g, dev, v0=None, dt=torch.float32, guide=None):
+    """Yields chunks (Kc, B, T, D) of directions, dtype dt, with E[a a^T] = I (or Σ for `guided`). With a per-token unit
+    vector `guide` (B, T, D) (O3), a share cfg.top_guide of each draw's variance goes along it."""
+    if guide is not None and cfg.top_guide > 0:
+        bt = cfg.top_guide
+        for a in draws(key, K, B, T, D, cfg, state, g, dev, v0, dt):
+            xi = torch.randn(a.shape[0], B, T, 1, generator=g, device=dev, dtype=dt)
+            yield math.sqrt(1 - bt) * a + math.sqrt(bt * D) * xi * guide.to(dt)[None]
+        return
     n, Kc = cfg.noise, cfg.chunk
     if n in ("orth", "sobol"):
         if n == "orth":       # per token, the K directions are orthogonal (blocks of D if K > D), each of norm sqrt(D)
@@ -119,7 +136,7 @@ def update_guided(key, ghat, cfg, state):
 
 
 # ---- the two estimators ----------------------------------------------------------------------------------------------
-def rerun_site(model, c, site, K, sig, gamma, cfg, state, g, mask, stop=None):
+def rerun_site(model, c, site, K, sig, gamma, cfg, state, g, mask, stop=None, guide=None, unit_mask=None):
     """Perturb `site`, rerun, score each token's loss change. Returns ghat (B, T, D) ≈ d(sum of losses)/d(site output)."""
     v0 = c[site]
     B, T, D = v0.shape
@@ -131,18 +148,37 @@ def rerun_site(model, c, site, K, sig, gamma, cfg, state, g, mask, stop=None):
     Sra = torch.zeros(B, T, D, device=dev)
     Sa = torch.zeros(B, T, D, device=dev)
     rsum = torch.zeros(B, T, device=dev)
-    for a in draws(site, K, B, T, D, cfg, state, g, dev, v0, v0.dtype):
+    shaped = cfg.shaping != "" and site[0] not in ("head", "aux")
+    Rs, As = [], []
+    for a in draws(site, K, B, T, D, cfg, state, g, dev, v0, v0.dtype, guide):
         if mask is not None:
             a = a * mask[None, :, :, None].to(a.dtype)
+        if unit_mask is not None:
+            a = a * unit_mask[None].to(a.dtype)
         kc = a.shape[0]
         loss = model.resume(site, (v0[None] + sig * a).reshape(kc * B, T, D), c, stop_aux=stop).view(kc, B, T)
         r = clean[None] - loss                                  # > 0: the draw lowered that token's loss (fp32)
         if Gam is not None:
             r = r @ Gam.T
+        if shaped:
+            Rs.append(r)
+            As.append(a)
+            continue
         Sra += torch.einsum("kbt,kbtd->btd", r.to(a.dtype), a).float()
         Sa += a.sum(0).float()
         rsum += r.sum(0)
-    ghat = -(Sra - (rsum / K)[..., None] * Sa) / (K * sig)
+    if shaped:
+        R, A = torch.cat(Rs, 0), torch.cat(As, 0)                  # (K, B, T), (K, B, T, D)
+        mu, sd = R.mean(0), R.std(0).clamp(min=1e-8)
+        if cfg.shaping == "boltz":                                 # lam -> infinity gives back (R - mu): Dust's estimator
+            w = torch.softmax((R - mu) / sd / cfg.lam, 0)
+            coef = cfg.lam * sd * (w - 1.0 / K) * K
+        else:                                                      # centred ranks, rescaled to the reward spread
+            u = R.argsort(0).argsort(0).float() / (K - 1) - 0.5
+            coef = sd * u / u.std(0).clamp(min=1e-8)
+        ghat = -torch.einsum("kbt,kbtd->btd", coef.to(A.dtype), A).float() / (K * sig)
+    else:
+        ghat = -(Sra - (rsum / K)[..., None] * Sa) / (K * sig)
     update_guided(site, ghat, cfg, state)
     return ghat, K * model.resume_cost(site, stop)
 
@@ -183,6 +219,42 @@ def hub_local(model, c, b, g_o, cfg, state, g, mask):
     return out, 3 * cfg.K * (T * d) / f["fwd"]
 
 
+def act_local(model, h0, ez, K, sig, g):
+    """O4: the error at the MLP hidden pre-activation, per unit, from the error ez at its output z = act(h): perturb every
+    unit at once, score unit j by -ez_j * Δz_j (its own output only, so each unit is a 1-dimensional problem). Works for
+    any activation, differentiable or not; estimates ez_j times the noise-smoothed slope."""
+    h = h0.float()
+    z0 = model.act(h)
+    Sra = torch.zeros_like(h)
+    Sa = torch.zeros_like(h)
+    rs = torch.zeros_like(h)
+    for _ in range(K):
+        a = torch.randn(h.shape, generator=g, device=h.device)
+        r = -ez * (model.act(h + sig * a) - z0)
+        Sra += r * a
+        Sa += a
+        rs += r
+    return -(Sra - rs / K * Sa) / (K * sig)
+
+
+def top_error(model, c, tgt):
+    """O3: the exact error at the top of the residual stream (before the final norm), from the head's closed-form error:
+    no draws, no pass through the network."""
+    z = c[("head",)].float()
+    p = torch.softmax(15 * torch.tanh(z / 15), -1)
+    valid = (tgt >= 0).float()[..., None]
+    ez = (p - torch.nn.functional.one_hot(tgt.clamp(min=0), model.V).float()) * valid * (1 - torch.tanh(z / 15) ** 2)
+    eu = ez @ model.Whead.float()
+    x = c["xL"].float()
+    rr = x.pow(2).mean(-1, keepdim=True).add(1e-6).sqrt()
+    y = x / rr
+    return (eu - y * (y * eu).sum(-1, keepdim=True) / x.shape[-1]) / rr
+
+
+def unit(v):
+    return v / v.norm(dim=-1, keepdim=True).clamp(min=1e-12)
+
+
 def entropy_mask(c, frac):
     z = c[("head",)].float()
     p = torch.softmax(15 * torch.tanh(z / 15), -1)
@@ -207,6 +279,10 @@ def shadow(model, cfg, state):
 @torch.no_grad()
 def estimate(model_fp32, idx, tgt, cfg, state, g):
     model = shadow(model_fp32, cfg, state)
+    if cfg.simul:
+        from simul import estimate_simul
+        grads, cost = estimate_simul(model_fp32, idx, tgt, cfg.K, cfg.sig["proj"], cfg.sig["head"], cfg.chunk, g, model)
+        return grads, dict(loss=float("nan"), cost=cost, err={})
     c = model.forward_cache(idx, tgt)
     B, T = idx.shape
     N = B * T
@@ -222,11 +298,26 @@ def estimate(model_fp32, idx, tgt, cfg, state, g):
 
     sites = [("emb",)]
     for b in range(model.L):
-        sites += ([("o", b)] if cfg.qkv_mode == "hub" else [("qkv", b)]) + [("proj", b), ("fc", b), ("out", b)]
+        if cfg.hub_T:
+            sites += [("proj", b), ("out", b)]
+        else:
+            sites += ([("o", b)] if cfg.qkv_mode == "hub" else [("qkv", b)]) + [("proj", b), ("fc", b), ("out", b)]
+    gtop = unit(top_error(model, c, tgt)) if cfg.top_guide > 0 else None
     for s in sites:
         b = 0 if s[0] == "emb" else s[1]
-        err[s], k = rerun_site(model, c, s, cfg.K, cfg.sig[s[0]], cfg.gamma, cfg, state, g, mask, stop_for(b))
+        guide = gtop if s[0] in ("proj", "out", "emb") else None
+        um = None
+        if cfg.sparse_c > 0 and s[0] == "fc":
+            um = model.margin(c[s].float()) < cfg.sparse_c * cfg.sig["fc"]
+        err[s], k = rerun_site(model, c, s, cfg.K, cfg.sig[s[0]], cfg.gamma, cfg, state, g, mask, stop_for(b), guide, um)
         cost += k
+    if cfg.hub_T:
+        f = model.flops_tok()
+        for b in range(model.L):
+            err[("o", b)] = err[("proj", b)] @ model.Wproj[b].float()
+            err[("fc", b)] = act_local(model, c[("fc", b)], err[("out", b)] @ model.Wout[b].float(), cfg.act_K,
+                                       cfg.sig["fc"], g)
+            cost += cfg.act_K * model.m / f["fwd"] * 2
     if cfg.qkv_mode == "hub":
         for b in range(model.L):
             err[("qkv", b)], k = hub_local(model, c, b, err[("o", b)], cfg, state, g, mask)

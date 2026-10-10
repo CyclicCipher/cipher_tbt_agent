@@ -1,0 +1,104 @@
+{
+ "args": {
+  "method": "bp",
+  "steps": 300,
+  "lr": 0.003,
+  "B": 32,
+  "T": 64,
+  "task": "latin",
+  "d": 256,
+  "L": 4,
+  "H": 16,
+  "aux_every": 0,
+  "aux_weight": 0.0,
+  "topk": 0.0,
+  "amp": "",
+  "seed": 0,
+  "eval_every": 50,
+  "set": [],
+  "sig_sched": "",
+  "save": "runs/ckpt_bp300_d256.pt",
+  "json": "runs/e2/ckpt/d256.json"
+ },
+ "cfg": {
+  "K": 32,
+  "chunk": 16,
+  "sig": {
+   "emb": 0.2,
+   "o": 0.2,
+   "proj": 0.2,
+   "fc": 0.2,
+   "out": 0.2,
+   "qkv": 0.2,
+   "loc": 0.05,
+   "head": 0.05,
+   "aux": 0.05
+  },
+  "gamma": 0.0,
+  "gamma_loc": 0.98,
+  "qkv_mode": "hub",
+  "head_mult": 4,
+  "noise": "gauss",
+  "rank": 8,
+  "beta": 0.5,
+  "ema": 0.1,
+  "ent_frac": 1.0,
+  "local": false,
+  "exact_head": false,
+  "amp": "",
+  "sparse_c": 0.0,
+  "top_guide": 0.0,
+  "hub_T": false,
+  "act_K": 4,
+  "shaping": "",
+  "lam": 1.0,
+  "simul": false
+ },
+ "log": [
+  {
+   "step": 0,
+   "t": 0.0,
+   "cost": 0.0,
+   "val": 3.6372
+  },
+  {
+   "step": 50,
+   "t": 2.3,
+   "cost": 150,
+   "val": 2.4327
+  },
+  {
+   "step": 100,
+   "t": 3.5,
+   "cost": 300,
+   "val": 2.3399
+  },
+  {
+   "step": 150,
+   "t": 4.7,
+   "cost": 450,
+   "val": 2.2281
+  },
+  {
+   "step": 200,
+   "t": 5.9,
+   "cost": 600,
+   "val": 2.1696
+  },
+  {
+   "step": 250,
+   "t": 7.1,
+   "cost": 750,
+   "val": 2.1186
+  },
+  {
+   "step": 300,
+   "t": 8.3,
+   "cost": 900,
+   "val": 2.1103
+  }
+ ],
+ "secs": 8.3,
+ "cost": 900,
+ "val": 2.1103
+}

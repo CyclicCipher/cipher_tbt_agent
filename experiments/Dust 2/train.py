@@ -57,6 +57,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--eval_every", type=int, default=50)
     ap.add_argument("--set", nargs="*", default=[])
+    ap.add_argument("--sig_sched", default="", help="T1: 'start,end' -- rerun-site σ annealed geometrically over the run")
     ap.add_argument("--save", default="")
     ap.add_argument("--json", default="")
     args = ap.parse_args()
@@ -87,6 +88,10 @@ def main():
         for gp in opt.param_groups:
             gp["lr"] = lr
         idx, tgt = get()
+        if args.sig_sched:
+            s0, s1 = map(float, args.sig_sched.split(","))
+            for k in ("emb", "o", "proj", "fc", "out", "qkv"):
+                cfg.sig[k] = s0 * (s1 / s0) ** ((step - 1) / max(1, args.steps - 1))
         if args.method == "bp":
             model.zero_grad(set_to_none=True)
             with torch.autocast("cuda", dtype=dict(bf16=torch.bfloat16, fp16=torch.float16).get(args.amp, torch.float32),

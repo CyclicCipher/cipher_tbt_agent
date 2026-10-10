@@ -1,0 +1,6 @@
+step     0  val 3.6387
+step    10  t    3.1s  cost      2870 fwd  val 2.9245
+step    20  t    4.9s  cost      5740 fwd  val 2.6969
+step    30  t    6.8s  cost      8611 fwd  val 2.5850
+step    40  t    8.8s  cost     11481 fwd  val 2.5193
+step    50  t   10.7s  cost     14351 fwd  val 2.4915

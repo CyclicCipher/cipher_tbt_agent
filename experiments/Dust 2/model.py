@@ -67,6 +67,14 @@ class TinyGPT(nn.Module):
             z = z * (h >= thr)
         return z
 
+    def margin(self, h):
+        """How far each hidden unit is from being active (<= 0: active): ReLU² -> -h; top-k -> max(threshold, 0) - h."""
+        if self.topk_frac:
+            k = max(1, int(round(self.topk_frac * h.shape[-1])))
+            thr = h.topk(k, dim=-1).values[..., -1:].clamp(min=0)
+            return thr - h
+        return -h
+
     def attend(self, qkv):
         N, T, _ = qkv.shape
         q, k, v = qkv.view(N, T, 3, self.H, self.d // self.H).permute(2, 0, 3, 1, 4)
@@ -118,6 +126,7 @@ class TinyGPT(nn.Module):
                 c["in", ("aux", b)] = rms(x)
                 za = keep(("aux", b), rms(x) @ self.Waux[str(b)].T)
                 c["loss_aux", b] = self.tok_loss(za, tgt)
+        c["xL"] = x
         c["in", ("head",)] = rms(x)
         z = keep(("head",), rms(x) @ self.Whead.T)
         c["loss"] = self.tok_loss(z, tgt)

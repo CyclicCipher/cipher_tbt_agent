@@ -1,0 +1,116 @@
+{
+ "args": {
+  "method": "bp",
+  "steps": 4000,
+  "lr": 0.003,
+  "B": 32,
+  "T": 64,
+  "task": "recall",
+  "d": 64,
+  "L": 4,
+  "H": 4,
+  "aux_every": 0,
+  "aux_weight": 0.0,
+  "topk": 0.1,
+  "amp": "",
+  "seed": 0,
+  "eval_every": 500,
+  "set": [],
+  "sig_sched": "",
+  "save": "runs/ckpt_recall_bp4000_top10.pt",
+  "json": "runs/e2/ckpt/top10_recall.json"
+ },
+ "cfg": {
+  "K": 32,
+  "chunk": 16,
+  "sig": {
+   "emb": 0.2,
+   "o": 0.2,
+   "proj": 0.2,
+   "fc": 0.2,
+   "out": 0.2,
+   "qkv": 0.2,
+   "loc": 0.05,
+   "head": 0.05,
+   "aux": 0.05
+  },
+  "gamma": 0.0,
+  "gamma_loc": 0.98,
+  "qkv_mode": "hub",
+  "head_mult": 4,
+  "noise": "gauss",
+  "rank": 8,
+  "beta": 0.5,
+  "ema": 0.1,
+  "ent_frac": 1.0,
+  "local": false,
+  "exact_head": false,
+  "amp": "",
+  "sparse_c": 0.0,
+  "top_guide": 0.0,
+  "hub_T": false,
+  "act_K": 4,
+  "shaping": "",
+  "lam": 1.0,
+  "simul": false
+ },
+ "log": [
+  {
+   "step": 0,
+   "t": 0.0,
+   "cost": 0.0,
+   "val": 3.4964
+  },
+  {
+   "step": 500,
+   "t": 4.7,
+   "cost": 1500,
+   "val": 2.6202
+  },
+  {
+   "step": 1000,
+   "t": 8.4,
+   "cost": 3000,
+   "val": 2.5377
+  },
+  {
+   "step": 1500,
+   "t": 12.6,
+   "cost": 4500,
+   "val": 2.4044
+  },
+  {
+   "step": 2000,
+   "t": 16.5,
+   "cost": 6000,
+   "val": 2.3353
+  },
+  {
+   "step": 2500,
+   "t": 20.5,
+   "cost": 7500,
+   "val": 2.2345
+  },
+  {
+   "step": 3000,
+   "t": 24.5,
+   "cost": 9000,
+   "val": 2.1995
+  },
+  {
+   "step": 3500,
+   "t": 28.6,
+   "cost": 10500,
+   "val": 2.1933
+  },
+  {
+   "step": 4000,
+   "t": 32.7,
+   "cost": 12000,
+   "val": 2.1914
+  }
+ ],
+ "secs": 32.7,
+ "cost": 12000,
+ "val": 2.1914
+}
