@@ -180,3 +180,11 @@ quoting it.
 | **Sukhbaatar et al.** — *Intrinsic motivation and automatic curricula via asymmetric self-play*, ICLR 2018 | unchecked | One agent proposes tasks at the edge of the other's ability. |
 | **Cui et al.** — *JEPA-Anything: Learning Predictive Models across Different Worlds* (Orthogonal Predictive Factorization), arXiv 2609.20800 (Sep 2026); code github.com/Gen-Verse/JEPA-Anything | repo `refs/jepa_anything_opf_2609.20800.md` | A JEPA whose predictor is split into K heads, each predicting one block of a learned orthonormal rotation of the target; −34.8% single-intervention error on Interventional Pong vs a capacity-matched dense JEPA. Its Kepler result (slope −1.4991) is a frequency read-back with no control. |
 
+
+## 12. Training without backpropagation (the user's training-method plan, 2026-10-10)
+
+| Reference | Read? | What it gives us |
+|---|---|---|
+| **qlabs — *Dust: Pretraining Transformers Without Backpropagation*** (2026), qlabs.sh/research/dust; code github.com/qlabs-eng/dust | web + code summary, `refs/dust_qlabs_2026.md` | Node perturbation: jitter a layer's output at every token, estimate its output error from each token's loss change, update by the same outer product as backprop. Beats backprop's loss at 100k–1M tokens with a few hundred draws; cost scales with width. The note rates five cost-cutting ideas and adds sparsity, narrow groups with their own scores, and exact errors where they are known. |
+| **Ren, Kornblith, Liao & Hinton** — *Scaling forward gradient with local losses*, ICLR 2023, arXiv 2210.03310 | abstract | Activity perturbation plus ~250k local losses (block-, patch-, channel-group-wise) matches backprop on MNIST/CIFAR-10. Variance grows with the number of hidden dimensions, and the group losses are what make it scale. |
+| **Maheswaranathan, Metz, Tucker, Choi & Sohl-Dickstein** — *Guided evolutionary strategies*, ICML 2019, arXiv 1806.10230 | abstract | Perturb along a subspace spanned by surrogate gradients, plus isotropic noise. The result is a descent direction even when the surrogate is biased. |
