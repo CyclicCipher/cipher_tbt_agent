@@ -1,0 +1,81 @@
+{
+ "args": {
+  "method": "dust",
+  "steps": 300,
+  "lr": 0.01,
+  "B": 32,
+  "T": 64,
+  "task": "latin",
+  "d": 64,
+  "L": 4,
+  "H": 4,
+  "aux_every": 0,
+  "aux_weight": 0.0,
+  "topk": 0.0,
+  "amp": "bf16",
+  "seed": 1,
+  "eval_every": 100,
+  "set": [
+   "K=32",
+   "amp=fp16"
+  ],
+  "save": "",
+  "json": "runs/e1/m2/base_s1.json"
+ },
+ "cfg": {
+  "K": 32,
+  "chunk": 16,
+  "sig": {
+   "emb": 0.2,
+   "o": 0.2,
+   "proj": 0.2,
+   "fc": 0.2,
+   "out": 0.2,
+   "qkv": 0.2,
+   "loc": 0.05,
+   "head": 0.05,
+   "aux": 0.05
+  },
+  "gamma": 0.0,
+  "gamma_loc": 0.98,
+  "qkv_mode": "hub",
+  "head_mult": 4,
+  "noise": "gauss",
+  "rank": 8,
+  "beta": 0.5,
+  "ema": 0.1,
+  "ent_frac": 1.0,
+  "local": false,
+  "exact_head": false,
+  "amp": "fp16"
+ },
+ "log": [
+  {
+   "step": 0,
+   "t": 0.0,
+   "cost": 0.0,
+   "val": 3.6387
+  },
+  {
+   "step": 100,
+   "t": 19.7,
+   "cost": 28702,
+   "val": 2.4333
+  },
+  {
+   "step": 200,
+   "t": 38.6,
+   "cost": 57405,
+   "val": 2.3872
+  },
+  {
+   "step": 300,
+   "t": 58.0,
+   "cost": 86107,
+   "val": 2.3704
+  }
+ ],
+ "secs": 58.0,
+ "cost": 86107,
+ "val": 2.3704
+}

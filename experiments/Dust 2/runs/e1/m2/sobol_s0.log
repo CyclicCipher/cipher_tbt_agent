@@ -1,0 +1,5 @@
+step     0  val 3.6372
+step   100  t   37.2s  cost     28702 fwd  val 2.4363
+step   200  t   73.5s  cost     57405 fwd  val 2.3829
+step   300  t  109.2s  cost     86107 fwd  val 2.3705
+done: dust K=32 amp=fp16 noise=sobol | val 2.3705 | 109s | 86107 fwd-equiv

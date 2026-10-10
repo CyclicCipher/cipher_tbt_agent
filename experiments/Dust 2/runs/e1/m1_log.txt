@@ -1,0 +1,34 @@
+latin  base       mean cos 0.509  K_eq   32.0  gain  1.00  cost  287.0  2.4s
+latin  lr_rand8   mean cos 0.281  K_eq    8.1  gain  0.25  cost  287.0  1.1s
+latin  lr_rand16  mean cos 0.349  K_eq   12.4  gain  0.39  cost  287.0  1.1s
+latin  lr_pca8    mean cos 0.587  K_eq   48.8  gain  1.52  cost  287.0  1.4s
+latin  orth       mean cos 0.584  K_eq   48.1  gain  1.50  cost  287.0  1.6s
+latin  sobol      mean cos 0.481  K_eq   27.1  gain  0.85  cost  287.0  2.0s
+latin  anti       mean cos 0.413  K_eq   18.2  gain  0.57  cost  287.0  1.1s
+latin  local32    mean cos 0.389  K_eq   15.9  gain  1.99  cost   73.5  0.8s
+latin  local128   mean cos 0.551  K_eq   40.2  gain  1.26  cost  290.8  1.9s
+latin  ent50      mean cos 0.342  K_eq   11.8  gain  0.37  cost  287.0  1.1s
+latin  ent25      mean cos 0.292  K_eq    8.7  gain  0.27  cost  287.0  1.1s
+latin  guided     mean cos 0.657  K_eq   72.6  gain  2.27  cost  287.0  1.4s
+latin  oracle_b1  mean cos 0.736  K_eq  119.1  gain  3.72  cost  287.0  1.4s
+latin  oracle_b05 mean cos 0.708  K_eq   99.9  gain  3.12  cost  287.0  1.4s
+recall base       mean cos 0.353  K_eq   32.0  gain  1.00  cost  286.6  1.0s
+recall lr_rand8   mean cos 0.221  K_eq    9.8  gain  0.30  cost  286.6  1.1s
+recall lr_rand16  mean cos 0.263  K_eq   15.5  gain  0.49  cost  286.6  1.1s
+recall lr_pca8    mean cos 0.383  K_eq   40.3  gain  1.26  cost  286.6  1.4s
+recall orth       mean cos 0.399  K_eq   45.4  gain  1.42  cost  286.6  1.7s
+recall sobol      mean cos 0.329  K_eq   26.6  gain  0.83  cost  286.6  1.7s
+recall anti       mean cos 0.279  K_eq   17.8  gain  0.56  cost  286.6  1.1s
+recall local32    mean cos 0.255  K_eq   14.3  gain  1.78  cost   72.8  0.8s
+recall local128   mean cos 0.375  K_eq   37.8  gain  1.18  cost  288.0  2.2s
+recall ent50      mean cos 0.338  K_eq   28.6  gain  0.89  cost  286.6  1.1s
+recall ent25      mean cos 0.305  K_eq   22.0  gain  0.69  cost  286.6  1.1s
+recall guided     mean cos 0.460  K_eq   71.9  gain  2.25  cost  286.6  1.4s
+recall oracle_b1  mean cos 0.542  K_eq  131.5  gain  4.11  cost  286.6  1.4s
+recall oracle_b05 mean cos 0.508  K_eq  102.1  gain  3.19  cost  286.6  1.4s
+depth L=8  o     per-token error cos by block: 0.555 0.558 0.551 0.553 0.557 0.561 0.560 0.558
+depth L=8  proj  per-token error cos by block: 0.555 0.559 0.555 0.558 0.558 0.562 0.562 0.564
+depth L=8  out   per-token error cos by block: 0.553 0.553 0.556 0.556 0.558 0.559 0.563 0.563
+depth L=8  fc    per-token error cos by block: 0.320 0.323 0.319 0.319 0.317 0.319 0.320 0.318
+depth L=8  qkv   per-token error cos by block: 0.280 0.278 0.264 0.307 0.311 0.315 0.292 0.259
+depth L=8  weight cos by block (out): 0.623 0.609 0.611 0.643 0.611 0.658 0.634 0.642

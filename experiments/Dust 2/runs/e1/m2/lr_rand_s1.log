@@ -1,0 +1,5 @@
+step     0  val 3.6387
+step   100  t   20.8s  cost     28702 fwd  val 2.4319
+step   200  t   41.2s  cost     57405 fwd  val 2.3952
+step   300  t   61.9s  cost     86107 fwd  val 2.3824
+done: dust K=32 amp=fp16 noise=lr_rand rank=8 | val 2.3824 | 62s | 86107 fwd-equiv

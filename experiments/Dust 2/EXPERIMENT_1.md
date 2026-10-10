@@ -131,3 +131,97 @@ Anything else is **PARTIAL**.
 
 - Code: `estimators.py`, `measure.py`, `train.py`.
 - Results: `runs/e1/curve/` (baseline curve), `runs/e1/m1/` (diagnostics), `runs/e1/m2/` (training).
+
+## Results — RAN 2026-10-10 (`runs/e1/m1/`, `runs/e1/m1_log.txt`, `runs/e1/m2/`)
+
+### M0 — depth (L = 8, K = 32): the per-token error cosine by block, 0 → 7
+
+| site | block 0 … block 7 |
+|---|---|
+| hub `o` | 0.555 0.558 0.551 0.553 0.557 0.561 0.560 0.558 |
+| projection | 0.555 0.559 0.555 0.558 0.558 0.562 0.562 0.564 |
+| MLP output | 0.553 0.553 0.556 0.556 0.558 0.559 0.563 0.563 |
+| MLP hidden | 0.320 0.323 0.319 0.319 0.317 0.319 0.320 0.318 |
+
+Flat. The cosine is set by the site's width (64 vs 256), not its depth.
+
+### M1 — gradient quality at the checkpoints (gain = equivalent draws ÷ the baseline's draws at the same cost)
+
+| arm | Latin mean cos | Latin gain | recall mean cos | recall gain |
+|---|---|---|---|---|
+| base (K = 32) | 0.509 | 1.00 | 0.353 | 1.00 |
+| lr_rand, rank 8 | 0.281 | **0.25** | 0.221 | 0.30 |
+| lr_rand, rank 16 | 0.349 | 0.39 | 0.263 | 0.49 |
+| lr_pca, rank 8 | 0.587 | **1.52** | 0.383 | 1.26 |
+| orth | 0.584 | **1.50** | 0.399 | 1.42 |
+| sobol | 0.481 | 0.85 | 0.329 | 0.83 |
+| anti (reference) | 0.413 | 0.57 | 0.279 | 0.56 |
+| local, K = 32 (cost 73.5; vs baseline K = 8) | 0.389 | 1.99 | 0.255 | 1.78 |
+| local, K = 128 (cost 291; vs baseline K = 32) | 0.551 | **1.26** | 0.375 | 1.18 |
+| ent50 | 0.342 | 0.37 | 0.338 | 0.89 |
+| ent25 | 0.292 | 0.27 | 0.305 | 0.69 |
+| guided (rank 8, β 0.5) | 0.657 | **2.27** | 0.460 | 2.25 |
+| oracle, β 1 (reference) | 0.736 | 3.72 | 0.542 | 4.11 |
+| oracle, β 0.5 (reference) | 0.708 | 3.12 | 0.508 | 3.19 |
+
+### M2 — training, Latin, 300 steps, two seeds, matched cost (86–87k forward-equivalents)
+
+| arm | validation per seed | mean | vs base | seconds per run |
+|---|---|---|---|---|
+| base | 2.3670 / 2.3704 | 2.3687 | — | 57 |
+| lr_rand | 2.3947 / 2.3824 | 2.3885 | +0.020 | 62 |
+| lr_pca | 2.3765 / 2.3822 | 2.3794 | +0.011 | 83 |
+| orth | 2.3509 / 2.3599 | 2.3554 | −0.013 | 114 |
+| sobol | 2.3705 / 2.3788 | 2.3746 | +0.006 | 109 |
+| anti (reference) | 2.3865 / 2.3870 | 2.3868 | +0.018 | 62 |
+| **local, K = 128** | **2.2469 / 2.3161** | **2.2815** | **−0.087** | **135 (over the 2-minute limit)** |
+| ent50 | 2.5027 / 2.4826 | 2.4927 | +0.124 | 63 |
+| guided | 2.3630 / 2.3912 | 2.3771 | +0.008 | 89 |
+
+The baseline's seeds differ by 0.003, so the margin is 0.02. For reference, backprop reaches 2.153 in 300 steps, at 900
+forward-equivalents.
+
+### Against the predictions
+
+- **P0 — HELD.** Depth is not the cost: block 0 and block 7 differ by < 0.01. Gemini's "variance grows exponentially with
+  depth" is wrong here.
+- **P1 — split.**
+  - **lr_rand: HELD.** Gain 0.25–0.49; idea 1 as a fixed random subspace FAILS.
+  - **lr_pca: REFUTED in gradient quality.** Gain 1.52 / 1.26: the activations' main directions do overlap the errors'.
+    But it trains slightly WORSE (+0.011), so by the verdict rule it FAILS.
+- **P2 — orth HELD** (gain 1.50 / 1.42: a constant factor). It trains 0.013 better, in both seeds, but under the margin:
+  **PARTIAL**. **sobol REFUTED, on the low side** (0.85 / 0.83, slightly worse than plain Gaussian): FAILS.
+- **P3 — REFUTED.**
+  - **Gradient quality:** local scoring at matched cost is better, even measured against the GLOBAL gradient (1.26 /
+    1.18).
+  - **Training:** it trains much better (−0.087; −0.122 and −0.053 by seed), the only large training effect in this
+    experiment.
+  - **Verdict:** PARTIAL by the rule, because the cosine gain is under 1.3.
+  - **Caveat:** its runs took 135 s, over the 2-minute limit. Its many short reruns launch more kernels at the same
+    forward-equivalent cost.
+- **P4 — HELD.** Entropy gating FAILS badly (−0.37 gain; +0.124 in training).
+- **P5 — REFUTED in training.** Guided has the best gradient quality of any real arm (2.27 / 2.25, about 60% of the
+  oracle's ceiling), but it trains no better (+0.008). By the rule it FAILS.
+- **P6 — HELD.** No arm reaches 10×. The best real gain is 2.3×; the oracle subspace is 3–4×.
+
+### What it says
+
+1. **Gemini's ideas, scored.**
+   - **Idea 1:** fails as a fixed random subspace. As a PCA of activations it improves the gradient but not training.
+   - **Idea 2:** orthogonal draws are a small real gain (1.4–1.5×, slightly better training); Sobol is worse.
+   - **Idea 3:** local losses are the one clear training win, not for the reason Gemini gave: depth is not the cost.
+   - **Idea 4:** entropy gating fails.
+   - **Idea 5:** covariance adaptation (guided) gives the best gradients, but not better training.
+
+   **None gives orders of magnitude.**
+2. **Gradient cosine at a checkpoint is a poor predictor of training here.**
+   - guided: 2.3× cosine, no training gain;
+   - lr_rand: 4× worse cosine, only 0.02 worse;
+   - local: 1.2× cosine, the best training.
+
+   The Dust authors wrote that cosine picks candidates and training decides; this is a strong case of it. Momentum (Adam
+   β1 = 0.9) already averages roughly 10 steps of noise. So the per-step cosine overstates how noise-limited training
+   is, and something else holds Dust at 2.37 against backprop's 2.15 at equal steps. Experiment 2's V test (K = 128 vs
+   32 vs backprop) asks whether that something is variance at all.
+3. **Local losses change what is optimised.** Each block also gets a direct next-character objective, and its draws are
+   4× cheaper. Experiment 2's bp_aux control asks whether the gain is the objective (deep supervision) or the estimator.

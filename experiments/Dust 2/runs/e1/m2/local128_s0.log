@@ -1,0 +1,5 @@
+step     0  val 3.6372
+step   100  t   45.2s  cost     29084 fwd  val 2.3889
+step   200  t   89.9s  cost     58169 fwd  val 2.2914
+step   300  t  134.7s  cost     87253 fwd  val 2.2469
+done: dust K=128 amp=fp16 local=1 | val 2.2469 | 135s | 87253 fwd-equiv
