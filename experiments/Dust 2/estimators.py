@@ -74,14 +74,25 @@ def draws(key, K, B, T, D, cfg, state, g, dev, v0=None, dt=torch.float32, guide=
             yield math.sqrt(1 - bt) * a + math.sqrt(bt * D) * xi * guide.to(dt)[None]
         return
     n, Kc = cfg.noise, cfg.chunk
+    if n == "orth_sign":      # fast: one random orthonormal basis per call, per token its own random signs (still orthogonal)
+        blocks = []
+        for j in range(0, K, D):
+            kk = min(D, K - j)
+            q, _ = torch.linalg.qr(torch.randn(D, kk, generator=g, device=dev))   # (D, kk)
+            blocks.append(q.T * math.sqrt(D))                                    # (kk, D)
+        Q = torch.cat(blocks, 0)                                                 # (K, D)
+        sgn = (torch.randint(0, 2, (B, T, D), generator=g, device=dev) * 2 - 1).to(dt)
+        for j in range(0, K, Kc):
+            yield Q[j:j + Kc, None, None, :].to(dt) * sgn[None]
+        return
     if n in ("orth", "sobol"):
         if n == "orth":       # per token, the K directions are orthogonal (blocks of D if K > D), each of norm sqrt(D)
             blocks = []
             for j in range(0, K, D):
                 kk = min(D, K - j)
-                z = torch.randn(B * T, D, kk, generator=g, device=dev)
+                z = torch.randn(B * T, D, kk, generator=g, device=dev).double()  # float64: a full block of D is ill-conditioned
                 Lc = torch.linalg.cholesky(z.transpose(1, 2) @ z)            # Cholesky-QR: Q = Z L^-T
-                q = torch.linalg.solve_triangular(Lc, z.transpose(1, 2), upper=False).transpose(1, 2)
+                q = torch.linalg.solve_triangular(Lc, z.transpose(1, 2), upper=False).transpose(1, 2).float()
                 blocks.append(q.permute(2, 0, 1) * math.sqrt(D))
             allk = torch.cat(blocks, 0).view(K, B, T, D)
         else:                 # scrambled Sobol points -> Gaussian; per token a random sign per coordinate and own order
@@ -321,7 +332,8 @@ def estimate(model_fp32, idx, tgt, cfg, state, g):
     model = shadow(model_fp32, cfg, state)
     if cfg.simul:
         from simul import estimate_simul
-        grads, cost = estimate_simul(model_fp32, idx, tgt, cfg.K, cfg.sig["proj"], cfg.sig["head"], cfg.chunk, g, model)
+        grads, cost = estimate_simul(model_fp32, idx, tgt, cfg.K, cfg.sig["proj"], cfg.sig["head"], cfg.chunk, g, model,
+                                     cfg.local)
         return grads, dict(loss=float("nan"), cost=cost, err={})
     c = model.forward_cache(idx, tgt)
     B, T = idx.shape

@@ -17,7 +17,7 @@ import torch
 from model import rms
 
 
-def noisy_pass(m, idx, tgt, sig, sig_head, g):
+def noisy_pass(m, idx, tgt, sig, sig_head, g, local=False):
     """One forward of N = Kc*B rows (idx, tgt already tiled) with noise at every site. Returns per-token losses (N, T) and
     {site: (a, x)} with a = the noise (N, T, D_out) and x = the site's input in this pass (N, T, D_in)."""
     N, T = idx.shape
@@ -49,6 +49,12 @@ def noisy_pass(m, idx, tgt, sig, sig_head, g):
         a = nz(mo.shape, mo.dtype)
         rec[("out", b)] = (a, z)
         x = x + mo + sig * a
+        if local and b in m.aux_blocks:                       # Experiment 5 W3: an auxiliary head, also perturbed
+            ua = rms(x)
+            za = ua @ m.Waux[str(b)].T
+            a = nz(za.shape, za.dtype)
+            rec[("aux", b)] = (a, ua)
+            rec["loss_aux", b] = m.tok_loss(za + sig_head * a, tgt)
     u = rms(x)
     zl = u @ m.Whead.T
     a = nz(zl.shape, zl.dtype)
@@ -58,7 +64,16 @@ def noisy_pass(m, idx, tgt, sig, sig_head, g):
 
 
 @torch.no_grad()
-def estimate_simul(model_fp32, idx, tgt, K, sig, sig_head, chunk, g, shadow_model):
+def score_of(m, s, local):
+    """Which loss scores site s: the final loss, or (local) the first auxiliary head at or after the site's block."""
+    if not local or s[0] == "head":
+        return None
+    b = s[1] if s[0] != "emb" else 0
+    nxt = [e for e in m.aux_blocks if e >= b]
+    return nxt[0] if nxt else None
+
+
+def estimate_simul(model_fp32, idx, tgt, K, sig, sig_head, chunk, g, shadow_model, local=False):
     """Returns {parameter: gradient estimate of the mean per-token loss} and the cost in forward-equivalents."""
     m = shadow_model
     B, T = idx.shape
@@ -68,11 +83,20 @@ def estimate_simul(model_fp32, idx, tgt, K, sig, sig_head, chunk, g, shadow_mode
         kc = min(chunk, K - j)
         I = idx.repeat(kc, 1)
         Tg = tgt.repeat(kc, 1)
-        loss, rec = noisy_pass(m, I, Tg, sig, sig_head, g)
-        r = -loss.view(kc, B, T)
-        r = r - r.mean(0, keepdim=True)                       # chunk-mean baseline: no clean pass
-        for s, (a, x) in rec.items():
-            sg = sig_head if s[0] == "head" else sig
+        loss, rec = noisy_pass(m, I, Tg, sig, sig_head, g, local)
+        rewards = {}
+        for key in [None] + list(m.aux_blocks):
+            lt = loss if key is None else rec.get(("loss_aux", key))
+            if lt is None:
+                continue
+            r = -lt.view(kc, B, T)
+            rewards[key] = r - r.mean(0, keepdim=True)        # chunk-mean baseline: no clean pass
+        for s, v in rec.items():
+            if s[0] == "loss_aux":
+                continue
+            a, x = v
+            r = rewards[s[1]] if s[0] == "aux" else rewards[score_of(m, s, local)]
+            sg = sig_head if s[0] in ("head", "aux") else sig
             a = a.view(kc, B, T, -1)
             ra = r[..., None].to(a.dtype) * a                     # (kc, B, T, D_out)
             if s[0] == "emb":
