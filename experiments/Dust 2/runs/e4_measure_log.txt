@@ -1,0 +1,14 @@
+DENSE: val 2.3318  active z by block {0: 0.4448, 1: 0.3622, 2: 0.274, 3: 0.2553}  rerun-cost fraction 0.253
+   changed (all tokens perturbed): {'o1': 0.7695, 'o2': 0.7048, 'o3': 0.67, 'xa0': 0.0, 'xa1': 0.0651, 'xa2': 0.1335, 'xa3': 0.1506, 'h1': 0.7469, 'h2': 0.6765, 'h3': 0.6454, 'z1': 0.2325, 'z2': 0.1768, 'z3': 0.1845, 'xm0': 0.0597, 'xm1': 0.1303, 'xm2': 0.1473, 'xm3': 0.1601}
+   branching (z) [0.76, 1.044]  avalanche per token {'mean': 152.0, 'median': 146.0, 'p99': 259.0, 'max': 295.0}
+   one-token perturbation: changed {'o1': 0.0183, 'o2': 0.0126, 'o3': 0.0114, 'xa0': 0.0, 'xa1': 0.0009, 'xa2': 0.0019, 'xa3': 0.0021, 'h1': 0.0114, 'h2': 0.0103, 'h3': 0.0097, 'z1': 0.0035, 'z2': 0.0027, 'z3': 0.0028, 'xm0': 0.0009, 'xm1': 0.0019, 'xm2': 0.0021, 'xm3': 0.0022}  avalanche per sequence {'mean': 147.2, 'median': 144.0, 'p99': 249.7, 'max': 269.0}
+EV5: val 2.344  active z by block {0: 0.0759, 1: 0.0668, 2: 0.0611, 3: 0.0583}  rerun-cost fraction 0.434
+   changed (all tokens perturbed): {'o1': 0.9314, 'o2': 0.9065, 'o3': 0.8977, 'xa0': 0.0, 'xa1': 0.4341, 'xa2': 0.6086, 'xa3': 0.6532, 'h1': 0.9087, 'h2': 0.8859, 'h3': 0.8679, 'z1': 0.057, 'z2': 0.0508, 'z3': 0.0501, 'xm0': 0.0615, 'xm1': 0.5363, 'xm2': 0.6167, 'xm3': 0.6484}
+   branching (z) [0.891, 0.986]  avalanche per token {'mean': 40.4, 'median': 39.0, 'p99': 62.0, 'max': 71.0}
+   one-token perturbation: changed {'o1': 0.051, 'o2': 0.0548, 'o3': 0.0692, 'xa0': 0.0, 'xa1': 0.0063, 'xa2': 0.0111, 'xa3': 0.014, 'h1': 0.0181, 'h2': 0.0184, 'h3': 0.0199, 'z1': 0.002, 'z2': 0.0023, 'z3': 0.0034, 'xm0': 0.001, 'xm1': 0.0088, 'xm2': 0.0112, 'xm3': 0.0136}  avalanche per sequence {'mean': 125.6, 'median': 98.0, 'p99': 397.7, 'max': 447.0}
+   estimator: base cos K32 0.474  O1 cos 0.550  O1 gain 1.54
+EV2: val 2.3415  active z by block {0: 0.0551, 1: 0.0404, 2: 0.0333, 3: 0.0355}  rerun-cost fraction 0.475
+   changed (all tokens perturbed): {'o1': 0.9474, 'o2': 0.9305, 'o3': 0.9319, 'xa0': 0.0, 'xa1': 0.5577, 'xa2': 0.7098, 'xa3': 0.724, 'h1': 0.9227, 'h2': 0.9029, 'h3': 0.8877, 'z1': 0.036, 'z2': 0.0303, 'z3': 0.0321, 'xm0': 0.0617, 'xm1': 0.6334, 'xm2': 0.7075, 'xm3': 0.719}
+   branching (z) [0.842, 1.059]  avalanche per token {'mean': 25.2, 'median': 24.0, 'p99': 42.0, 'max': 59.0}
+   one-token perturbation: changed {'o1': 0.0577, 'o2': 0.0825, 'o3': 0.101, 'xa0': 0.0, 'xa1': 0.0122, 'xa2': 0.0184, 'xa3': 0.0216, 'h1': 0.0229, 'h2': 0.0247, 'h3': 0.0266, 'z1': 0.0017, 'z2': 0.0028, 'z3': 0.0035, 'xm0': 0.001, 'xm1': 0.014, 'xm2': 0.0175, 'xm3': 0.0204}  avalanche per sequence {'mean': 130.9, 'median': 97.0, 'p99': 519.4, 'max': 602.0}
+   estimator: base cos K32 0.467  O1 cos 0.557  O1 gain 1.7

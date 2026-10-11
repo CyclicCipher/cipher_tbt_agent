@@ -73,7 +73,17 @@ decides, because a higher cosine does not always mean a lower loss.
   best estimator's gradient advantage grows from 5.7× at d = 64 to 19.7× at d = 256, but in gradient quality only. The
   ideas carrying that growth (guided subspaces) failed in training.
 - **The lesson on measures.** A gradient cosine at a checkpoint misranked arms, and a curvature-weighted proxy was worse
-  still. A 25-step training probe ranks best (τ 0.57), but it misses local scoring's gain.
+  still. A 25-step training probe ranks best: τ 0.57 in validation, and τ 1.0 out of sample on Experiment 3. It misses
+  local scoring's gain.
+- **Thermodynamics (Experiment 3).**
+  - σ is not a useful temperature here (null), Boltzmann weighting hurts, and rank shaping is neutral.
+  - **Cache-free simultaneous perturbation** is about as efficient per unit of compute as Dust. It stores no activations
+    and needs no reruns, using a local three-factor rule. That is the form looped models need.
+- **Event-driven units (Experiments 4, 4b).**
+  - They train as well as dense ones under backprop, and their avalanches are heavy-tailed.
+  - Send-on-delta reruns keep Dust's signal. Event-driven units allow a 10× coarser tolerance, so reruns cost ~4× less
+    (net ~1.8× after paying for sparser probes).
+  - The bigger win needs sparse writes, local norms and sparse attention in the architecture.
 
 ## Standing rules (from the user and the project)
 

@@ -44,7 +44,7 @@ def noisy_pass(m, idx, tgt, sig, sig_head, g):
         h = u @ m.Wfc[b].T
         a = nz(h.shape, h.dtype)
         rec[("fc", b)] = (a, u)
-        z = m.act(h + sig * a)
+        z = m.act(h + sig * a, b)
         mo = z @ m.Wout[b].T
         a = nz(mo.shape, mo.dtype)
         rec[("out", b)] = (a, z)

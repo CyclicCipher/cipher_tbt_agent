@@ -86,8 +86,94 @@ def record(m, idx, tgt, site_b=None, noise=None):
             mo = mo + noise
         x = x + mo
         rec["xm", b] = x
-    rec["loss"] = m.tok_loss(rms(x) @ m.Whead.T, tgt)
+    rec["logit"] = rms(x) @ m.Whead.T
+    rec["loss"] = m.tok_loss(rec["logit"], tgt)
     return rec
+
+
+@torch.no_grad()
+def rerun_sod(m, tgt, clean, noise, tol):
+    """Rerun after block 0's MLP output (+ noise). tol=None: exact. Otherwise SEND-ON-DELTA: after every operation a change
+    smaller than tol x the clean tensor's rms is dropped (the clean value is kept). Returns per-token loss, fractions."""
+    fr = {}
+
+    def keep(key, y):
+        if tol is None:
+            return y
+        c = clean[key]
+        mk = (y - c).abs() > tol * c.pow(2).mean().sqrt()
+        fr[f"{key[0]}{key[1]}" if isinstance(key, tuple) else key] = float(mk.float().mean())
+        return c + (y - c) * mk
+    x = keep(("xm", 0), clean["xm", 0] + noise)
+    for b in range(1, m.L):
+        o = keep(("o", b), m.attend(rms(x) @ m.Wqkv[b].T))
+        x = keep(("xa", b), x + o @ m.Wproj[b].T)
+        h = keep(("h", b), rms(x) @ m.Wfc[b].T)
+        z = keep(("z", b), m.act(h, b))
+        x = keep(("xm", b), x + z @ m.Wout[b].T)
+    logit = keep("logit", rms(x) @ m.Whead.T)
+    return m.tok_loss(logit, tgt), fr
+
+
+def fidelity(dev="cuda"):
+    """Experiment 4b: exact vs send-on-delta rewards for sparse (4 of 64) and dense (64) probes at block 0's MLP output."""
+    from estimators import backprop
+    tr, va = data.load(dev)
+    gb = torch.Generator(device=dev).manual_seed(123)
+    batches = [data.batch(va, 32, 64, gb) for _ in range(2)]
+    res = {}
+    for name, ck, ev in [("DENSE", "runs/ckpt_bp300.pt", False), ("EV5", "runs/ckpt_ev5.pt", True)]:
+        m = TinyGPT(data.V, ev=ev).to(dev)
+        m.load_state_dict(torch.load(ck, map_location=dev))
+        for mc in (4, 64):
+            g = torch.Generator(device=dev).manual_seed(0)
+            acc = {t: dict(ex=[], sod=[], fr=[]) for t in (1e-4, 1e-3, 1e-2)}
+            cos_ex, cos_sod = [], {t: [] for t in acc}
+            for idx, tgt in batches:
+                B, T = idx.shape
+                clean = record(m, idx, tgt)
+                true = backprop(m, idx, tgt)[0][m.Wout[0]]
+                z0 = clean["z", 0]
+                A, Rex, Rsod = [], [], {t: [] for t in acc}
+                for k in range(32):
+                    a = torch.zeros(B, T, m.d, device=dev)
+                    pick = torch.rand(B, T, m.d, generator=g, device=dev).argsort(-1)[..., :mc]
+                    a.scatter_(-1, pick, torch.randn(B, T, mc, generator=g, device=dev) * (m.d / mc) ** 0.5)
+                    lex, _ = rerun_sod(m, tgt, clean, 0.2 * a, None)
+                    A.append(a)
+                    Rex.append(clean["loss"] - lex)
+                    for t in acc:
+                        ls, fr = rerun_sod(m, tgt, clean, 0.2 * a, t)
+                        Rsod[t].append(clean["loss"] - ls)
+                        acc[t]["ex"].append((clean["loss"] - lex).flatten())
+                        acc[t]["sod"].append((clean["loss"] - ls).flatten())
+                        acc[t]["fr"].append(fr)
+                A = torch.stack(A)
+
+                def est(R):
+                    R = torch.stack(R)
+                    R = R - R.mean(0, keepdim=True)
+                    gh = -(R[..., None] * A).sum(0) / (32 * 0.2)
+                    G = torch.einsum("btd,bti->di", gh, z0) / (B * T)
+                    return float((G * true).sum() / (G.norm() * true.norm()))
+                cos_ex.append(est(Rex))
+                for t in acc:
+                    cos_sod[t].append(est(Rsod[t]))
+            out = {}
+            for t, v in acc.items():
+                ex, so = torch.cat(v["ex"]), torch.cat(v["sod"])
+                corr = float(torch.corrcoef(torch.stack([ex, so]))[0, 1])
+                frs = {k: sum(f[k] for f in v["fr"]) / len(v["fr"]) for k in v["fr"][0]}
+                out[str(t)] = dict(corr=round(corr, 4), cos=round(sum(cos_sod[t]) / len(cos_sod[t]), 4),
+                                   cost_fraction=rerun_cost_fraction(m, frs),
+                                   changed_stream=[round(frs[f"xm{b}"], 3) for b in range(m.L)])
+            r = dict(cos_exact=round(sum(cos_ex) / len(cos_ex), 4), by_tol=out)
+            res[f"{name}_m{mc}"] = r
+            print(f"{name} probe m={mc:2d}: exact-reward cos {r['cos_exact']:.3f} | " + " | ".join(
+                f"tol {t}: corr {o['corr']:.3f} cos {o['cos']:.3f} cost {o['cost_fraction']:.2f}" for t, o in out.items()),
+                flush=True)
+    OUT.mkdir(parents=True, exist_ok=True)
+    json.dump(res, open(OUT / "fidelity.json", "w"), indent=1)
 
 
 def changed(a, b, tol=1e-3):
@@ -184,5 +270,7 @@ def measure_all(dev="cuda"):
 if __name__ == "__main__":
     if sys.argv[1] == "train":
         train_ev(float(sys.argv[2]))
+    elif sys.argv[1] == "fidelity":
+        fidelity()
     else:
         measure_all()

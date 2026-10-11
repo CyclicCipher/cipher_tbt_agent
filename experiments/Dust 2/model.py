@@ -35,9 +35,9 @@ def _attn_half(x, Wqkv, Wproj, H):
     return x + o @ Wproj.T
 
 
-def _mlp_half(x, Wfc, Wout, topk_frac):
+def _mlp_half(x, Wfc, Wout, topk_frac, theta=None):
     h = rms(x) @ Wfc.T
-    z = F.relu(h).square()
+    z = F.relu(h if theta is None else h - theta).square()
     if topk_frac:
         k = max(1, int(round(topk_frac * h.shape[-1])))
         z = z * (h >= h.topk(k, dim=-1).values[..., -1:])
@@ -61,8 +61,11 @@ def _halves(fast):
 class TinyGPT(nn.Module):
     fast = False                                   # torch.compile the rerun path (apparatus; same maths)
 
-    def __init__(self, V, d=64, L=4, H=4, T=64, mlp=4, act="relu2", aux_every=0, topk_frac=0.0):
+    def __init__(self, V, d=64, L=4, H=4, T=64, mlp=4, act="relu2", aux_every=0, topk_frac=0.0, ev=False):
         super().__init__()
+        self.ev = ev                               # event-driven hidden units: z = (h - theta_j)_+^2, per-unit threshold
+        if ev:
+            self.register_buffer("theta", torch.zeros(L, mlp * d))
         self.V, self.d, self.L, self.H, self.T, self.m = V, d, L, H, T, mlp * d
         self.act_kind, self.topk_frac = act, topk_frac
         s = math.sqrt(3) / math.sqrt(d)
@@ -91,7 +94,9 @@ class TinyGPT(nn.Module):
         return s + [("head",)] + [("aux", b) for b in self.aux_blocks]
 
     # ---- pieces -------------------------------------------------------------------------------------------------------
-    def act(self, h):
+    def act(self, h, b=None):
+        if self.ev:
+            return F.relu(h - self.theta[b].to(h.dtype)).square()
         z = F.relu(h).square()
         if self.topk_frac:
             k = max(1, int(round(self.topk_frac * h.shape[-1])))
@@ -99,8 +104,11 @@ class TinyGPT(nn.Module):
             z = z * (h >= thr)
         return z
 
-    def margin(self, h):
-        """How far each hidden unit is from being active (<= 0: active): ReLU² -> -h; top-k -> max(threshold, 0) - h."""
+    def margin(self, h, b=None):
+        """How far each hidden unit is from being active (<= 0: active): ReLU² -> -h; top-k -> max(threshold, 0) - h;
+        event-driven -> theta_j - h."""
+        if self.ev:
+            return self.theta[b].to(h.dtype) - h
         if self.topk_frac:
             k = max(1, int(round(self.topk_frac * h.shape[-1])))
             thr = h.topk(k, dim=-1).values[..., -1:].clamp(min=0)
@@ -152,7 +160,7 @@ class TinyGPT(nn.Module):
             c["xm", b] = x
             c["in", ("fc", b)] = u = rms(x)
             h = keep(("fc", b), u @ self.Wfc[b].T)
-            c["in", ("out", b)] = z = self.act(h)
+            c["in", ("out", b)] = z = self.act(h, b)
             x = x + keep(("out", b), z @ self.Wout[b].T)
             if b in self.aux_blocks:
                 c["in", ("aux", b)] = rms(x)
@@ -188,7 +196,7 @@ class TinyGPT(nn.Module):
             x, b0, half = R(c["xa", b]) + val, b, "m"
         elif k == "fc":
             b = site[1]
-            x, b0, half = R(c["xm", b]) + self.act(val) @ self.Wout[b].T, b, "end"
+            x, b0, half = R(c["xm", b]) + self.act(val, b) @ self.Wout[b].T, b, "end"
         elif k == "out":
             b = site[1]
             x, b0, half = R(c["xm", b]) + val, b, "end"
@@ -201,7 +209,7 @@ class TinyGPT(nn.Module):
                 x = ah(x, self.Wqkv[b], self.Wproj[b], self.H)
                 half = "m"
             if half == "m":
-                x = mh(x, self.Wfc[b], self.Wout[b], self.topk_frac)
+                x = mh(x, self.Wfc[b], self.Wout[b], self.topk_frac, self.theta[b].to(x.dtype) if self.ev else None)
                 half = "end"
             if stop_aux is not None and b == stop_aux:
                 return self.tok_loss(rms(x) @ self.Waux[str(b)].T, c["tgt"])

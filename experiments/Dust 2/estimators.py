@@ -257,18 +257,18 @@ def hub_local(model, c, b, g_o, cfg, state, g, mask):
     return out, 3 * cfg.K * (T * d) / f["fwd"]
 
 
-def act_local(model, h0, ez, K, sig, g):
+def act_local(model, h0, ez, K, sig, g, b=None):
     """O4: the error at the MLP hidden pre-activation, per unit, from the error ez at its output z = act(h): perturb every
     unit at once, score unit j by -ez_j * Δz_j (its own output only, so each unit is a 1-dimensional problem). Works for
     any activation, differentiable or not; estimates ez_j times the noise-smoothed slope."""
     h = h0.float()
-    z0 = model.act(h)
+    z0 = model.act(h, b)
     Sra = torch.zeros_like(h)
     Sa = torch.zeros_like(h)
     rs = torch.zeros_like(h)
     for _ in range(K):
         a = torch.randn(h.shape, generator=g, device=h.device)
-        r = -ez * (model.act(h + sig * a) - z0)
+        r = -ez * (model.act(h + sig * a, b) - z0)
         Sra += r * a
         Sa += a
         rs += r
@@ -311,6 +311,8 @@ def shadow(model, cfg, state):
         sh = state["shadow"] = copy.deepcopy(model).to(dict(bf16=torch.bfloat16, fp16=torch.float16)[cfg.amp])
     for p16, p in zip(sh.parameters(), model.parameters()):
         p16.copy_(p)
+    for b16, b in zip(sh.buffers(), model.buffers()):             # event-driven thresholds move during training
+        b16.copy_(b)
     return sh
 
 
@@ -346,7 +348,7 @@ def estimate(model_fp32, idx, tgt, cfg, state, g):
         guide = gtop if s[0] in ("proj", "out", "emb") else None
         um = None
         if cfg.sparse_c > 0 and s[0] == "fc":
-            um = model.margin(c[s].float()) < cfg.sparse_c * cfg.sig["fc"]
+            um = model.margin(c[s].float(), s[1]) < cfg.sparse_c * cfg.sig["fc"]
         err[s], k = rerun_site(model, c, s, cfg.K, cfg.sig[s[0]], cfg.gamma, cfg, state, g, mask, stop_for(b), guide, um)
         cost += k
     if cfg.hub_T:
@@ -354,7 +356,7 @@ def estimate(model_fp32, idx, tgt, cfg, state, g):
         for b in range(model.L):
             err[("o", b)] = err[("proj", b)] @ model.Wproj[b].float()
             err[("fc", b)] = act_local(model, c[("fc", b)], err[("out", b)] @ model.Wout[b].float(), cfg.act_K,
-                                       cfg.sig["fc"], g)
+                                       cfg.sig["fc"], g, b)
             cost += cfg.act_K * model.m / f["fwd"] * 2
     if cfg.qkv_mode == "hub":
         for b in range(model.L):

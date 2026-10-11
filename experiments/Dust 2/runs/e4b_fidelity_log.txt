@@ -1,0 +1,4 @@
+DENSE probe m= 4: exact-reward cos 0.577 | tol 0.0001: corr 1.000 cos 0.577 cost 0.68 | tol 0.001: corr 0.993 cos 0.574 cost 0.42 | tol 0.01: corr 0.511 cos 0.226 cost 0.16
+DENSE probe m=64: exact-reward cos 0.628 | tol 0.0001: corr 1.000 cos 0.628 cost 0.78 | tol 0.001: corr 0.996 cos 0.625 cost 0.73 | tol 0.01: corr 0.436 cos 0.191 cost 0.39
+EV5 probe m= 4: exact-reward cos 0.460 | tol 0.0001: corr 1.000 cos 0.460 cost 0.64 | tol 0.001: corr 1.000 cos 0.460 cost 0.58 | tol 0.01: corr 0.897 cos 0.408 cost 0.25
+EV5 probe m=64: exact-reward cos 0.553 | tol 0.0001: corr 1.000 cos 0.553 cost 0.71 | tol 0.001: corr 1.000 cos 0.553 cost 0.70 | tol 0.01: corr 0.935 cos 0.518 cost 0.57
