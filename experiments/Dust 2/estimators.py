@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 import torch
 
-SIG = dict(emb=0.2, o=0.2, proj=0.2, fc=0.2, out=0.2, qkv=0.2, loc=0.05, head=0.05, aux=0.05)
+SIG = dict(emb=0.2, o=0.2, proj=0.2, fc=0.2, out=0.2, qkv=0.2, loc=0.05, head=0.05, aux=0.05, mix=0.2)
 
 
 @dataclass
@@ -49,6 +49,7 @@ class Cfg:
     lam: float = 1.0            # T2: Boltzmann temperature, in units of each token's reward spread
     simul: bool = False         # T3: every site perturbed in every pass, no clean pass, no cache (simul.py)
     whiten: bool = False        # E2b: estimate g (Σ^-1 times the average) rather than Σg, for guided/oracle/top_guide
+    K_mix: int = 8              # Block AttnRes: draws per mix site (its width is the number of sources, <= L + 1)
 
 
 def discount(T, gamma, dev):
@@ -374,6 +375,12 @@ def estimate(model_fp32, idx, tgt, cfg, state, g):
         for b in range(model.L):
             err[("qkv", b)], k = hub_local(model, c, b, err[("o", b)], cfg, state, g, mask)
             cost += k
+    if hasattr(model, "n_mix"):                                   # Block AttnRes mixes (attnres.py)
+        mc = Cfg(**{**cfg.__dict__, "noise": "gauss", "top_guide": 0.0})
+        for l in range(model.n_mix):
+            s = ("mix", l)
+            err[s], k = rerun_site(model, c, s, cfg.K_mix, cfg.sig["mix"], 0.0, mc, state, g, mask)
+            cost += k
     heads = [("head",)] + [("aux", b) for b in aux]
     for s in heads:
         if cfg.exact_head:
@@ -389,6 +396,10 @@ def estimate(model_fp32, idx, tgt, cfg, state, g):
     grads = {}
     m = model_fp32
     for s in m.weight_sites():
+        sg = m.site_grad(s, err[s], c, N) if hasattr(m, "site_grad") else None
+        if sg is not None:
+            grads[m.weight_of(s)] = sg
+            continue
         if s[0] == "emb":
             ge = err[s].reshape(-1, m.d)
             grads[m.wte] = torch.zeros_like(m.wte).index_add_(0, idx.reshape(-1), ge) / N

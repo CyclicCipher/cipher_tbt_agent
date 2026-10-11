@@ -1,0 +1,8 @@
+{
+ "arm": "base",
+ "ckpt": "runs/ckpt_bp300.pt",
+ "v0": 2.3404,
+ "v1": NaN,
+ "drop": NaN,
+ "secs": 7.0
+}

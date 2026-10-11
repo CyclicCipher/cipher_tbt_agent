@@ -1,0 +1,32 @@
+step     0  val 3.6387
+step    10  t    6.0s  cost      2870 fwd  val 3.0029
+step    20  t    7.5s  cost      5740 fwd  val 2.8372
+step    30  t    9.0s  cost      8611 fwd  val 2.7005
+step    40  t   10.5s  cost     11481 fwd  val 2.5745
+step    50  t   12.0s  cost     14351 fwd  val 2.5398
+step    60  t   13.5s  cost     17221 fwd  val 2.5028
+step    70  t   15.1s  cost     20092 fwd  val 2.4798
+step    80  t   16.6s  cost     22962 fwd  val 2.4600
+step    90  t   18.2s  cost     25832 fwd  val 2.4548
+step   100  t   19.8s  cost     28702 fwd  val 2.4465
+step   110  t   21.5s  cost     31572 fwd  val 2.4420
+step   120  t   23.1s  cost     34443 fwd  val 2.4394
+step   130  t   24.7s  cost     37313 fwd  val 2.4346
+step   140  t   26.4s  cost     40183 fwd  val 2.4353
+step   150  t   28.0s  cost     43053 fwd  val 2.4303
+step   160  t   29.6s  cost     45924 fwd  val 2.4252
+step   170  t   31.3s  cost     48794 fwd  val 2.4184
+step   180  t   32.9s  cost     51664 fwd  val 2.4125
+step   190  t   34.5s  cost     54534 fwd  val 2.4096
+step   200  t   36.1s  cost     57405 fwd  val 2.4086
+step   210  t   37.8s  cost     60275 fwd  val 2.4071
+step   220  t   39.4s  cost     63145 fwd  val 2.4033
+step   230  t   41.0s  cost     66015 fwd  val 2.3993
+step   240  t   42.7s  cost     68885 fwd  val 2.3975
+step   250  t   44.3s  cost     71756 fwd  val 2.3979
+step   260  t   45.9s  cost     74626 fwd  val 2.3984
+step   270  t   47.6s  cost     77496 fwd  val 2.3980
+step   280  t   49.2s  cost     80366 fwd  val 2.3975
+step   290  t   50.8s  cost     83237 fwd  val 2.3974
+step   300  t   52.5s  cost     86107 fwd  val 2.3974
+done: dust K=32 amp=fp16 | val 2.3974 | 52s | 86107 fwd-equiv

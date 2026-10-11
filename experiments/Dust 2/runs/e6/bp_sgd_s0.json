@@ -1,0 +1,286 @@
+{
+ "args": {
+  "method": "bp",
+  "steps": 300,
+  "lr": 0.1,
+  "B": 32,
+  "T": 64,
+  "task": "latin",
+  "d": 64,
+  "L": 4,
+  "H": 4,
+  "aux_every": 0,
+  "aux_weight": 0.0,
+  "topk": 0.0,
+  "attnres": false,
+  "fast": true,
+  "amp": "bf16",
+  "seed": 0,
+  "eval_every": 10,
+  "set": [],
+  "opt": "sgd",
+  "mom": 0.95,
+  "emb_mult": 300.0,
+  "sig_sched": "",
+  "save": "",
+  "json": "runs/e6/bp_sgd_s0.json"
+ },
+ "cfg": {
+  "K": 32,
+  "chunk": 16,
+  "sig": {
+   "emb": 0.2,
+   "o": 0.2,
+   "proj": 0.2,
+   "fc": 0.2,
+   "out": 0.2,
+   "qkv": 0.2,
+   "loc": 0.05,
+   "head": 0.05,
+   "aux": 0.05,
+   "mix": 0.2
+  },
+  "gamma": 0.0,
+  "gamma_loc": 0.98,
+  "qkv_mode": "hub",
+  "head_mult": 4,
+  "noise": "gauss",
+  "rank": 8,
+  "beta": 0.5,
+  "ema": 0.1,
+  "ent_frac": 1.0,
+  "local": false,
+  "exact_head": false,
+  "amp": "",
+  "sparse_c": 0.0,
+  "top_guide": 0.0,
+  "hub_T": false,
+  "act_K": 4,
+  "shaping": "",
+  "lam": 1.0,
+  "simul": false,
+  "whiten": false,
+  "K_mix": 8
+ },
+ "log": [
+  {
+   "step": 0,
+   "t": 0.0,
+   "cost": 0.0,
+   "val": 3.6372
+  },
+  {
+   "step": 10,
+   "t": 1.4,
+   "cost": 30,
+   "val": 3.0181,
+   "train": 3.0117
+  },
+  {
+   "step": 20,
+   "t": 1.5,
+   "cost": 60,
+   "val": 2.7797,
+   "train": 2.7793
+  },
+  {
+   "step": 30,
+   "t": 1.6,
+   "cost": 90,
+   "val": 2.6438,
+   "train": 2.6189
+  },
+  {
+   "step": 40,
+   "t": 1.7,
+   "cost": 120,
+   "val": 2.5734,
+   "train": 2.5675
+  },
+  {
+   "step": 50,
+   "t": 1.8,
+   "cost": 150,
+   "val": 2.5383,
+   "train": 2.5261
+  },
+  {
+   "step": 60,
+   "t": 2.0,
+   "cost": 180,
+   "val": 2.4905,
+   "train": 2.4856
+  },
+  {
+   "step": 70,
+   "t": 2.1,
+   "cost": 210,
+   "val": 2.4797,
+   "train": 2.4645
+  },
+  {
+   "step": 80,
+   "t": 2.2,
+   "cost": 240,
+   "val": 2.4628,
+   "train": 2.4574
+  },
+  {
+   "step": 90,
+   "t": 2.4,
+   "cost": 270,
+   "val": 2.4507,
+   "train": 2.4371
+  },
+  {
+   "step": 100,
+   "t": 2.5,
+   "cost": 300,
+   "val": 2.435,
+   "train": 2.4285
+  },
+  {
+   "step": 110,
+   "t": 2.6,
+   "cost": 330,
+   "val": 2.4271,
+   "train": 2.4219
+  },
+  {
+   "step": 120,
+   "t": 2.7,
+   "cost": 360,
+   "val": 2.432,
+   "train": 2.4126
+  },
+  {
+   "step": 130,
+   "t": 2.8,
+   "cost": 390,
+   "val": 2.4144,
+   "train": 2.4035
+  },
+  {
+   "step": 140,
+   "t": 3.0,
+   "cost": 420,
+   "val": 2.4125,
+   "train": 2.3989
+  },
+  {
+   "step": 150,
+   "t": 3.1,
+   "cost": 450,
+   "val": 2.4036,
+   "train": 2.3924
+  },
+  {
+   "step": 160,
+   "t": 3.2,
+   "cost": 480,
+   "val": 2.4028,
+   "train": 2.3936
+  },
+  {
+   "step": 170,
+   "t": 3.3,
+   "cost": 510,
+   "val": 2.4025,
+   "train": 2.3878
+  },
+  {
+   "step": 180,
+   "t": 3.4,
+   "cost": 540,
+   "val": 2.3945,
+   "train": 2.3832
+  },
+  {
+   "step": 190,
+   "t": 3.5,
+   "cost": 570,
+   "val": 2.3923,
+   "train": 2.3814
+  },
+  {
+   "step": 200,
+   "t": 3.7,
+   "cost": 600,
+   "val": 2.3904,
+   "train": 2.3769
+  },
+  {
+   "step": 210,
+   "t": 3.8,
+   "cost": 630,
+   "val": 2.3894,
+   "train": 2.3761
+  },
+  {
+   "step": 220,
+   "t": 3.9,
+   "cost": 660,
+   "val": 2.3846,
+   "train": 2.3758
+  },
+  {
+   "step": 230,
+   "t": 4.0,
+   "cost": 690,
+   "val": 2.3874,
+   "train": 2.3745
+  },
+  {
+   "step": 240,
+   "t": 4.1,
+   "cost": 720,
+   "val": 2.3849,
+   "train": 2.372
+  },
+  {
+   "step": 250,
+   "t": 4.3,
+   "cost": 750,
+   "val": 2.382,
+   "train": 2.3703
+  },
+  {
+   "step": 260,
+   "t": 4.4,
+   "cost": 780,
+   "val": 2.382,
+   "train": 2.3704
+  },
+  {
+   "step": 270,
+   "t": 4.5,
+   "cost": 810,
+   "val": 2.3808,
+   "train": 2.3693
+  },
+  {
+   "step": 280,
+   "t": 4.7,
+   "cost": 840,
+   "val": 2.3803,
+   "train": 2.3686
+  },
+  {
+   "step": 290,
+   "t": 4.8,
+   "cost": 870,
+   "val": 2.3801,
+   "train": 2.3684
+  },
+  {
+   "step": 300,
+   "t": 4.9,
+   "cost": 900,
+   "val": 2.3801,
+   "train": 2.3683
+  }
+ ],
+ "secs": 4.9,
+ "cost": 900,
+ "val": 2.3801
+}

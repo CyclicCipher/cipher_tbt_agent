@@ -15,10 +15,12 @@ from e1_m1 import fit_aux
 from estimators import estimate
 from model import TinyGPT
 from proxy import ARMS
-from train import parse_cfg, val_loss
+from train import make_opt, parse_cfg, val_loss
 
 OUT = Path("runs/probe")
 STEPS, LR, WARM = 25, 1e-2, 5
+OPT = dict(kind=os.environ.get("PROBE_OPT", "adam"), lr=float(os.environ.get("PROBE_LR", "1e-2")),
+           emb_mult=float(os.environ.get("PROBE_EMB", "1")))
 
 
 def probe(name, ck, dev):
@@ -35,13 +37,13 @@ def probe(name, ck, dev):
     gb = torch.Generator(device=dev).manual_seed(321)
     batches = [data.batch(tr, 32, 64, gb) for _ in range(STEPS)]
     v0 = val_loss(m, vb)
-    opt = torch.optim.Adam(m.parameters(), lr=LR, betas=(0.9, 0.99))
+    opt = make_opt(m, OPT["kind"], OPT["lr"], 0.95, OPT["emb_mult"])
     cfg = parse_cfg(["K=32", "amp=fp16"] + sets) if sets is not None else None
     state, g = {}, torch.Generator(device=dev).manual_seed(0)
     t0 = time.time()
     for i, (idx, tgt) in enumerate(batches):
         for gp in opt.param_groups:
-            gp["lr"] = LR * min(1.0, (i + 1) / WARM)
+            gp["lr"] = OPT["lr"] * gp.get("mult", 1.0) * min(1.0, (i + 1) / WARM)
         if cfg is None:
             m.zero_grad(set_to_none=True)
             m.forward_cache(idx, tgt)["loss"].mean().backward()
@@ -59,7 +61,8 @@ def main():
     TinyGPT.fast = True
     dev = os.environ.get("PROXY_DEV", "cuda")
     ck = sys.argv[1]
-    tag = Path(ck).stem
+    tag = Path(ck).stem + ("" if OPT["kind"] == "adam" and OPT["lr"] == 1e-2 else
+                           f"_{OPT['kind']}_lr{OPT['lr']:g}_emb{OPT['emb_mult']:g}")
     OUT.mkdir(parents=True, exist_ok=True)
     for name in sys.argv[2:]:
         f = OUT / f"{tag}_{name}.json"

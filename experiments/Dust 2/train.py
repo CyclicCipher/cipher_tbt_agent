@@ -18,6 +18,7 @@ import torch
 import data
 import recall
 from estimators import Cfg, backprop, estimate
+from attnres import ARGPT
 from model import TinyGPT
 
 
@@ -25,6 +26,15 @@ from model import TinyGPT
 def val_loss(model, vb):
     """Mean loss per SCORED token (recall scores only the answers)."""
     return sum((model.forward_cache(i, t)["loss"].sum() / (t >= 0).sum()).item() for i, t in vb) / len(vb)
+
+
+def make_opt(model, kind, lr, mom=0.95, emb_mult=1.0):
+    """Adam (0.9, 0.99) as before, or SGD with momentum and a separate learning-rate multiplier for the embeddings."""
+    if kind == "adam":
+        return torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.99))
+    emb = [model.wte, model.wpe]
+    rest = [p for p in model.parameters() if all(p is not e for e in emb)]
+    return torch.optim.SGD([dict(params=rest, mult=1.0), dict(params=emb, mult=emb_mult)], lr=lr, momentum=mom)
 
 
 def parse_cfg(pairs):
@@ -53,11 +63,15 @@ def main():
     ap.add_argument("--aux_every", type=int, default=0)
     ap.add_argument("--aux_weight", type=float, default=0.0, help="bp only: weight of the auxiliary losses")
     ap.add_argument("--topk", type=float, default=0.0)
+    ap.add_argument("--attnres", action="store_true", help="Block Attention Residuals (attnres.py)")
     ap.add_argument("--fast", action="store_true", help="torch.compile the rerun path (apparatus)")
     ap.add_argument("--amp", default="bf16", help="bp only: '', 'bf16' or 'fp16' autocast (dust: --set amp=bf16)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--eval_every", type=int, default=50)
     ap.add_argument("--set", nargs="*", default=[])
+    ap.add_argument("--opt", choices=["adam", "sgd"], default="adam")
+    ap.add_argument("--mom", type=float, default=0.95, help="SGD momentum")
+    ap.add_argument("--emb_mult", type=float, default=1.0, help="SGD: lr multiplier for wte/wpe (Dust uses a large one)")
     ap.add_argument("--sig_sched", default="", help="T1: 'start,end' -- rerun-site σ annealed geometrically over the run")
     ap.add_argument("--save", default="")
     ap.add_argument("--json", default="")
@@ -78,11 +92,11 @@ def main():
         get = lambda: recall.batch(args.B, args.T, g)
         tb = []
         V = recall.V
-    model = TinyGPT(V, d=args.d, L=args.L, H=args.H, T=args.T, aux_every=args.aux_every,
+    model = (ARGPT if args.attnres else TinyGPT)(V, d=args.d, L=args.L, H=args.H, T=args.T, aux_every=args.aux_every,
                     topk_frac=args.topk).to(dev)
     cfg = parse_cfg(args.set)
     TinyGPT.fast = args.fast
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.99))
+    opt = make_opt(model, args.opt, args.lr, args.mom, args.emb_mult)
     state, log, cost = {}, [], 0.0
     t0 = time.time()
     v0 = val_loss(model, vb)
@@ -91,7 +105,7 @@ def main():
     for step in range(1, args.steps + 1):
         lr = args.lr * (step / 20 if step <= 20 else 0.5 * (1 + math.cos(math.pi * (step - 20) / (args.steps - 20))))
         for gp in opt.param_groups:
-            gp["lr"] = lr
+            gp["lr"] = lr * gp.get("mult", 1.0)
         idx, tgt = get()
         if args.sig_sched:
             s0, s1 = map(float, args.sig_sched.split(","))
