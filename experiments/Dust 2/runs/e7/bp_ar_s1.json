@@ -1,0 +1,286 @@
+{
+ "args": {
+  "method": "bp",
+  "steps": 300,
+  "lr": 0.02,
+  "B": 32,
+  "T": 64,
+  "task": "latin",
+  "d": 64,
+  "L": 4,
+  "H": 4,
+  "aux_every": 0,
+  "aux_weight": 0.0,
+  "topk": 0.0,
+  "attnres": true,
+  "fast": true,
+  "amp": "bf16",
+  "seed": 1,
+  "eval_every": 10,
+  "set": [],
+  "opt": "adam",
+  "mom": 0.95,
+  "emb_mult": 1.0,
+  "sig_sched": "",
+  "save": "",
+  "json": "runs/e7/bp_ar_s1.json"
+ },
+ "cfg": {
+  "K": 32,
+  "chunk": 16,
+  "sig": {
+   "emb": 0.2,
+   "o": 0.2,
+   "proj": 0.2,
+   "fc": 0.2,
+   "out": 0.2,
+   "qkv": 0.2,
+   "loc": 0.05,
+   "head": 0.05,
+   "aux": 0.05,
+   "mix": 0.2
+  },
+  "gamma": 0.0,
+  "gamma_loc": 0.98,
+  "qkv_mode": "hub",
+  "head_mult": 4,
+  "noise": "gauss",
+  "rank": 8,
+  "beta": 0.5,
+  "ema": 0.1,
+  "ent_frac": 1.0,
+  "local": false,
+  "exact_head": false,
+  "amp": "",
+  "sparse_c": 0.0,
+  "top_guide": 0.0,
+  "hub_T": false,
+  "act_K": 4,
+  "shaping": "",
+  "lam": 1.0,
+  "simul": false,
+  "whiten": false,
+  "K_mix": 8
+ },
+ "log": [
+  {
+   "step": 0,
+   "t": 0.0,
+   "cost": 0.0,
+   "val": 3.6387
+  },
+  {
+   "step": 10,
+   "t": 1.4,
+   "cost": 30,
+   "val": 2.81,
+   "train": 2.8142
+  },
+  {
+   "step": 20,
+   "t": 1.6,
+   "cost": 60,
+   "val": 2.5903,
+   "train": 2.5841
+  },
+  {
+   "step": 30,
+   "t": 1.8,
+   "cost": 90,
+   "val": 2.489,
+   "train": 2.4784
+  },
+  {
+   "step": 40,
+   "t": 2.0,
+   "cost": 120,
+   "val": 2.4599,
+   "train": 2.4466
+  },
+  {
+   "step": 50,
+   "t": 2.2,
+   "cost": 150,
+   "val": 2.4415,
+   "train": 2.426
+  },
+  {
+   "step": 60,
+   "t": 2.4,
+   "cost": 180,
+   "val": 2.43,
+   "train": 2.4223
+  },
+  {
+   "step": 70,
+   "t": 2.6,
+   "cost": 210,
+   "val": 2.4235,
+   "train": 2.4112
+  },
+  {
+   "step": 80,
+   "t": 2.8,
+   "cost": 240,
+   "val": 2.4199,
+   "train": 2.4079
+  },
+  {
+   "step": 90,
+   "t": 3.0,
+   "cost": 270,
+   "val": 2.4153,
+   "train": 2.4005
+  },
+  {
+   "step": 100,
+   "t": 3.2,
+   "cost": 300,
+   "val": 2.4147,
+   "train": 2.403
+  },
+  {
+   "step": 110,
+   "t": 3.4,
+   "cost": 330,
+   "val": 2.4151,
+   "train": 2.3966
+  },
+  {
+   "step": 120,
+   "t": 3.6,
+   "cost": 360,
+   "val": 2.4107,
+   "train": 2.3969
+  },
+  {
+   "step": 130,
+   "t": 3.8,
+   "cost": 390,
+   "val": 2.402,
+   "train": 2.3963
+  },
+  {
+   "step": 140,
+   "t": 4.0,
+   "cost": 420,
+   "val": 2.403,
+   "train": 2.3948
+  },
+  {
+   "step": 150,
+   "t": 4.2,
+   "cost": 450,
+   "val": 2.402,
+   "train": 2.3923
+  },
+  {
+   "step": 160,
+   "t": 4.4,
+   "cost": 480,
+   "val": 2.4066,
+   "train": 2.3874
+  },
+  {
+   "step": 170,
+   "t": 4.6,
+   "cost": 510,
+   "val": 2.4007,
+   "train": 2.3834
+  },
+  {
+   "step": 180,
+   "t": 4.8,
+   "cost": 540,
+   "val": 2.3892,
+   "train": 2.3811
+  },
+  {
+   "step": 190,
+   "t": 5.0,
+   "cost": 570,
+   "val": 2.3866,
+   "train": 2.3743
+  },
+  {
+   "step": 200,
+   "t": 5.2,
+   "cost": 600,
+   "val": 2.3812,
+   "train": 2.372
+  },
+  {
+   "step": 210,
+   "t": 5.5,
+   "cost": 630,
+   "val": 2.371,
+   "train": 2.3637
+  },
+  {
+   "step": 220,
+   "t": 5.7,
+   "cost": 660,
+   "val": 2.3705,
+   "train": 2.3607
+  },
+  {
+   "step": 230,
+   "t": 5.9,
+   "cost": 690,
+   "val": 2.3698,
+   "train": 2.357
+  },
+  {
+   "step": 240,
+   "t": 6.1,
+   "cost": 720,
+   "val": 2.3604,
+   "train": 2.3529
+  },
+  {
+   "step": 250,
+   "t": 6.3,
+   "cost": 750,
+   "val": 2.3585,
+   "train": 2.3499
+  },
+  {
+   "step": 260,
+   "t": 6.5,
+   "cost": 780,
+   "val": 2.3567,
+   "train": 2.3462
+  },
+  {
+   "step": 270,
+   "t": 6.7,
+   "cost": 810,
+   "val": 2.3552,
+   "train": 2.3441
+  },
+  {
+   "step": 280,
+   "t": 6.9,
+   "cost": 840,
+   "val": 2.3545,
+   "train": 2.3431
+  },
+  {
+   "step": 290,
+   "t": 7.1,
+   "cost": 870,
+   "val": 2.3541,
+   "train": 2.3427
+  },
+  {
+   "step": 300,
+   "t": 7.3,
+   "cost": 900,
+   "val": 2.3541,
+   "train": 2.3426
+  }
+ ],
+ "secs": 7.3,
+ "cost": 900,
+ "val": 2.3541
+}

@@ -1,0 +1,286 @@
+{
+ "args": {
+  "method": "bp",
+  "steps": 300,
+  "lr": 0.02,
+  "B": 32,
+  "T": 64,
+  "task": "latin",
+  "d": 64,
+  "L": 4,
+  "H": 4,
+  "aux_every": 0,
+  "aux_weight": 0.0,
+  "topk": 0.0,
+  "attnres": true,
+  "fast": true,
+  "amp": "bf16",
+  "seed": 0,
+  "eval_every": 10,
+  "set": [],
+  "opt": "adam",
+  "mom": 0.95,
+  "emb_mult": 1.0,
+  "sig_sched": "",
+  "save": "",
+  "json": "runs/e7/bp_ar_s0.json"
+ },
+ "cfg": {
+  "K": 32,
+  "chunk": 16,
+  "sig": {
+   "emb": 0.2,
+   "o": 0.2,
+   "proj": 0.2,
+   "fc": 0.2,
+   "out": 0.2,
+   "qkv": 0.2,
+   "loc": 0.05,
+   "head": 0.05,
+   "aux": 0.05,
+   "mix": 0.2
+  },
+  "gamma": 0.0,
+  "gamma_loc": 0.98,
+  "qkv_mode": "hub",
+  "head_mult": 4,
+  "noise": "gauss",
+  "rank": 8,
+  "beta": 0.5,
+  "ema": 0.1,
+  "ent_frac": 1.0,
+  "local": false,
+  "exact_head": false,
+  "amp": "",
+  "sparse_c": 0.0,
+  "top_guide": 0.0,
+  "hub_T": false,
+  "act_K": 4,
+  "shaping": "",
+  "lam": 1.0,
+  "simul": false,
+  "whiten": false,
+  "K_mix": 8
+ },
+ "log": [
+  {
+   "step": 0,
+   "t": 0.0,
+   "cost": 0.0,
+   "val": 3.6372
+  },
+  {
+   "step": 10,
+   "t": 1.3,
+   "cost": 30,
+   "val": 2.7774,
+   "train": 2.7766
+  },
+  {
+   "step": 20,
+   "t": 1.5,
+   "cost": 60,
+   "val": 2.5651,
+   "train": 2.5535
+  },
+  {
+   "step": 30,
+   "t": 1.7,
+   "cost": 90,
+   "val": 2.4724,
+   "train": 2.46
+  },
+  {
+   "step": 40,
+   "t": 1.9,
+   "cost": 120,
+   "val": 2.4546,
+   "train": 2.4409
+  },
+  {
+   "step": 50,
+   "t": 2.1,
+   "cost": 150,
+   "val": 2.4279,
+   "train": 2.426
+  },
+  {
+   "step": 60,
+   "t": 2.3,
+   "cost": 180,
+   "val": 2.4209,
+   "train": 2.4168
+  },
+  {
+   "step": 70,
+   "t": 2.5,
+   "cost": 210,
+   "val": 2.4261,
+   "train": 2.4075
+  },
+  {
+   "step": 80,
+   "t": 2.7,
+   "cost": 240,
+   "val": 2.4127,
+   "train": 2.4054
+  },
+  {
+   "step": 90,
+   "t": 2.9,
+   "cost": 270,
+   "val": 2.4136,
+   "train": 2.3995
+  },
+  {
+   "step": 100,
+   "t": 3.1,
+   "cost": 300,
+   "val": 2.4093,
+   "train": 2.3972
+  },
+  {
+   "step": 110,
+   "t": 3.3,
+   "cost": 330,
+   "val": 2.3936,
+   "train": 2.3901
+  },
+  {
+   "step": 120,
+   "t": 3.5,
+   "cost": 360,
+   "val": 2.4016,
+   "train": 2.3923
+  },
+  {
+   "step": 130,
+   "t": 3.7,
+   "cost": 390,
+   "val": 2.3937,
+   "train": 2.3859
+  },
+  {
+   "step": 140,
+   "t": 3.9,
+   "cost": 420,
+   "val": 2.4006,
+   "train": 2.3843
+  },
+  {
+   "step": 150,
+   "t": 4.1,
+   "cost": 450,
+   "val": 2.396,
+   "train": 2.3829
+  },
+  {
+   "step": 160,
+   "t": 4.3,
+   "cost": 480,
+   "val": 2.3933,
+   "train": 2.3827
+  },
+  {
+   "step": 170,
+   "t": 4.5,
+   "cost": 510,
+   "val": 2.3868,
+   "train": 2.3765
+  },
+  {
+   "step": 180,
+   "t": 4.7,
+   "cost": 540,
+   "val": 2.393,
+   "train": 2.3748
+  },
+  {
+   "step": 190,
+   "t": 4.9,
+   "cost": 570,
+   "val": 2.3933,
+   "train": 2.3747
+  },
+  {
+   "step": 200,
+   "t": 5.1,
+   "cost": 600,
+   "val": 2.3875,
+   "train": 2.373
+  },
+  {
+   "step": 210,
+   "t": 5.3,
+   "cost": 630,
+   "val": 2.3817,
+   "train": 2.3728
+  },
+  {
+   "step": 220,
+   "t": 5.5,
+   "cost": 660,
+   "val": 2.3795,
+   "train": 2.3679
+  },
+  {
+   "step": 230,
+   "t": 5.7,
+   "cost": 690,
+   "val": 2.3792,
+   "train": 2.3667
+  },
+  {
+   "step": 240,
+   "t": 5.9,
+   "cost": 720,
+   "val": 2.3816,
+   "train": 2.366
+  },
+  {
+   "step": 250,
+   "t": 6.1,
+   "cost": 750,
+   "val": 2.3766,
+   "train": 2.3644
+  },
+  {
+   "step": 260,
+   "t": 6.3,
+   "cost": 780,
+   "val": 2.3751,
+   "train": 2.3641
+  },
+  {
+   "step": 270,
+   "t": 6.5,
+   "cost": 810,
+   "val": 2.3741,
+   "train": 2.3625
+  },
+  {
+   "step": 280,
+   "t": 6.7,
+   "cost": 840,
+   "val": 2.3741,
+   "train": 2.3617
+  },
+  {
+   "step": 290,
+   "t": 6.9,
+   "cost": 870,
+   "val": 2.3741,
+   "train": 2.3615
+  },
+  {
+   "step": 300,
+   "t": 7.1,
+   "cost": 900,
+   "val": 2.3741,
+   "train": 2.3614
+  }
+ ],
+ "secs": 7.1,
+ "cost": 900,
+ "val": 2.3741
+}

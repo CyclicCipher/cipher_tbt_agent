@@ -28,9 +28,15 @@ def val_loss(model, vb):
     return sum((model.forward_cache(i, t)["loss"].sum() / (t >= 0).sum()).item() for i, t in vb) / len(vb)
 
 
-def make_opt(model, kind, lr, mom=0.95, emb_mult=1.0):
-    """Adam (0.9, 0.99) as before, or SGD with momentum and a separate learning-rate multiplier for the embeddings."""
+def make_opt(model, kind, lr, mom=0.95, emb_mult=1.0, mix_mult=1.0):
+    """Adam (0.9, 0.99) as before, or SGD with momentum and a separate learning-rate multiplier for the embeddings.
+    AttnRes pseudo-queries can get their own multiplier (mix_mult)."""
     if kind == "adam":
+        mix = list(getattr(model, "Wmix", []))
+        if mix and mix_mult != 1.0:
+            rest = [p for p in model.parameters() if all(p is not q for q in mix)]
+            return torch.optim.Adam([dict(params=rest, mult=1.0), dict(params=mix, mult=mix_mult)], lr=lr,
+                                    betas=(0.9, 0.99))
         return torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.99))
     emb = [model.wte, model.wpe]
     rest = [p for p in model.parameters() if all(p is not e for e in emb)]
@@ -64,6 +70,7 @@ def main():
     ap.add_argument("--aux_weight", type=float, default=0.0, help="bp only: weight of the auxiliary losses")
     ap.add_argument("--topk", type=float, default=0.0)
     ap.add_argument("--attnres", action="store_true", help="Block Attention Residuals (attnres.py)")
+    ap.add_argument("--mix_lr", type=float, default=1.0, help="AttnRes: learning-rate multiplier for the pseudo-queries")
     ap.add_argument("--fast", action="store_true", help="torch.compile the rerun path (apparatus)")
     ap.add_argument("--amp", default="bf16", help="bp only: '', 'bf16' or 'fp16' autocast (dust: --set amp=bf16)")
     ap.add_argument("--seed", type=int, default=0)
@@ -76,6 +83,9 @@ def main():
     ap.add_argument("--save", default="")
     ap.add_argument("--json", default="")
     args = ap.parse_args()
+    if args.json and Path(args.json).exists():          # never re-run an unchanged experiment (the user's rule)
+        print(f"{args.json} exists: not re-run")
+        return
     dev = "cuda"
     torch.manual_seed(args.seed)
     g = torch.Generator(device=dev).manual_seed(args.seed)
@@ -96,7 +106,7 @@ def main():
                     topk_frac=args.topk).to(dev)
     cfg = parse_cfg(args.set)
     TinyGPT.fast = args.fast
-    opt = make_opt(model, args.opt, args.lr, args.mom, args.emb_mult)
+    opt = make_opt(model, args.opt, args.lr, args.mom, args.emb_mult, args.mix_lr)
     state, log, cost = {}, [], 0.0
     t0 = time.time()
     v0 = val_loss(model, vb)

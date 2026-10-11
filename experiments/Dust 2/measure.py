@@ -32,6 +32,8 @@ def names(model):
         out[model.Wout[b]] = f"out{b}"
     for b in model.aux_blocks:
         out[model.Waux[str(b)]] = f"aux{b}"
+    for l in range(getattr(model, "n_mix", 0)):
+        out[model.Wmix[l]] = f"mix{l}"
     return out
 
 

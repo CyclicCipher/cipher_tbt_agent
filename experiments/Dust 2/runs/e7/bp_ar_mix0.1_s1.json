@@ -1,0 +1,287 @@
+{
+ "args": {
+  "method": "bp",
+  "steps": 300,
+  "lr": 0.02,
+  "B": 32,
+  "T": 64,
+  "task": "latin",
+  "d": 64,
+  "L": 4,
+  "H": 4,
+  "aux_every": 0,
+  "aux_weight": 0.0,
+  "topk": 0.0,
+  "attnres": true,
+  "mix_lr": 0.1,
+  "fast": true,
+  "amp": "bf16",
+  "seed": 1,
+  "eval_every": 10,
+  "set": [],
+  "opt": "adam",
+  "mom": 0.95,
+  "emb_mult": 1.0,
+  "sig_sched": "",
+  "save": "",
+  "json": "runs/e7/bp_ar_mix0.1_s1.json"
+ },
+ "cfg": {
+  "K": 32,
+  "chunk": 16,
+  "sig": {
+   "emb": 0.2,
+   "o": 0.2,
+   "proj": 0.2,
+   "fc": 0.2,
+   "out": 0.2,
+   "qkv": 0.2,
+   "loc": 0.05,
+   "head": 0.05,
+   "aux": 0.05,
+   "mix": 0.2
+  },
+  "gamma": 0.0,
+  "gamma_loc": 0.98,
+  "qkv_mode": "hub",
+  "head_mult": 4,
+  "noise": "gauss",
+  "rank": 8,
+  "beta": 0.5,
+  "ema": 0.1,
+  "ent_frac": 1.0,
+  "local": false,
+  "exact_head": false,
+  "amp": "",
+  "sparse_c": 0.0,
+  "top_guide": 0.0,
+  "hub_T": false,
+  "act_K": 4,
+  "shaping": "",
+  "lam": 1.0,
+  "simul": false,
+  "whiten": false,
+  "K_mix": 8
+ },
+ "log": [
+  {
+   "step": 0,
+   "t": 0.0,
+   "cost": 0.0,
+   "val": 3.6387
+  },
+  {
+   "step": 10,
+   "t": 1.4,
+   "cost": 30,
+   "val": 2.8346,
+   "train": 2.8408
+  },
+  {
+   "step": 20,
+   "t": 1.6,
+   "cost": 60,
+   "val": 2.6064,
+   "train": 2.5983
+  },
+  {
+   "step": 30,
+   "t": 1.8,
+   "cost": 90,
+   "val": 2.4966,
+   "train": 2.4887
+  },
+  {
+   "step": 40,
+   "t": 2.0,
+   "cost": 120,
+   "val": 2.4612,
+   "train": 2.4525
+  },
+  {
+   "step": 50,
+   "t": 2.2,
+   "cost": 150,
+   "val": 2.4469,
+   "train": 2.4324
+  },
+  {
+   "step": 60,
+   "t": 2.4,
+   "cost": 180,
+   "val": 2.438,
+   "train": 2.4251
+  },
+  {
+   "step": 70,
+   "t": 2.6,
+   "cost": 210,
+   "val": 2.4323,
+   "train": 2.4163
+  },
+  {
+   "step": 80,
+   "t": 2.8,
+   "cost": 240,
+   "val": 2.4242,
+   "train": 2.4101
+  },
+  {
+   "step": 90,
+   "t": 3.1,
+   "cost": 270,
+   "val": 2.4229,
+   "train": 2.4036
+  },
+  {
+   "step": 100,
+   "t": 3.3,
+   "cost": 300,
+   "val": 2.4111,
+   "train": 2.399
+  },
+  {
+   "step": 110,
+   "t": 3.5,
+   "cost": 330,
+   "val": 2.412,
+   "train": 2.3927
+  },
+  {
+   "step": 120,
+   "t": 3.7,
+   "cost": 360,
+   "val": 2.4118,
+   "train": 2.3932
+  },
+  {
+   "step": 130,
+   "t": 3.9,
+   "cost": 390,
+   "val": 2.3978,
+   "train": 2.3896
+  },
+  {
+   "step": 140,
+   "t": 4.1,
+   "cost": 420,
+   "val": 2.4022,
+   "train": 2.3913
+  },
+  {
+   "step": 150,
+   "t": 4.3,
+   "cost": 450,
+   "val": 2.3985,
+   "train": 2.3856
+  },
+  {
+   "step": 160,
+   "t": 4.5,
+   "cost": 480,
+   "val": 2.3974,
+   "train": 2.3776
+  },
+  {
+   "step": 170,
+   "t": 4.7,
+   "cost": 510,
+   "val": 2.3957,
+   "train": 2.3755
+  },
+  {
+   "step": 180,
+   "t": 4.9,
+   "cost": 540,
+   "val": 2.3861,
+   "train": 2.3742
+  },
+  {
+   "step": 190,
+   "t": 5.1,
+   "cost": 570,
+   "val": 2.3824,
+   "train": 2.3669
+  },
+  {
+   "step": 200,
+   "t": 5.3,
+   "cost": 600,
+   "val": 2.3803,
+   "train": 2.3672
+  },
+  {
+   "step": 210,
+   "t": 5.6,
+   "cost": 630,
+   "val": 2.3724,
+   "train": 2.3604
+  },
+  {
+   "step": 220,
+   "t": 5.8,
+   "cost": 660,
+   "val": 2.3731,
+   "train": 2.3573
+  },
+  {
+   "step": 230,
+   "t": 6.0,
+   "cost": 690,
+   "val": 2.3722,
+   "train": 2.3551
+  },
+  {
+   "step": 240,
+   "t": 6.2,
+   "cost": 720,
+   "val": 2.3644,
+   "train": 2.3523
+  },
+  {
+   "step": 250,
+   "t": 6.4,
+   "cost": 750,
+   "val": 2.364,
+   "train": 2.3495
+  },
+  {
+   "step": 260,
+   "t": 6.6,
+   "cost": 780,
+   "val": 2.3622,
+   "train": 2.3459
+  },
+  {
+   "step": 270,
+   "t": 6.8,
+   "cost": 810,
+   "val": 2.3606,
+   "train": 2.3442
+  },
+  {
+   "step": 280,
+   "t": 7.0,
+   "cost": 840,
+   "val": 2.3601,
+   "train": 2.3434
+  },
+  {
+   "step": 290,
+   "t": 7.2,
+   "cost": 870,
+   "val": 2.3596,
+   "train": 2.343
+  },
+  {
+   "step": 300,
+   "t": 7.4,
+   "cost": 900,
+   "val": 2.3595,
+   "train": 2.3429
+  }
+ ],
+ "secs": 7.4,
+ "cost": 900,
+ "val": 2.3595
+}
