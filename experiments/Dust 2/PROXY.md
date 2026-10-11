@@ -152,3 +152,13 @@ themselves. Neither gates anything: every Experiment 3 arm still trains.
 
 **Timing:** 4–10 s per arm per checkpoint on the GPU. A CPU version would be about 25× slower at this batch size, so
 the "seconds on the CPU" goal is not met by this design.
+
+## Out-of-sample result on Experiment 3 (2026-10-10)
+
+The probe's recorded predictions ranked Experiment 3's six comparable arms perfectly (τ-b = 1.0), with 4/5 same/worse
+calls right (the miss was at the band's edge). cos got τ-b = 0.41.
+
+**Status:** the probe is a useful screen for variants of the estimator's noise and weighting, with one known blind spot:
+anything whose gain shows up only from scratch, such as local scoring. Use it to rank candidates. Promote the top ones
+to real 2-minute runs, and always also promote anything that changes WHAT is scored, not just how draws are made. It
+costs 4–10 s per arm per checkpoint on the GPU. On the CPU it is about 25× slower at this batch size.

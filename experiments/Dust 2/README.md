@@ -50,7 +50,30 @@ decides, because a higher cosine does not always mean a lower loss.
 | `measure.py` | the cosine diagnostic against backprop |
 | `train.py` | training by backprop or by an estimator, with cost counted in forward equivalents |
 | `EXPERIMENT_1.md` | Gemini's five ideas, pre-registered, then results |
-| `runs/` | results |
+| `EXPERIMENT_2.md` | my own ideas (O1–O4, combo), the width scaling, the variance-or-bias test; results |
+| `EXPERIMENT_2B.md` | whitened guides, and stacking what trained well (O4 + orth, O4 + local); results |
+| `EXPERIMENT_3.md` | thermodynamic ideas: σ as temperature, Boltzmann/rank weighting, cache-free simultaneous perturbation |
+| `EXPERIMENT_4.md` | event-driven units (per-unit thresholds + homeostasis): cascade sizes, delta-rerun savings |
+| `THERMODYNAMICS.md` | thermodynamics as a source of ideas (the user's question), with the experiment plan |
+| `PROXY.md` | a fast proxy for training outcomes: v1 (curvature-weighted progress) and v2 (25-step probe), validations |
+| `proxy.py`, `probe.py` | the two proxies |
+| `simul.py`, `ev.py`, `recall.py` | cache-free estimator (T3); event-driven units (Experiment 4); task 2 |
+| `e1_m1.py`, `e2_m1.py`, `e3_m1.py`, `summarize.py`, `reach.py` | drivers and summaries |
+| `runs/` | results (`*.pt` checkpoints are git-ignored) |
+
+## Where it stands (2026-10-10)
+
+- **Best so far.** Two stacks reach the Dust baseline's loss with less compute:
+  - **O4 + local scoring:** 3–4.7× less.
+  - **O4 + orthogonal draws:** 2× less.
+
+  Against backprop the gap shrinks from ~220× to ~50–75×. O4 obtains the attention hub's and MLP hidden's errors from
+  their own block's writer through one local linear map, with the activation slope measured by draws.
+- **Width.** Plain Dust's gradient quality at fixed draws falls with width, so cost ∝ width, as the user expected. The
+  best estimator's gradient advantage grows from 5.7× at d = 64 to 19.7× at d = 256, but in gradient quality only. The
+  ideas carrying that growth (guided subspaces) failed in training.
+- **The lesson on measures.** A gradient cosine at a checkpoint misranked arms, and a curvature-weighted proxy was worse
+  still. A 25-step training probe ranks best (τ 0.57), but it misses local scoring's gain.
 
 ## Standing rules (from the user and the project)
 

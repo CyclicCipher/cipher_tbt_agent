@@ -1,0 +1,32 @@
+step     0  val 3.6387
+step    10  t    6.5s  cost      2870 fwd  val 2.9245
+step    20  t    8.1s  cost      5740 fwd  val 2.6986
+step    30  t    9.6s  cost      8611 fwd  val 2.5849
+step    40  t   11.2s  cost     11481 fwd  val 2.5185
+step    50  t   12.8s  cost     14351 fwd  val 2.4897
+step    60  t   14.4s  cost     17221 fwd  val 2.4686
+step    70  t   16.1s  cost     20092 fwd  val 2.4521
+step    80  t   17.8s  cost     22962 fwd  val 2.4440
+step    90  t   19.4s  cost     25832 fwd  val 2.4288
+step   100  t   21.1s  cost     28702 fwd  val 2.4345
+step   110  t   22.8s  cost     31572 fwd  val 2.4220
+step   120  t   24.5s  cost     34443 fwd  val 2.4220
+step   130  t   26.1s  cost     37313 fwd  val 2.4167
+step   140  t   27.8s  cost     40183 fwd  val 2.4110
+step   150  t   29.5s  cost     43053 fwd  val 2.4059
+step   160  t   31.1s  cost     45924 fwd  val 2.4032
+step   170  t   32.8s  cost     48794 fwd  val 2.4003
+step   180  t   34.5s  cost     51664 fwd  val 2.3941
+step   190  t   36.2s  cost     54534 fwd  val 2.3910
+step   200  t   37.8s  cost     57405 fwd  val 2.3917
+step   210  t   39.5s  cost     60275 fwd  val 2.3894
+step   220  t   41.2s  cost     63145 fwd  val 2.3843
+step   230  t   42.8s  cost     66015 fwd  val 2.3793
+step   240  t   44.5s  cost     68885 fwd  val 2.3787
+step   250  t   46.2s  cost     71756 fwd  val 2.3796
+step   260  t   47.9s  cost     74626 fwd  val 2.3797
+step   270  t   49.5s  cost     77496 fwd  val 2.3790
+step   280  t   51.2s  cost     80366 fwd  val 2.3786
+step   290  t   52.9s  cost     83237 fwd  val 2.3783
+step   300  t   54.5s  cost     86107 fwd  val 2.3783
+done: dust K=32 amp=fp16 sig.emb=0.4 sig.o=0.4 sig.proj=0.4 sig.fc=0.4 sig.out=0.4 | val 2.3783 | 55s | 86107 fwd-equiv
