@@ -109,8 +109,8 @@ Experiment 1's guided arm (2.3× in cosine) and its natural variants. It is list
 
 | id | idea | when | status |
 |---|---|---|---|
-| T1 | σ as temperature (levels + anneal) | Experiment 3, after Experiment 2 | to pre-register |
-| T2 | Boltzmann and rank weighting of draws | Experiment 3 | to pre-register |
-| T3 | fluctuation–dissipation: all sites perturbed at once, no cache | Experiment 3 | to pre-register |
-| T4 | nudged-minus-free state in a settling block (Equilibrium Propagation) | with the looped architecture | design |
+| T1 | σ as temperature (levels + anneal) | Experiment 3 | done: null |
+| T2 | Boltzmann and rank weighting of draws | Experiment 3 | done: Boltzmann hurts, rank neutral |
+| T3 | fluctuation–dissipation: all sites perturbed at once, no cache | Experiment 3 | done: ≈ Dust per unit of cost |
+| T4 | nudged-minus-free state in a settling block (Equilibrium Propagation) | — | **REJECTED by the user (2026-10-10)**: it forces an architecture choice instead of opening the design space, and it inherently costs more than backprop |
 | T5 | error rank against criticality | with the sparse, critical network | design |

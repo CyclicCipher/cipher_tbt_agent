@@ -1,0 +1,32 @@
+step     0  val 3.6387
+step    10  t    7.6s  cost      1528 fwd  val 2.9216
+step    20  t   10.4s  cost      3055 fwd  val 2.8303
+step    30  t   13.2s  cost      4583 fwd  val 2.5838
+step    40  t   16.0s  cost      6111 fwd  val 2.4923
+step    50  t   18.9s  cost      7638 fwd  val 2.4604
+step    60  t   21.7s  cost      9166 fwd  val 2.4494
+step    70  t   24.6s  cost     10694 fwd  val 2.4350
+step    80  t   27.5s  cost     12221 fwd  val 2.4289
+step    90  t   30.5s  cost     13749 fwd  val 2.4167
+step   100  t   33.4s  cost     15277 fwd  val 2.4102
+step   110  t   36.7s  cost     16804 fwd  val 2.4087
+step   120  t   39.6s  cost     18332 fwd  val 2.3890
+step   130  t   42.7s  cost     19860 fwd  val 2.3909
+step   140  t   45.7s  cost     21387 fwd  val 2.3838
+step   150  t   48.7s  cost     22915 fwd  val 2.3751
+step   160  t   51.8s  cost     24443 fwd  val 2.3699
+step   170  t   54.9s  cost     25970 fwd  val 2.3720
+step   180  t   57.9s  cost     27498 fwd  val 2.3595
+step   190  t   60.9s  cost     29026 fwd  val 2.3516
+step   200  t   63.9s  cost     30553 fwd  val 2.3413
+step   210  t   67.0s  cost     32081 fwd  val 2.3386
+step   220  t   70.0s  cost     33609 fwd  val 2.3279
+step   230  t   73.1s  cost     35136 fwd  val 2.3216
+step   240  t   76.2s  cost     36664 fwd  val 2.3212
+step   250  t   79.2s  cost     38192 fwd  val 2.3139
+step   260  t   82.3s  cost     39719 fwd  val 2.3087
+step   270  t   85.4s  cost     41247 fwd  val 2.3079
+step   280  t   88.4s  cost     42775 fwd  val 2.3080
+step   290  t   91.5s  cost     44302 fwd  val 2.3076
+step   300  t   94.6s  cost     45830 fwd  val 2.3075
+done: dust K=128 amp=fp16 hub_T=1 local=1 noise=orth_sign | val 2.3075 | 95s | 45830 fwd-equiv

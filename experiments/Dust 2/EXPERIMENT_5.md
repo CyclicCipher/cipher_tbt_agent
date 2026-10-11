@@ -53,3 +53,33 @@ is reported, not hidden).
 ## Files
 
 `simul.py` (`local` scoring for W3). Results: `runs/e5/`.
+
+## Results — RAN 2026-10-10 (`runs/e5/`)
+
+| arm | validation per seed | mean | vs its comparison | cost | cost to first reach 2.37 | s/run |
+|---|---|---|---|---|---|---|
+| W1: O4 + local + orth_sign, K = 128 | 2.2776 / 2.3075 | 2.2926 | **+0.011** vs O4 + local (2.2815) | 46k | 21k / 24k | 91 |
+| W2: O4 + local, K = 192 | 2.2282 / 2.3145 | 2.2713 | −0.010 vs O4 + local, at 1.5× the cost | 69k | 30k / 41k | **138 (over the 2-min limit)** |
+| W3: cache-free + local, K = 143 | 2.3956 / 2.4029 | 2.3992 | −0.007 vs T3 (2.4065) | 43k | not reached | **122 (over)** |
+
+### Against the predictions
+
+- **P1 — FAILED.** Orthogonal draws do not stack on O4 + local. W1 is worse in mean, and the seeds split: −0.042 on
+  seed 0, +0.020 on seed 1 against O4 + local.
+- **P2 — FAILED.** 1.5× the draws buys 0.010: saturated.
+- **P3 — FAILED.** Local scoring barely helps the cache-free form (−0.007).
+- **P4 — FAILED, narrowly.** Reaching 2.37 took 21k and 24k (bar ≤ 22k in both seeds). O4 + local alone took 18k and
+  29k.
+
+### What it says
+
+**The estimator tweaks are saturated around O4 + local:**
+- about 3–4× cheaper than the Dust baseline at reaching 2.37;
+- about 50–75× backprop's cost.
+
+Adding orthogonal draws, more draws, or local scoring to the cache-free form changes little. The user's reading fits:
+this route improves Dust by a constant factor but does not open orders of magnitude.
+
+**A consistent seed effect in every local-scored arm.** Seed 0 ends at 2.228–2.278, seed 1 at 2.307–2.327: a 0.03–0.09
+gap that non-local arms do not show (their seeds differ by ≤ 0.01–0.03). Local scoring is sensitive to the data order
+or the draws, so its results deserve more seeds than two.

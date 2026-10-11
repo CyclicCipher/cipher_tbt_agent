@@ -61,6 +61,14 @@ decides, because a higher cosine does not always mean a lower loss.
 | `e1_m1.py`, `e2_m1.py`, `e3_m1.py`, `summarize.py`, `reach.py` | drivers and summaries |
 | `runs/` | results (`*.pt` checkpoints are git-ignored) |
 
+## Decisions (the user)
+
+- **2026-10-10: no settling or nudged-state (Equilibrium-Propagation) route.** It forces an architecture instead of
+  opening the design space, and it inherently costs more than backprop.
+- **2026-10-10: next direction, DiffusionBlocks-like training with Block AttnRes** in BOTH the control (backprop) model
+  and the model trained by the new algorithm. The two are complementary.
+- **O4 is acceptable** because it does not require the model to be differentiable.
+
 ## Where it stands (2026-10-10)
 
 - **Best so far.** Two stacks reach the Dust baseline's loss with less compute:
