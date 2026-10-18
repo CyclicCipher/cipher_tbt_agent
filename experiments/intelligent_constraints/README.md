@@ -48,6 +48,8 @@ has seen other facts of the same relation written both ways (Berglund et al. 202
 | `run_e1.py` | Experiments 1 and 1b driver (`--frozen` = 1b): capacity pilot, then the grid; reuses existing results |
 | `EXPERIMENT_1.md` | the dagger memory against the reversal curse: pre-registration, then results (did not test C1) |
 | `EXPERIMENT_1B.md` | the same with frozen token codes, so facts must live in the MLPs: pre-registration, then results |
+| `EXPERIMENT_1C.md` | weight decay x transport (learned attention vs fixed sum) with a per-run MLP-off check |
+| `run_e1c.py` | Experiment 1c driver |
 | `runs/` | results, one JSON per configuration |
 
 ## Standing rules (from the user and the project)
@@ -69,4 +71,4 @@ has seen other facts of the same relation written both ways (Berglund et al. 202
 - `IDEAS.md` holds five candidate constraints (C1–C5) and four rejected ones.
 - **Experiment 1 (C1, the dagger memory): did not test C1.** The facts were stored in the learned embeddings and attention, not in the MLP (a plain MLP with 8 hidden units memorised everything). Tied embeddings alone gave a small reversal (~25× chance).
 - **Experiment 1b (frozen random token codes): apparatus check failed again.** Attention alone memorises the facts (picking the top answer among random codes needs only ~0.5 correlation). The baseline is fully cursed (chance). The dagger arm also stays at chance on one-way facts, but its transpose path answers up to half of the PAIRED reverse facts, as separate storage. Sharing K and V does not force sharing a fact unless an entity has one code at the MLP input and at the output (C3 at the MLP interface).
-- **Next, awaiting the user:** weight decay (an L2 penalty makes one-unit-both-ways cheaper), a per-run "where are the facts" check, and a fixed-transport variant.
+- **Experiment 1c** (pre-registered): weight decay 0.01, 0.1 or 1.0, crossed with learned attention vs a fixed sum of the token codes, plus a per-run MLP-off check of where the facts live.

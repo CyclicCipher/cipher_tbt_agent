@@ -37,11 +37,21 @@ def evaluate(net, F, names=("fwd", "rev_paired", "rev_oneway", "rev_oneway_clean
     return out
 
 
-def run(mlp, m, tied, seed, steps=6000, lr=1e-3, batch=512, eval_every=250, d=128, n_layer=2, frozen=False):
+def run(mlp, m, tied, seed, steps=6000, lr=1e-3, batch=512, eval_every=250, d=128, n_layer=2, frozen=False,
+        transport="attn", wd=0.01, decay="all"):
+    """decay="all" (Experiments 1, 1b) decays every trainable tensor; "matrices" (1c) decays only 2-D weights, not
+    biases, LayerNorm or the logit scale."""
     F = make_facts(seed=0)                       # the facts are fixed; the seed varies the model and batch order
     torch.manual_seed(seed)
-    net = Net(F.vocab, d=d, n_layer=n_layer, m=m, dagger=(mlp == "dagger"), tied=tied, frozen=frozen).to(DEV)
-    opt = torch.optim.AdamW([p for p in net.parameters() if p.requires_grad], lr=lr, betas=(0.9, 0.98), weight_decay=0.01)
+    net = Net(F.vocab, d=d, n_layer=n_layer, m=m, dagger=(mlp == "dagger"), tied=tied, frozen=frozen,
+              transport=transport).to(DEV)
+    params = [p for p in net.parameters() if p.requires_grad]
+    if decay == "all":
+        groups = [dict(params=params, weight_decay=wd)]
+    else:
+        groups = [dict(params=[p for p in params if p.dim() == 2], weight_decay=wd),
+                  dict(params=[p for p in params if p.dim() != 2], weight_decay=0.0)]
+    opt = torch.optim.AdamW(groups, lr=lr, betas=(0.9, 0.98))
     X = torch.tensor([p for p, _ in F.train], device=DEV)
     Y = torch.tensor([a for _, a in F.train], device=DEV)
     g = torch.Generator(device=DEV).manual_seed(seed)
@@ -63,13 +73,17 @@ def run(mlp, m, tied, seed, steps=6000, lr=1e-3, batch=512, eval_every=250, d=12
             if reach99 is None and train_acc >= 0.99:
                 reach99 = step
             log.append(dict(step=step, loss=round(loss.item(), 4), train_acc=round(train_acc, 4), **e))
-    res = dict(mlp=mlp, m=m, tied=tied, frozen=frozen, seed=seed, steps=steps, lr=lr, batch=batch, d=d, n_layer=n_layer,
+    res = dict(mlp=mlp, m=m, tied=tied, frozen=frozen, transport=transport, wd=wd, decay=decay, seed=seed, steps=steps, lr=lr, batch=batch, d=d, n_layer=n_layer,
                params=sum(p.numel() for p in net.parameters()), log=log, final=log[-1], reach99=reach99,
                chance=round(sum(len(c) for _, c, _ in F.evals["rev_oneway"]) / len(F.evals["rev_oneway"]) / F.n_ent, 5))
     if mlp == "dagger":                          # ablation: the transpose read switched off at test time
         net.set_rev(False)
         res["final_rev_off"] = evaluate(net, F)
         net.set_rev(True)
+    if decay == "matrices":                      # 1c's per-run apparatus check: how much do the MLPs hold?
+        net.set_mlp_off(True)
+        res["final_mlp_off"] = evaluate(net, F)
+        net.set_mlp_off(False)
     res["secs"] = round(time.time() - t0, 1)
     return res
 

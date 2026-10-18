@@ -11,6 +11,10 @@ In the linear case this is Kosko's bidirectional associative memory (1988): forw
 `frozen=True` (Experiment 1b) fixes every token's code at a random N(0, 1) vector, so facts cannot be stored in the
 embedding table and must go into the weights. The answer logits are then s * LN(x) . code / sqrt(d), with a learned
 scalar s; untied, the output codes are learned at the same scale.
+
+`transport="sum"` (Experiment 1c) removes attention: the MLP blocks read the fixed sum of the two token codes, so an
+entity arrives at the MLP as exactly its own code. `set_mlp_off(True)` zeroes every MLP's output (the per-run check of
+how much of the facts the MLPs hold).
 """
 import math
 import torch
@@ -23,6 +27,7 @@ class MLP(nn.Module):
         super().__init__()
         self.dagger = dagger
         self.rev = True
+        self.off = False
         self.K = nn.Parameter(torch.randn(m, d) * 0.02)
         self.V = nn.Parameter(torch.randn(d, m) * 0.02 / math.sqrt(2 * n_layer))
         self.bk = nn.Parameter(torch.zeros(m))
@@ -31,6 +36,8 @@ class MLP(nn.Module):
             self.br = nn.Parameter(torch.zeros(m))
 
     def forward(self, x):
+        if self.off:
+            return torch.zeros_like(x)
         y = Fn.gelu(x @ self.K.T + self.bk) @ self.V.T
         if self.dagger and self.rev:
             y = y + Fn.gelu(x @ self.V + self.br) @ self.K
@@ -38,17 +45,22 @@ class MLP(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, d, n_head, m, dagger, n_layer):
+    def __init__(self, d, n_head, m, dagger, n_layer, attn=True):
         super().__init__()
-        self.ln1, self.ln2 = nn.LayerNorm(d), nn.LayerNorm(d)
-        self.qkv = nn.Linear(d, 3 * d)
-        self.proj = nn.Linear(d, d)
-        nn.init.normal_(self.qkv.weight, std=0.02)
-        nn.init.normal_(self.proj.weight, std=0.02 / math.sqrt(2 * n_layer))
+        self.attn = attn
+        if attn:
+            self.ln1 = nn.LayerNorm(d)
+            self.qkv = nn.Linear(d, 3 * d)
+            self.proj = nn.Linear(d, d)
+            nn.init.normal_(self.qkv.weight, std=0.02)
+            nn.init.normal_(self.proj.weight, std=0.02 / math.sqrt(2 * n_layer))
+        self.ln2 = nn.LayerNorm(d)
         self.n_head = n_head
         self.mlp = MLP(d, m, dagger, n_layer)
 
     def forward(self, x):
+        if not self.attn:
+            return x + self.mlp(self.ln2(x))
         B, T, d = x.shape
         q, k, v = self.qkv(self.ln1(x)).split(d, dim=2)
         q, k, v = (t.view(B, T, self.n_head, d // self.n_head).transpose(1, 2) for t in (q, k, v))
@@ -58,17 +70,22 @@ class Block(nn.Module):
 
 
 class Net(nn.Module):
-    def __init__(self, vocab, d=128, n_layer=2, n_head=4, m=256, dagger=False, tied=True, ctx=2, frozen=False):
+    def __init__(self, vocab, d=128, n_layer=2, n_head=4, m=256, dagger=False, tied=True, ctx=2, frozen=False,
+                 transport="attn"):
         super().__init__()
         self.tok = nn.Embedding(vocab, d)
-        self.pos = nn.Embedding(ctx, d)
+        self.transport = transport
+        if transport == "attn":
+            self.pos = nn.Embedding(ctx, d)
         self.frozen = frozen
         nn.init.normal_(self.tok.weight, std=1.0 if frozen else 0.02)
         if frozen:
             self.tok.weight.requires_grad_(False)
             self.scale = nn.Parameter(torch.ones(()))
-        nn.init.normal_(self.pos.weight, std=0.02)
-        self.blocks = nn.ModuleList(Block(d, n_head, m, dagger, n_layer) for _ in range(n_layer))
+        if transport == "attn":
+            nn.init.normal_(self.pos.weight, std=0.02)
+        self.blocks = nn.ModuleList(Block(d, n_head, m, dagger, n_layer, attn=(transport == "attn"))
+                                    for _ in range(n_layer))
         self.lnf = nn.LayerNorm(d)
         self.tied = tied
         if not tied:
@@ -78,8 +95,15 @@ class Net(nn.Module):
         for b in self.blocks:
             b.mlp.rev = on
 
+    def set_mlp_off(self, on):
+        for b in self.blocks:
+            b.mlp.off = on
+
     def forward(self, idx):
-        x = self.tok(idx) + self.pos(torch.arange(idx.shape[1], device=idx.device))
+        if self.transport == "sum":
+            x = self.tok(idx).sum(1, keepdim=True)
+        else:
+            x = self.tok(idx) + self.pos(torch.arange(idx.shape[1], device=idx.device))
         for b in self.blocks:
             x = b(x)
         W = self.tok.weight if self.tied else self.out
