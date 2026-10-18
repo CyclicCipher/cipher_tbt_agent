@@ -62,6 +62,63 @@ ample = 8× tight), seeds {0, 1}, and measures.
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/e1b/`, log `runs/e1b_log.txt`)
 
-*(to be filled in after the runs)*
+**The apparatus check FAILED.** The plain MLP at m = 8 memorised again (train_acc 1.000, reached at step 1250), even
+with frozen codes. So tight = 8 and ample = 64, and the facts are again mostly outside the MLP.
+
+My argument that attention could not store them was wrong:
+- A linear map on 128-d random codes can fit only about 128 pairs *exactly*.
+- But hits@1 among 1,000 random codes needs only about 0.5 correlation with the right code (the largest of 999 random
+  overlaps is about 3σ ≈ 0.28).
+- Attention's relation-gated linear maps reach that easily.
+
+As pre-registered, the grid is therefore uninformative about C1 as a clean test. The numbers are still worth recording.
+
+One-way clean hits@1 (chance 0.0012), and paired reverse hits@1 with the transpose read switched off at test time:
+
+| capacity | arm | one-way (s0, s1) | transpose off: paired reverse (s0, s1) | leak (s0, s1) |
+|---|---|---|---|---|
+| tight (8) | A plain | 0.000, 0.002 | – | 0.07, 0.09 |
+| | B dagger | 0.002, 0.000 | 0.845, 0.835 | 0.07, 0.07 |
+| | C plain 2m | 0.002, 0.001 | – | 0.06, 0.07 |
+| | D dagger untied | 0.003, 0.001 | 0.933, 0.986 | 0.13, 0.10 |
+| ample (64) | A plain | 0.002, 0.000 | – | 0.07, 0.08 |
+| | B dagger | 0.000, 0.001 | **0.707, 0.465** | 0.07, 0.07 |
+| | C plain 2m | 0.000, 0.000 | – | 0.06, 0.08 |
+| | D dagger untied | 0.001, 0.002 | 0.899, 0.858 | 0.12, 0.10 |
+
+All arms memorised (train_acc ≥ 0.998, reach99 750–1500). Every run took 33–55 s.
+
+**Against the predictions:**
+- **P1 (baseline cursed): holds.** A is at 0.000–0.002, which is chance. With frozen codes, the small "free" reversal
+  that learned tied embeddings gave in Experiment 1 is gone.
+- **P2: refuted under these conditions.** B ≤ 0.002 at both capacities.
+- **P3:** not applicable.
+- **P4:** not applicable (everything is at zero).
+- **P5:** not meaningful, since B and D are both at chance.
+- **P6: holds.** Every arm memorises.
+- **Leak fell from about 0.55 (Experiment 1) to about 0.07.** E1's habit of naming b's other partners lived in the
+  learned embedding table.
+
+**The informative finding: the transpose path is used, as extra storage, without transfer.**
+- Switching the transpose read off drops B's *paired* reverse accuracy to 0.84 at tight, and to 0.71 / 0.47 at ample.
+- So up to half of the paired reverse facts are answered through the transpose.
+- Yet one-way reverse accuracy stays at chance.
+- The model stores the reverse direction of each paired fact in the transpose path *as a separate association*, not as a
+  re-read of the forward one.
+
+That can happen because sharing K and V does not force sharing a fact:
+- a unit's row of K is both the forward *key* (a cue in the MLP's input space) and the reverse *value* (an answer
+  written toward the output codes);
+- the two coincide only if an entity's code at the MLP input equals its code at the output.
+
+Attention did not learn to carry codes unchanged, so the two roles stayed in different spaces. This is C3 (one code per
+entity) at the MLP interface, not only at the embedding table. Tying the embeddings is not enough when attention sits in
+between.
+
+**Next (not pre-registered yet, awaiting the user):**
+- **Weight decay** (0.1, 1.0): under an L2 penalty, the one-unit-both-ways solution is cheaper than separate storage.
+- **A per-run apparatus check:** zero the MLP at test time and measure the drop in forward accuracy.
+- **A fixed-transport variant:** replace attention with a fixed sum of the two token codes. That separates "can the
+  dagger memory transfer" from "can attention learn to carry codes unchanged".

@@ -68,4 +68,5 @@ has seen other facts of the same relation written both ways (Berglund et al. 202
 
 - `IDEAS.md` holds five candidate constraints (C1–C5) and four rejected ones.
 - **Experiment 1 (C1, the dagger memory): did not test C1.** The facts were stored in the learned embeddings and attention, not in the MLP (a plain MLP with 8 hidden units memorised everything). Tied embeddings alone gave a small reversal (~25× chance).
-- **Experiment 1b** (frozen random token codes, so facts must go into the MLPs) is pre-registered.
+- **Experiment 1b (frozen random token codes): apparatus check failed again.** Attention alone memorises the facts (picking the top answer among random codes needs only ~0.5 correlation). The baseline is fully cursed (chance). The dagger arm also stays at chance on one-way facts, but its transpose path answers up to half of the PAIRED reverse facts, as separate storage. Sharing K and V does not force sharing a fact unless an entity has one code at the MLP input and at the output (C3 at the MLP interface).
+- **Next, awaiting the user:** weight decay (an L2 penalty makes one-unit-both-ways cheaper), a per-run "where are the facts" check, and a fixed-transport variant.
