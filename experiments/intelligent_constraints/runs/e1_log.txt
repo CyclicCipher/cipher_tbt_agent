@@ -1,0 +1,39 @@
+ran plain_w8_tied_s0.json: train 1.0  one-way clean 0.0236  32.0s
+
+tight m = 8, ample m = 64
+
+cap       m arm s  params  train reach99 | fwd   revP  | 1-way: hits  mass   leak | transpose off: 1-way revP | secs
+--------------------------------------------------------------------------------------------------------------------
+tight     8  A  0  267536  1.000    750 | 1.000 1.000 | 0.024  0.023  0.589 |         -      -        | 32.0
+ran plain_w8_tied_s1.json: train 1.0  one-way clean 0.0318  31.5s
+tight     8  A  1  267536  1.000    750 | 1.000 1.000 | 0.032  0.027  0.625 |         -      -        | 31.5
+ran dagger_w8_tied_s0.json: train 1.0  one-way clean 0.0244  40.1s
+tight     8  B  0  267552  1.000    750 | 1.000 1.000 | 0.024  0.026  0.600 |       0.023  0.997      | 40.1
+ran dagger_w8_tied_s1.json: train 1.0  one-way clean 0.0277  42.3s
+tight     8  B  1  267552  1.000    750 | 1.000 1.000 | 0.028  0.027  0.602 |       0.024  0.995      | 42.3
+ran plain_w16_tied_s0.json: train 1.0  one-way clean 0.035  34.9s
+tight     8  C  0  271648  1.000    750 | 1.000 1.000 | 0.035  0.029  0.581 |         -      -        | 34.9
+ran plain_w16_tied_s1.json: train 1.0  one-way clean 0.0318  36.7s
+tight     8  C  1  271648  1.000    750 | 1.000 1.000 | 0.032  0.030  0.573 |         -      -        | 36.7
+ran dagger_w8_untied_s0.json: train 1.0  one-way clean 0.0  45.1s
+tight     8  D  0  397088  1.000    750 | 1.000 1.000 | 0.000  0.000  0.471 |       0.000  0.992      | 45.1
+ran dagger_w8_untied_s1.json: train 1.0  one-way clean 0.0  43.8s
+tight     8  D  1  397088  1.000    750 | 1.000 1.000 | 0.000  0.001  0.529 |       0.001  0.998      | 43.8
+ran plain_w64_tied_s0.json: train 1.0  one-way clean 0.035  36.1s
+ample    64  A  0  296320  1.000    750 | 1.000 1.000 | 0.035  0.031  0.520 |         -      -        | 36.1
+ran plain_w64_tied_s1.json: train 1.0  one-way clean 0.0302  35.9s
+ample    64  A  1  296320  1.000    750 | 1.000 1.000 | 0.030  0.025  0.526 |         -      -        | 35.9
+ran dagger_w64_tied_s0.json: train 1.0  one-way clean 0.0489  45.9s
+ample    64  B  0  296448  1.000    750 | 1.000 1.000 | 0.049  0.035  0.569 |       0.036  0.984      | 45.9
+ran dagger_w64_tied_s1.json: train 1.0  one-way clean 0.0326  44.6s
+ample    64  B  1  296448  1.000    750 | 1.000 1.000 | 0.033  0.028  0.557 |       0.032  0.983      | 44.6
+ran plain_w128_tied_s0.json: train 1.0  one-way clean 0.0391  37.1s
+ample    64  C  0  329216  1.000    750 | 1.000 1.000 | 0.039  0.034  0.495 |         -      -        | 37.1
+ran plain_w128_tied_s1.json: train 1.0  one-way clean 0.0513  39.4s
+ample    64  C  1  329216  1.000    750 | 1.000 1.000 | 0.051  0.034  0.445 |         -      -        | 39.4
+ran dagger_w64_untied_s0.json: train 1.0  one-way clean 0.0008  54.4s
+ample    64  D  0  425984  1.000    750 | 1.000 1.000 | 0.001  0.001  0.478 |       0.000  0.995      | 54.4
+ran dagger_w64_untied_s1.json: train 1.0  one-way clean 0.0008  47.8s
+ample    64  D  1  425984  1.000    750 | 1.000 1.000 | 0.001  0.001  0.469 |       0.001  0.991      | 47.8
+
+chance hits@1 on one-way questions: 0.0012

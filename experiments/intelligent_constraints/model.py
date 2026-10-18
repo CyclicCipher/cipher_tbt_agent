@@ -7,6 +7,10 @@ K is (m, d), V is (d, m). In the dagger MLP the second term reads the SAME param
 and K's rows as values. A unit trained to map cue x_a to value v_b is therefore also cued by v_b and writes back x_a.
 In the linear case this is Kosko's bidirectional associative memory (1988): forward read W, backward read W^T.
 `rev=False` switches the transpose read off (the ablation in Experiment 1).
+
+`frozen=True` (Experiment 1b) fixes every token's code at a random N(0, 1) vector, so facts cannot be stored in the
+embedding table and must go into the weights. The answer logits are then s * LN(x) . code / sqrt(d), with a learned
+scalar s; untied, the output codes are learned at the same scale.
 """
 import math
 import torch
@@ -54,17 +58,21 @@ class Block(nn.Module):
 
 
 class Net(nn.Module):
-    def __init__(self, vocab, d=128, n_layer=2, n_head=4, m=256, dagger=False, tied=True, ctx=2):
+    def __init__(self, vocab, d=128, n_layer=2, n_head=4, m=256, dagger=False, tied=True, ctx=2, frozen=False):
         super().__init__()
         self.tok = nn.Embedding(vocab, d)
         self.pos = nn.Embedding(ctx, d)
-        nn.init.normal_(self.tok.weight, std=0.02)
+        self.frozen = frozen
+        nn.init.normal_(self.tok.weight, std=1.0 if frozen else 0.02)
+        if frozen:
+            self.tok.weight.requires_grad_(False)
+            self.scale = nn.Parameter(torch.ones(()))
         nn.init.normal_(self.pos.weight, std=0.02)
         self.blocks = nn.ModuleList(Block(d, n_head, m, dagger, n_layer) for _ in range(n_layer))
         self.lnf = nn.LayerNorm(d)
         self.tied = tied
         if not tied:
-            self.out = nn.Parameter(torch.randn(vocab, d) * 0.02)
+            self.out = nn.Parameter(torch.randn(vocab, d) * (1.0 if frozen else 0.02))
 
     def set_rev(self, on):
         for b in self.blocks:
@@ -75,4 +83,5 @@ class Net(nn.Module):
         for b in self.blocks:
             x = b(x)
         W = self.tok.weight if self.tied else self.out
-        return self.lnf(x[:, -1]) @ W.T          # logits for the answer after the last prompt token
+        logits = self.lnf(x[:, -1]) @ W.T        # logits for the answer after the last prompt token
+        return logits * self.scale / W.shape[1] ** 0.5 if self.frozen else logits

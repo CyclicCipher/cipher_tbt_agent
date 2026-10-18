@@ -37,11 +37,11 @@ def evaluate(net, F, names=("fwd", "rev_paired", "rev_oneway", "rev_oneway_clean
     return out
 
 
-def run(mlp, m, tied, seed, steps=6000, lr=1e-3, batch=512, eval_every=250, d=128, n_layer=2):
+def run(mlp, m, tied, seed, steps=6000, lr=1e-3, batch=512, eval_every=250, d=128, n_layer=2, frozen=False):
     F = make_facts(seed=0)                       # the facts are fixed; the seed varies the model and batch order
     torch.manual_seed(seed)
-    net = Net(F.vocab, d=d, n_layer=n_layer, m=m, dagger=(mlp == "dagger"), tied=tied).to(DEV)
-    opt = torch.optim.AdamW(net.parameters(), lr=lr, betas=(0.9, 0.98), weight_decay=0.01)
+    net = Net(F.vocab, d=d, n_layer=n_layer, m=m, dagger=(mlp == "dagger"), tied=tied, frozen=frozen).to(DEV)
+    opt = torch.optim.AdamW([p for p in net.parameters() if p.requires_grad], lr=lr, betas=(0.9, 0.98), weight_decay=0.01)
     X = torch.tensor([p for p, _ in F.train], device=DEV)
     Y = torch.tensor([a for _, a in F.train], device=DEV)
     g = torch.Generator(device=DEV).manual_seed(seed)
@@ -63,7 +63,7 @@ def run(mlp, m, tied, seed, steps=6000, lr=1e-3, batch=512, eval_every=250, d=12
             if reach99 is None and train_acc >= 0.99:
                 reach99 = step
             log.append(dict(step=step, loss=round(loss.item(), 4), train_acc=round(train_acc, 4), **e))
-    res = dict(mlp=mlp, m=m, tied=tied, seed=seed, steps=steps, lr=lr, batch=batch, d=d, n_layer=n_layer,
+    res = dict(mlp=mlp, m=m, tied=tied, frozen=frozen, seed=seed, steps=steps, lr=lr, batch=batch, d=d, n_layer=n_layer,
                params=sum(p.numel() for p in net.parameters()), log=log, final=log[-1], reach99=reach99,
                chance=round(sum(len(c) for _, c, _ in F.evals["rev_oneway"]) / len(F.evals["rev_oneway"]) / F.n_ent, 5))
     if mlp == "dagger":                          # ablation: the transpose read switched off at test time
@@ -84,6 +84,7 @@ if __name__ == "__main__":
     ap.add_argument("--mlp", choices=["plain", "dagger"], default="plain")
     ap.add_argument("--m", type=int, default=256)
     ap.add_argument("--untied", action="store_true")
+    ap.add_argument("--frozen", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=6000)
     ap.add_argument("--json", default="")
@@ -91,7 +92,7 @@ if __name__ == "__main__":
     if a.json and Path(a.json).exists():
         print(f"{a.json} exists: not re-run")
         raise SystemExit
-    r = run(a.mlp, a.m, not a.untied, a.seed, steps=a.steps)
+    r = run(a.mlp, a.m, not a.untied, a.seed, steps=a.steps, frozen=a.frozen)
     print(json.dumps(dict(final=r["final"], rev_off=r.get("final_rev_off"), reach99=r["reach99"], secs=r["secs"])))
     if a.json:
         save(r, a.json)

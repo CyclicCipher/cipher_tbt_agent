@@ -114,6 +114,53 @@ once and reused. Pilot runs are reused too.
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/e1/`, log `runs/e1_log.txt`)
 
-*(to be filled in after the runs)*
+**The pilot.** It stopped at the first width: **m = 8** memorised every training prompt (train_acc 1.000, reached at step
+750). So tight = 8 and ample = 64.
+
+One-way clean hits@1 (chance 0.0012). "Transpose off" is the dagger arms' test with the transpose read switched off.
+
+| capacity | arm | seed 0 | seed 1 | transpose off: one-way / paired reverse (s0, s1) | leak (s0, s1) |
+|---|---|---|---|---|---|
+| tight (8) | A plain | 0.024 | 0.032 | – | 0.59, 0.63 |
+| | B dagger | 0.024 | 0.028 | 0.023 / 0.997, 0.024 / 0.995 | 0.60, 0.60 |
+| | C plain 2m | 0.035 | 0.032 | – | 0.58, 0.57 |
+| | D dagger untied | 0.000 | 0.000 | 0.000 / 0.992, 0.001 / 0.998 | 0.47, 0.53 |
+| ample (64) | A plain | 0.035 | 0.030 | – | 0.52, 0.53 |
+| | B dagger | 0.049 | 0.033 | 0.036 / 0.984, 0.032 / 0.983 | 0.57, 0.56 |
+| | C plain 2m | 0.039 | 0.051 | – | 0.50, 0.45 |
+| | D dagger untied | 0.001 | 0.001 | 0.000 / 0.995, 0.001 / 0.991 | 0.48, 0.47 |
+
+All arms reached train_acc 1.000 at step 750. Every run took 32–54 s.
+
+**Against the predictions:**
+- **P1 (baseline cursed): fails narrowly.** A scores 0.024–0.035, about 25× chance, against a 0.02 threshold. The small
+  reversal comes from the tied embeddings: the untied arm D is at 0.000.
+- **P2 (dagger helps): not supported.** B ≈ A ≈ C at both capacities (0.024–0.049), far below 0.10. It is not formally
+  "refuted" (B ≤ 0.02), but there is no effect.
+- **P3 (mechanism): the transpose path is unused.** Switching it off leaves paired reverse accuracy at 0.98–1.00
+  (failure mode 1).
+- **P4 (tight > ample): no.** B is 0.026 at tight against 0.041 at ample, but the difference is within seed noise.
+- **P5 (D < B): yes,** but the mechanism is the tying, not the dagger.
+- **P6 (no memorisation cost): yes.** reach99 is 750 for every arm.
+- **Leak is large in every arm (0.45–0.63).** Asked a reversed question it cannot answer, the model names b's other
+  partners.
+
+**Verdict: the experiment did not test C1, because the facts were not in the MLP.**
+- An MLP with 8 hidden units has about 2k parameters per layer, against about 45k bits of facts.
+- The facts were therefore stored in the learned embedding table and attention (about 260k parameters together).
+  Attention patterns that depend on the relation token can select which part of e_a to read.
+- I had assumed the conjunction "a AND r → b" needs the MLP. It doesn't, when each entity has its own learned 128-d
+  embedding and appears in only about 6 facts.
+- In a real LM, each token takes part in vast numbers of contexts, so facts live mostly in the MLPs. This toy distorted
+  that.
+- The dagger constraint was applied to a component that holds almost nothing, so the capacity pilot could not create the
+  intended pressure.
+
+**Kept from this run:**
+1. **The apparatus lesson:** check where the facts are stored before constraining a component.
+2. **The tied embeddings alone give a small, real reversal** (about 25× chance against 0 for untied). This is weak
+   evidence for C3 (one code per entity).
+
+**Correction:** Experiment 1b (`EXPERIMENT_1B.md`) freezes the token codes, so the facts must go into the MLPs.

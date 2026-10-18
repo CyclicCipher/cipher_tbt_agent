@@ -45,8 +45,9 @@ has seen other facts of the same relation written both ways (Berglund et al. 202
 | `data.py` | synthetic relational facts: single-token entities, 6 relations with converse tokens, paired and one-way splits |
 | `model.py` | tiny causal transformer; MLP = plain key-value memory or DAGGER memory (transpose read of the same weights) |
 | `train.py` | trains one configuration and logs full curves; refuses to re-run an existing result |
-| `run_e1.py` | Experiment 1 driver: capacity pilot, then the grid; reuses existing results |
-| `EXPERIMENT_1.md` | the dagger memory against the reversal curse: pre-registration, then results |
+| `run_e1.py` | Experiments 1 and 1b driver (`--frozen` = 1b): capacity pilot, then the grid; reuses existing results |
+| `EXPERIMENT_1.md` | the dagger memory against the reversal curse: pre-registration, then results (did not test C1) |
+| `EXPERIMENT_1B.md` | the same with frozen token codes, so facts must live in the MLPs: pre-registration, then results |
 | `runs/` | results, one JSON per configuration |
 
 ## Standing rules (from the user and the project)
@@ -66,4 +67,5 @@ has seen other facts of the same relation written both ways (Berglund et al. 202
 ## Where it stands (2026-10-18)
 
 - `IDEAS.md` holds five candidate constraints (C1–C5) and four rejected ones.
-- **Experiment 1 (C1, the dagger memory)** is pre-registered.
+- **Experiment 1 (C1, the dagger memory): did not test C1.** The facts were stored in the learned embeddings and attention, not in the MLP (a plain MLP with 8 hidden units memorised everything). Tied embeddings alone gave a small reversal (~25× chance).
+- **Experiment 1b** (frozen random token codes, so facts must go into the MLPs) is pre-registered.
