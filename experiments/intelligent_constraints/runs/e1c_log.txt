@@ -1,0 +1,65 @@
+ran attn_plain_w256_wd0.01_s0.json: train 1.0  one-way clean 0.0016  60.5s
+ran attn_plain_w256_wd0.01_s1.json: train 1.0  one-way clean 0.0  84.0s
+ran attn_dagger_w256_wd0.01_s0.json: train 1.0  one-way clean 0.0  94.6s
+ran attn_dagger_w256_wd0.01_s1.json: train 1.0  one-way clean 0.0008  135.0s
+ran attn_plain_w512_wd0.01_s0.json: train 1.0  one-way clean 0.0008  79.3s
+ran attn_plain_w512_wd0.01_s1.json: train 1.0  one-way clean 0.0  93.1s
+ran attn_plain_w256_wd0.1_s0.json: train 1.0  one-way clean 0.0008  89.3s
+ran attn_plain_w256_wd0.1_s1.json: train 1.0  one-way clean 0.0008  73.0s
+ran attn_dagger_w256_wd0.1_s0.json: train 1.0  one-way clean 0.0024  95.0s
+ran attn_dagger_w256_wd0.1_s1.json: train 1.0  one-way clean 0.0008  82.2s
+ran attn_plain_w512_wd0.1_s0.json: train 1.0  one-way clean 0.0  69.1s
+ran attn_plain_w512_wd0.1_s1.json: train 1.0  one-way clean 0.0024  69.7s
+ran attn_plain_w256_wd1.0_s0.json: train 0.9926  one-way clean 0.0024  70.1s
+ran attn_plain_w256_wd1.0_s1.json: train 0.9942  one-way clean 0.0008  79.9s
+ran attn_dagger_w256_wd1.0_s0.json: train 0.9995  one-way clean 0.0  107.8s
+ran attn_dagger_w256_wd1.0_s1.json: train 0.9976  one-way clean 0.0  110.0s
+ran attn_plain_w512_wd1.0_s0.json: train 0.9989  one-way clean 0.0024  94.5s
+ran attn_plain_w512_wd1.0_s1.json: train 0.9992  one-way clean 0.0  70.9s
+ran sum_plain_w256_wd0.01_s0.json: train 1.0  one-way clean 0.0  48.9s
+ran sum_plain_w256_wd0.01_s1.json: train 1.0  one-way clean 0.0016  37.1s
+ran sum_dagger_w256_wd0.01_s0.json: train 1.0  one-way clean 0.0041  81.7s
+ran sum_dagger_w256_wd0.01_s1.json: train 1.0  one-way clean 0.0033  58.1s
+ran sum_plain_w256_wd0.1_s0.json: train 1.0  one-way clean 0.0016  44.7s
+ran sum_plain_w256_wd0.1_s1.json: train 1.0  one-way clean 0.0  45.3s
+ran sum_dagger_w256_wd0.1_s0.json: train 1.0  one-way clean 0.0049  68.2s
+ran sum_dagger_w256_wd0.1_s1.json: train 1.0  one-way clean 0.0033  65.1s
+ran sum_plain_w256_wd1.0_s0.json: train 0.9891  one-way clean 0.0008  43.3s
+ran sum_plain_w256_wd1.0_s1.json: train 0.9891  one-way clean 0.0  36.6s
+ran sum_dagger_w256_wd1.0_s0.json: train 0.995  one-way clean 0.0033  51.1s
+ran sum_dagger_w256_wd1.0_s1.json: train 0.9934  one-way clean 0.0016  61.9s
+
+trans    wd arm s  train reach99 | fwd   revP  | 1-way: hits  mass   leak | MLP off: fwd | transpose off: 1-way revP | secs
+---------------------------------------------------------------------------------------------------------------------------
+attn   0.01  A  0  1.000    750 | 1.000 1.000 | 0.002  0.001  0.080 |    0.098    |         -      -        | 60.5
+attn   0.01  A  1  1.000    750 | 1.000 1.000 | 0.000  0.001  0.092 |    0.112    |         -      -        | 84.0
+attn   0.01  B  0  1.000    750 | 1.000 1.000 | 0.000  0.001  0.085 |    0.075    |       0.000  0.511      | 94.6
+attn   0.01  B  1  1.000    750 | 1.000 1.000 | 0.001  0.002  0.085 |    0.085    |       0.000  0.561      | 135.0
+attn   0.01  C  0  1.000    750 | 1.000 1.000 | 0.001  0.001  0.105 |    0.079    |         -      -        | 79.3
+attn   0.01  C  1  1.000    750 | 1.000 1.000 | 0.000  0.001  0.102 |    0.084    |         -      -        | 93.1
+attn   0.10  A  0  1.000    750 | 1.000 1.000 | 0.001  0.001  0.081 |    0.080    |         -      -        | 89.3
+attn   0.10  A  1  1.000    750 | 1.000 1.000 | 0.001  0.001  0.096 |    0.084    |         -      -        | 73.0
+attn   0.10  B  0  1.000    750 | 1.000 1.000 | 0.002  0.002  0.080 |    0.062    |       0.002  0.415      | 95.0
+attn   0.10  B  1  1.000    750 | 1.000 1.000 | 0.001  0.001  0.076 |    0.069    |       0.000  0.471      | 82.2
+attn   0.10  C  0  1.000    750 | 1.000 1.000 | 0.000  0.001  0.104 |    0.057    |         -      -        | 69.1
+attn   0.10  C  1  1.000    750 | 1.000 1.000 | 0.002  0.001  0.093 |    0.070    |         -      -        | 69.7
+attn   1.00  A  0  0.993    750 | 0.991 0.995 | 0.002  0.002  0.075 |    0.026    |         -      -        | 70.1
+attn   1.00  A  1  0.994    750 | 0.994 0.994 | 0.001  0.001  0.102 |    0.029    |         -      -        | 79.9
+attn   1.00  B  0  1.000   1000 | 0.999 1.000 | 0.000  0.001  0.082 |    0.016    |       0.000  0.240      | 107.8
+attn   1.00  B  1  0.998   1000 | 0.999 0.995 | 0.000  0.001  0.071 |    0.019    |       0.000  0.226      | 110.0
+attn   1.00  C  0  0.999    750 | 0.998 1.000 | 0.002  0.002  0.120 |    0.012    |         -      -        | 94.5
+attn   1.00  C  1  0.999    750 | 0.999 0.999 | 0.000  0.001  0.121 |    0.010    |         -      -        | 70.9
+sum    0.01  A  0  1.000   1000 | 1.000 1.000 | 0.000  0.001  0.123 |    0.000    |         -      -        | 48.9
+sum    0.01  A  1  1.000   1000 | 1.000 1.000 | 0.002  0.001  0.118 |    0.000    |         -      -        | 37.1
+sum    0.01  B  0  1.000   1000 | 1.000 1.000 | 0.004  0.003  0.146 |    0.000    |       0.000  0.104      | 81.7
+sum    0.01  B  1  1.000    750 | 1.000 1.000 | 0.003  0.002  0.156 |    0.000    |       0.002  0.097      | 58.1
+sum    0.10  A  0  1.000   1000 | 1.000 1.000 | 0.002  0.001  0.136 |    0.000    |         -      -        | 44.7
+sum    0.10  A  1  1.000   1000 | 1.000 1.000 | 0.000  0.001  0.116 |    0.000    |         -      -        | 45.3
+sum    0.10  B  0  1.000   1000 | 1.000 1.000 | 0.005  0.004  0.140 |    0.000    |       0.000  0.015      | 68.2
+sum    0.10  B  1  1.000    750 | 1.000 1.000 | 0.003  0.002  0.146 |    0.000    |       0.001  0.032      | 65.1
+sum    1.00  A  0  0.989   1000 | 0.990 0.988 | 0.001  0.001  0.200 |    0.000    |         -      -        | 43.3
+sum    1.00  A  1  0.989   1250 | 0.989 0.990 | 0.000  0.000  0.179 |    0.000    |         -      -        | 36.6
+sum    1.00  B  0  0.995   1000 | 0.996 0.993 | 0.003  0.003  0.189 |    0.000    |       0.000  0.000      | 51.1
+sum    1.00  B  1  0.993   1000 | 0.992 0.995 | 0.002  0.002  0.196 |    0.000    |       0.000  0.000      | 61.9
+
+chance hits@1 on one-way questions: 0.0012

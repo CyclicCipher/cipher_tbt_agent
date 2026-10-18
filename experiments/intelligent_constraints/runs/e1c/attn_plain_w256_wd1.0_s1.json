@@ -1,0 +1,1068 @@
+{
+ "mlp": "plain",
+ "m": 256,
+ "tied": true,
+ "frozen": true,
+ "transport": "attn",
+ "wd": 1.0,
+ "decay": "matrices",
+ "seed": 1,
+ "steps": 10000,
+ "lr": 0.001,
+ "batch": 512,
+ "d": 128,
+ "n_layer": 2,
+ "params": 395009,
+ "log": [
+  {
+   "step": 250,
+   "loss": 6.6277,
+   "train_acc": 0.0175,
+   "fwd": {
+    "hits": 0.0204,
+    "mass": 0.0023,
+    "leak": 0.0063
+   },
+   "rev_paired": {
+    "hits": 0.0119,
+    "mass": 0.0024,
+    "leak": 0.006
+   },
+   "rev_oneway": {
+    "hits": 0.0,
+    "mass": 0.0012,
+    "leak": 0.0061
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0012,
+    "leak": 0.0061
+   }
+  },
+  {
+   "step": 500,
+   "loss": 2.9589,
+   "train_acc": 0.6767,
+   "fwd": {
+    "hits": 0.6944,
+    "mass": 0.1463,
+    "leak": 0.0201
+   },
+   "rev_paired": {
+    "hits": 0.6416,
+    "mass": 0.1263,
+    "leak": 0.0221
+   },
+   "rev_oneway": {
+    "hits": 0.0016,
+    "mass": 0.0012,
+    "leak": 0.0306
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.0011,
+    "leak": 0.0306
+   }
+  },
+  {
+   "step": 750,
+   "loss": 0.746,
+   "train_acc": 0.9973,
+   "fwd": {
+    "hits": 0.9972,
+    "mass": 0.7501,
+    "leak": 0.0087
+   },
+   "rev_paired": {
+    "hits": 0.9976,
+    "mass": 0.7382,
+    "leak": 0.0091
+   },
+   "rev_oneway": {
+    "hits": 0.0016,
+    "mass": 0.0012,
+    "leak": 0.0609
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0011,
+    "leak": 0.0611
+   }
+  },
+  {
+   "step": 1000,
+   "loss": 0.6145,
+   "train_acc": 0.9971,
+   "fwd": {
+    "hits": 0.9972,
+    "mass": 0.8843,
+    "leak": 0.0055
+   },
+   "rev_paired": {
+    "hits": 0.9968,
+    "mass": 0.8839,
+    "leak": 0.005
+   },
+   "rev_oneway": {
+    "hits": 0.0016,
+    "mass": 0.0015,
+    "leak": 0.0817
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.0014,
+    "leak": 0.0816
+   }
+  },
+  {
+   "step": 1250,
+   "loss": 0.6125,
+   "train_acc": 0.9987,
+   "fwd": {
+    "hits": 0.9984,
+    "mass": 0.9246,
+    "leak": 0.0039
+   },
+   "rev_paired": {
+    "hits": 0.9992,
+    "mass": 0.9183,
+    "leak": 0.0051
+   },
+   "rev_oneway": {
+    "hits": 0.0,
+    "mass": 0.0008,
+    "leak": 0.0962
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0007,
+    "leak": 0.0965
+   }
+  },
+  {
+   "step": 1500,
+   "loss": 0.6327,
+   "train_acc": 0.9992,
+   "fwd": {
+    "hits": 1.0,
+    "mass": 0.9449,
+    "leak": 0.0031
+   },
+   "rev_paired": {
+    "hits": 0.9976,
+    "mass": 0.9329,
+    "leak": 0.0031
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0011,
+    "leak": 0.0958
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.001,
+    "leak": 0.096
+   }
+  },
+  {
+   "step": 1750,
+   "loss": 0.5854,
+   "train_acc": 0.9981,
+   "fwd": {
+    "hits": 0.9988,
+    "mass": 0.9407,
+    "leak": 0.0029
+   },
+   "rev_paired": {
+    "hits": 0.9968,
+    "mass": 0.9307,
+    "leak": 0.0049
+   },
+   "rev_oneway": {
+    "hits": 0.0016,
+    "mass": 0.0019,
+    "leak": 0.1022
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.0018,
+    "leak": 0.1022
+   }
+  },
+  {
+   "step": 2000,
+   "loss": 0.5661,
+   "train_acc": 0.9936,
+   "fwd": {
+    "hits": 0.992,
+    "mass": 0.925,
+    "leak": 0.0055
+   },
+   "rev_paired": {
+    "hits": 0.9968,
+    "mass": 0.9293,
+    "leak": 0.0036
+   },
+   "rev_oneway": {
+    "hits": 0.0024,
+    "mass": 0.0018,
+    "leak": 0.1014
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0024,
+    "mass": 0.0018,
+    "leak": 0.1015
+   }
+  },
+  {
+   "step": 2250,
+   "loss": 0.6041,
+   "train_acc": 0.9944,
+   "fwd": {
+    "hits": 0.9932,
+    "mass": 0.924,
+    "leak": 0.0041
+   },
+   "rev_paired": {
+    "hits": 0.9968,
+    "mass": 0.9271,
+    "leak": 0.0038
+   },
+   "rev_oneway": {
+    "hits": 0.0032,
+    "mass": 0.0019,
+    "leak": 0.1008
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0033,
+    "mass": 0.0019,
+    "leak": 0.1004
+   }
+  },
+  {
+   "step": 2500,
+   "loss": 0.5155,
+   "train_acc": 0.9968,
+   "fwd": {
+    "hits": 0.9968,
+    "mass": 0.9351,
+    "leak": 0.0037
+   },
+   "rev_paired": {
+    "hits": 0.9968,
+    "mass": 0.9205,
+    "leak": 0.0044
+   },
+   "rev_oneway": {
+    "hits": 0.0016,
+    "mass": 0.002,
+    "leak": 0.0945
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.002,
+    "leak": 0.0947
+   }
+  },
+  {
+   "step": 2750,
+   "loss": 0.5818,
+   "train_acc": 0.9968,
+   "fwd": {
+    "hits": 0.9964,
+    "mass": 0.9357,
+    "leak": 0.0031
+   },
+   "rev_paired": {
+    "hits": 0.9976,
+    "mass": 0.9384,
+    "leak": 0.0034
+   },
+   "rev_oneway": {
+    "hits": 0.0,
+    "mass": 0.001,
+    "leak": 0.0979
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.001,
+    "leak": 0.0981
+   }
+  },
+  {
+   "step": 3000,
+   "loss": 0.5475,
+   "train_acc": 0.9931,
+   "fwd": {
+    "hits": 0.9924,
+    "mass": 0.9319,
+    "leak": 0.0031
+   },
+   "rev_paired": {
+    "hits": 0.9945,
+    "mass": 0.9411,
+    "leak": 0.0025
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0014,
+    "leak": 0.094
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0013,
+    "leak": 0.0939
+   }
+  },
+  {
+   "step": 3250,
+   "loss": 0.5496,
+   "train_acc": 0.9968,
+   "fwd": {
+    "hits": 0.998,
+    "mass": 0.9515,
+    "leak": 0.0024
+   },
+   "rev_paired": {
+    "hits": 0.9945,
+    "mass": 0.947,
+    "leak": 0.0019
+   },
+   "rev_oneway": {
+    "hits": 0.0032,
+    "mass": 0.0021,
+    "leak": 0.0911
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0033,
+    "mass": 0.0021,
+    "leak": 0.0909
+   }
+  },
+  {
+   "step": 3500,
+   "loss": 0.5577,
+   "train_acc": 0.9987,
+   "fwd": {
+    "hits": 0.9988,
+    "mass": 0.9647,
+    "leak": 0.0018
+   },
+   "rev_paired": {
+    "hits": 0.9984,
+    "mass": 0.9595,
+    "leak": 0.0018
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0013,
+    "leak": 0.105
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0013,
+    "leak": 0.1053
+   }
+  },
+  {
+   "step": 3750,
+   "loss": 0.5689,
+   "train_acc": 0.9981,
+   "fwd": {
+    "hits": 0.9972,
+    "mass": 0.9473,
+    "leak": 0.0022
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.9629,
+    "leak": 0.0016
+   },
+   "rev_oneway": {
+    "hits": 0.0016,
+    "mass": 0.0016,
+    "leak": 0.0959
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.0016,
+    "leak": 0.0958
+   }
+  },
+  {
+   "step": 4000,
+   "loss": 0.5549,
+   "train_acc": 0.9995,
+   "fwd": {
+    "hits": 0.9992,
+    "mass": 0.9611,
+    "leak": 0.0019
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.956,
+    "leak": 0.0016
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0015,
+    "leak": 0.0999
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0014,
+    "leak": 0.1001
+   }
+  },
+  {
+   "step": 4250,
+   "loss": 0.5634,
+   "train_acc": 0.9989,
+   "fwd": {
+    "hits": 0.9988,
+    "mass": 0.9501,
+    "leak": 0.002
+   },
+   "rev_paired": {
+    "hits": 0.9992,
+    "mass": 0.9648,
+    "leak": 0.0012
+   },
+   "rev_oneway": {
+    "hits": 0.0,
+    "mass": 0.001,
+    "leak": 0.0951
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.001,
+    "leak": 0.0947
+   }
+  },
+  {
+   "step": 4500,
+   "loss": 0.4511,
+   "train_acc": 0.9958,
+   "fwd": {
+    "hits": 0.996,
+    "mass": 0.9464,
+    "leak": 0.0021
+   },
+   "rev_paired": {
+    "hits": 0.9953,
+    "mass": 0.9226,
+    "leak": 0.0036
+   },
+   "rev_oneway": {
+    "hits": 0.0024,
+    "mass": 0.0015,
+    "leak": 0.0976
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0024,
+    "mass": 0.0014,
+    "leak": 0.0978
+   }
+  },
+  {
+   "step": 4750,
+   "loss": 0.5352,
+   "train_acc": 0.9958,
+   "fwd": {
+    "hits": 0.9976,
+    "mass": 0.9505,
+    "leak": 0.0026
+   },
+   "rev_paired": {
+    "hits": 0.9921,
+    "mass": 0.919,
+    "leak": 0.0037
+   },
+   "rev_oneway": {
+    "hits": 0.0,
+    "mass": 0.0007,
+    "leak": 0.0942
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0007,
+    "leak": 0.0944
+   }
+  },
+  {
+   "step": 5000,
+   "loss": 0.4875,
+   "train_acc": 0.9957,
+   "fwd": {
+    "hits": 0.9948,
+    "mass": 0.9494,
+    "leak": 0.0026
+   },
+   "rev_paired": {
+    "hits": 0.9976,
+    "mass": 0.9557,
+    "leak": 0.0021
+   },
+   "rev_oneway": {
+    "hits": 0.0024,
+    "mass": 0.0014,
+    "leak": 0.0952
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0024,
+    "mass": 0.0014,
+    "leak": 0.0954
+   }
+  },
+  {
+   "step": 5250,
+   "loss": 0.5491,
+   "train_acc": 0.9963,
+   "fwd": {
+    "hits": 0.9948,
+    "mass": 0.9446,
+    "leak": 0.002
+   },
+   "rev_paired": {
+    "hits": 0.9992,
+    "mass": 0.9638,
+    "leak": 0.0015
+   },
+   "rev_oneway": {
+    "hits": 0.0024,
+    "mass": 0.0017,
+    "leak": 0.1027
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0024,
+    "mass": 0.0017,
+    "leak": 0.1028
+   }
+  },
+  {
+   "step": 5500,
+   "loss": 0.4438,
+   "train_acc": 0.9973,
+   "fwd": {
+    "hits": 0.996,
+    "mass": 0.945,
+    "leak": 0.0028
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.9597,
+    "leak": 0.0023
+   },
+   "rev_oneway": {
+    "hits": 0.0016,
+    "mass": 0.002,
+    "leak": 0.0986
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.0019,
+    "leak": 0.0988
+   }
+  },
+  {
+   "step": 5750,
+   "loss": 0.4555,
+   "train_acc": 0.9963,
+   "fwd": {
+    "hits": 0.9952,
+    "mass": 0.9486,
+    "leak": 0.0027
+   },
+   "rev_paired": {
+    "hits": 0.9984,
+    "mass": 0.9563,
+    "leak": 0.0023
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0008,
+    "leak": 0.1005
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0008,
+    "leak": 0.1004
+   }
+  },
+  {
+   "step": 6000,
+   "loss": 0.5024,
+   "train_acc": 0.9941,
+   "fwd": {
+    "hits": 0.9928,
+    "mass": 0.9382,
+    "leak": 0.0036
+   },
+   "rev_paired": {
+    "hits": 0.9968,
+    "mass": 0.9579,
+    "leak": 0.0027
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0011,
+    "leak": 0.1045
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0011,
+    "leak": 0.1046
+   }
+  },
+  {
+   "step": 6250,
+   "loss": 0.5356,
+   "train_acc": 0.9968,
+   "fwd": {
+    "hits": 0.9964,
+    "mass": 0.9476,
+    "leak": 0.0034
+   },
+   "rev_paired": {
+    "hits": 0.9976,
+    "mass": 0.9596,
+    "leak": 0.0023
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0015,
+    "leak": 0.0957
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0015,
+    "leak": 0.0961
+   }
+  },
+  {
+   "step": 6500,
+   "loss": 0.495,
+   "train_acc": 0.9926,
+   "fwd": {
+    "hits": 0.992,
+    "mass": 0.9424,
+    "leak": 0.0035
+   },
+   "rev_paired": {
+    "hits": 0.9937,
+    "mass": 0.941,
+    "leak": 0.0031
+   },
+   "rev_oneway": {
+    "hits": 0.0,
+    "mass": 0.0011,
+    "leak": 0.0975
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.001,
+    "leak": 0.0978
+   }
+  },
+  {
+   "step": 6750,
+   "loss": 0.5595,
+   "train_acc": 0.9835,
+   "fwd": {
+    "hits": 0.9824,
+    "mass": 0.9171,
+    "leak": 0.0046
+   },
+   "rev_paired": {
+    "hits": 0.9858,
+    "mass": 0.9189,
+    "leak": 0.0044
+   },
+   "rev_oneway": {
+    "hits": 0.0024,
+    "mass": 0.002,
+    "leak": 0.0778
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0024,
+    "mass": 0.002,
+    "leak": 0.0779
+   }
+  },
+  {
+   "step": 7000,
+   "loss": 0.4796,
+   "train_acc": 0.9785,
+   "fwd": {
+    "hits": 0.9764,
+    "mass": 0.9073,
+    "leak": 0.0057
+   },
+   "rev_paired": {
+    "hits": 0.9826,
+    "mass": 0.9153,
+    "leak": 0.0058
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0017,
+    "leak": 0.0835
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0017,
+    "leak": 0.0838
+   }
+  },
+  {
+   "step": 7250,
+   "loss": 0.5169,
+   "train_acc": 0.9949,
+   "fwd": {
+    "hits": 0.9932,
+    "mass": 0.954,
+    "leak": 0.0028
+   },
+   "rev_paired": {
+    "hits": 0.9984,
+    "mass": 0.9638,
+    "leak": 0.0019
+   },
+   "rev_oneway": {
+    "hits": 0.0016,
+    "mass": 0.0013,
+    "leak": 0.0905
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.0012,
+    "leak": 0.0906
+   }
+  },
+  {
+   "step": 7500,
+   "loss": 0.4784,
+   "train_acc": 0.9899,
+   "fwd": {
+    "hits": 0.9852,
+    "mass": 0.9371,
+    "leak": 0.0034
+   },
+   "rev_paired": {
+    "hits": 0.9992,
+    "mass": 0.97,
+    "leak": 0.0013
+   },
+   "rev_oneway": {
+    "hits": 0.0016,
+    "mass": 0.0014,
+    "leak": 0.1112
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.0014,
+    "leak": 0.1117
+   }
+  },
+  {
+   "step": 7750,
+   "loss": 0.6397,
+   "train_acc": 0.9769,
+   "fwd": {
+    "hits": 0.9776,
+    "mass": 0.9238,
+    "leak": 0.0033
+   },
+   "rev_paired": {
+    "hits": 0.9755,
+    "mass": 0.9263,
+    "leak": 0.0039
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0009,
+    "leak": 0.1067
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0009,
+    "leak": 0.107
+   }
+  },
+  {
+   "step": 8000,
+   "loss": 0.4895,
+   "train_acc": 0.9925,
+   "fwd": {
+    "hits": 0.9908,
+    "mass": 0.9516,
+    "leak": 0.0031
+   },
+   "rev_paired": {
+    "hits": 0.996,
+    "mass": 0.9604,
+    "leak": 0.0017
+   },
+   "rev_oneway": {
+    "hits": 0.0016,
+    "mass": 0.0013,
+    "leak": 0.1045
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.0013,
+    "leak": 0.1049
+   }
+  },
+  {
+   "step": 8250,
+   "loss": 0.5675,
+   "train_acc": 0.9894,
+   "fwd": {
+    "hits": 0.9904,
+    "mass": 0.9525,
+    "leak": 0.0034
+   },
+   "rev_paired": {
+    "hits": 0.9873,
+    "mass": 0.949,
+    "leak": 0.002
+   },
+   "rev_oneway": {
+    "hits": 0.0,
+    "mass": 0.0006,
+    "leak": 0.1113
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0006,
+    "leak": 0.1116
+   }
+  },
+  {
+   "step": 8500,
+   "loss": 0.666,
+   "train_acc": 0.9859,
+   "fwd": {
+    "hits": 0.9848,
+    "mass": 0.9414,
+    "leak": 0.0028
+   },
+   "rev_paired": {
+    "hits": 0.9881,
+    "mass": 0.9465,
+    "leak": 0.0032
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0013,
+    "leak": 0.0951
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0013,
+    "leak": 0.0951
+   }
+  },
+  {
+   "step": 8750,
+   "loss": 0.4401,
+   "train_acc": 0.9928,
+   "fwd": {
+    "hits": 0.994,
+    "mass": 0.9647,
+    "leak": 0.0024
+   },
+   "rev_paired": {
+    "hits": 0.9905,
+    "mass": 0.9478,
+    "leak": 0.0035
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0014,
+    "leak": 0.0866
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0014,
+    "leak": 0.087
+   }
+  },
+  {
+   "step": 9000,
+   "loss": 0.4611,
+   "train_acc": 0.9934,
+   "fwd": {
+    "hits": 0.9944,
+    "mass": 0.9652,
+    "leak": 0.0018
+   },
+   "rev_paired": {
+    "hits": 0.9913,
+    "mass": 0.9524,
+    "leak": 0.002
+   },
+   "rev_oneway": {
+    "hits": 0.0,
+    "mass": 0.0008,
+    "leak": 0.0932
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0008,
+    "leak": 0.0936
+   }
+  },
+  {
+   "step": 9250,
+   "loss": 0.5074,
+   "train_acc": 0.9849,
+   "fwd": {
+    "hits": 0.9976,
+    "mass": 0.9643,
+    "leak": 0.002
+   },
+   "rev_paired": {
+    "hits": 0.9597,
+    "mass": 0.9093,
+    "leak": 0.0041
+   },
+   "rev_oneway": {
+    "hits": 0.0,
+    "mass": 0.0005,
+    "leak": 0.0989
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0005,
+    "leak": 0.0992
+   }
+  },
+  {
+   "step": 9500,
+   "loss": 0.4501,
+   "train_acc": 0.9894,
+   "fwd": {
+    "hits": 0.9868,
+    "mass": 0.9489,
+    "leak": 0.0029
+   },
+   "rev_paired": {
+    "hits": 0.9945,
+    "mass": 0.9549,
+    "leak": 0.0022
+   },
+   "rev_oneway": {
+    "hits": 0.0016,
+    "mass": 0.0016,
+    "leak": 0.1072
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.0016,
+    "leak": 0.1076
+   }
+  },
+  {
+   "step": 9750,
+   "loss": 0.5141,
+   "train_acc": 0.9787,
+   "fwd": {
+    "hits": 0.97,
+    "mass": 0.9169,
+    "leak": 0.0042
+   },
+   "rev_paired": {
+    "hits": 0.996,
+    "mass": 0.9621,
+    "leak": 0.0028
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0012,
+    "leak": 0.1069
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0012,
+    "leak": 0.1071
+   }
+  },
+  {
+   "step": 10000,
+   "loss": 0.5196,
+   "train_acc": 0.9942,
+   "fwd": {
+    "hits": 0.9944,
+    "mass": 0.9529,
+    "leak": 0.0022
+   },
+   "rev_paired": {
+    "hits": 0.9937,
+    "mass": 0.954,
+    "leak": 0.002
+   },
+   "rev_oneway": {
+    "hits": 0.0008,
+    "mass": 0.0014,
+    "leak": 0.1013
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0014,
+    "leak": 0.1016
+   }
+  }
+ ],
+ "final": {
+  "step": 10000,
+  "loss": 0.5196,
+  "train_acc": 0.9942,
+  "fwd": {
+   "hits": 0.9944,
+   "mass": 0.9529,
+   "leak": 0.0022
+  },
+  "rev_paired": {
+   "hits": 0.9937,
+   "mass": 0.954,
+   "leak": 0.002
+  },
+  "rev_oneway": {
+   "hits": 0.0008,
+   "mass": 0.0014,
+   "leak": 0.1013
+  },
+  "rev_oneway_clean": {
+   "hits": 0.0008,
+   "mass": 0.0014,
+   "leak": 0.1016
+  }
+ },
+ "reach99": 750,
+ "chance": 0.0012,
+ "final_mlp_off": {
+  "fwd": {
+   "hits": 0.0288,
+   "mass": 0.0274,
+   "leak": 0.0188
+  },
+  "rev_paired": {
+   "hits": 0.0277,
+   "mass": 0.0233,
+   "leak": 0.0132
+  },
+  "rev_oneway": {
+   "hits": 0.0016,
+   "mass": 0.0015,
+   "leak": 0.0142
+  },
+  "rev_oneway_clean": {
+   "hits": 0.0016,
+   "mass": 0.0015,
+   "leak": 0.0142
+  }
+ },
+ "secs": 79.9
+}

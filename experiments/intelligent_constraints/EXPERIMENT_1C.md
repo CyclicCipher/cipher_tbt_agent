@@ -85,6 +85,74 @@ relations into b), about 0.3–0.5.
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/e1c/`, log `runs/e1c_log.txt`)
 
-*(to be filled in after the runs)*
+**One run broke the 2-minute rule:** `attn_dagger_w256_wd0.01_s1` took 135 s, against about 90 s in the smoke test. The
+laptop GPU slows down under sustained load. Every other run took 37–110 s.
+
+| transport | wd | arm | one-way clean (s0, s1) | MLP off: fwd (s0, s1) | transpose off: paired reverse (s0, s1) | train_acc (s0, s1) |
+|---|---|---|---|---|---|---|
+| attn | 0.01 | A | 0.002, 0.000 | 0.098, 0.112 | – | 1.000, 1.000 |
+| | | B | 0.000, 0.001 | 0.075, 0.085 | 0.511, 0.561 | 1.000, 1.000 |
+| | | C | 0.001, 0.000 | 0.079, 0.084 | – | 1.000, 1.000 |
+| attn | 0.1 | A | 0.001, 0.001 | 0.080, 0.084 | – | 1.000, 1.000 |
+| | | B | 0.002, 0.001 | 0.062, 0.069 | 0.415, 0.471 | 1.000, 1.000 |
+| | | C | 0.000, 0.002 | 0.057, 0.070 | – | 1.000, 1.000 |
+| attn | 1.0 | A | 0.002, 0.001 | 0.026, 0.029 | – | 0.993, 0.994 |
+| | | B | 0.000, 0.000 | 0.016, 0.019 | 0.240, 0.226 | 1.000, 0.998 |
+| | | C | 0.002, 0.000 | 0.012, 0.010 | – | 0.999, 0.999 |
+| sum | 0.01 | A | 0.000, 0.002 | 0.000, 0.000 | – | 1.000, 1.000 |
+| | | B | 0.004, 0.003 | 0.000, 0.000 | 0.104, 0.097 | 1.000, 1.000 |
+| sum | 0.1 | A | 0.002, 0.000 | 0.000, 0.000 | – | 1.000, 1.000 |
+| | | B | 0.005, 0.003 | 0.000, 0.000 | 0.015, 0.032 | 1.000, 1.000 |
+| sum | 1.0 | A | 0.001, 0.000 | 0.000, 0.000 | – | **0.989, 0.989** |
+| | | B | 0.003, 0.002 | 0.000, 0.000 | **0.000, 0.000** | 0.995, 0.993 |
+
+Chance on one-way questions is 0.0012. Leak is 0.07–0.12 with attention, and 0.12–0.20 with the fixed sum.
+
+**The apparatus now works.**
+- At m = 256 with learned attention, switching the MLPs off drops forward accuracy from 1.00 to 0.10 at weight decay
+  0.01, and to 0.01–0.03 at 1.0. So the MLPs hold about 90% of the facts at low weight decay and about 98% at high.
+- The exploratory prediction (the MLPs' share rises with weight decay) holds.
+- With the fixed sum, the MLPs hold everything, by construction.
+- So 1c, unlike 1 and 1b, tests the constraint where the facts are.
+
+**Against the predictions:**
+- **P1 (baseline cursed): holds everywhere.** A is at 0.000–0.002.
+- **P2 (the dagger transfers when codes match): REFUTED.** B_sum is at 0.002–0.005 at all three weight decays,
+  against the 0.02 refutation line. Even with an entity arriving at the MLP as exactly its own output code, nothing
+  transfers to one-way facts.
+- **P3 (weight decay helps transfer): no.** B_sum averages 0.0035 at weight decay 0.01 and 0.0025 at 1.0.
+- **P4 (transfer through learned attention): not supported.** B_attn is at 0.000–0.002.
+- **P5 (reuse grows with weight decay): first half holds, second half doesn't apply.**
+  - Switching the transpose off drops paired reverse accuracy more and more as weight decay rises:
+    - attention: to 0.54 at weight decay 0.01, 0.44 at 0.1, 0.23 at 1.0;
+    - fixed sum: to 0.10, 0.02 and **0.000**.
+  - At weight decay 1.0 with the fixed sum, *every* paired reverse fact is answered through the transpose.
+  - The second half (switching the transpose off kills one-way transfer) has nothing to act on.
+- **P6 (cost):** the plain fixed-sum model at weight decay 1.0 under-fits slightly (train_acc 0.989 < 0.99), and is
+  flagged. Every other run memorises.
+
+**What this shows.** The dagger memory does what weight decay asks of it: it answers paired reverse facts through the
+transpose, entirely so at weight decay 1.0. But it still transfers nothing to one-way facts, even when codes match by
+construction. Matched codes plus a penalty against duplicates are not enough.
+
+**Hypothesis for the failure** (mine, not yet tested; it explains the pattern, but it is not established):
+
+- The forward MLP's selectivity lives in its *keys* and their thresholds. Each hidden unit is a sharp detector of
+  certain (subject, relation) cues.
+- Its *values* are diffuse writers. With 3,000 facts on 256 units, each value is a superposition of many answers.
+- The transpose read uses the values as keys. For a one-way fact, nothing trained its unit's value to *detect* b, only to
+  help *write* b, so σ(Vᵀ c_b) fires unselectively.
+- The read then behaves like a linear associative memory. Kosko's bidirectional associative memory, the linear case,
+  holds only on the order of d pairs (d = 128 here), far fewer than 3,000.
+- For paired facts, the transpose path receives its own training signal, so the model makes some values selective for
+  those cues: a second, dedicated store. That is "separate storage", now inside the transpose path.
+
+**What the hypothesis predicts:**
+1. **Transfer should appear when facts are few relative to d,** and fade as facts grow. A fact-count sweep at fixed d
+   tests this.
+2. **Sparse, fact-specific hidden units** (each unit storing few facts, as in the hippocampus's sparse codes) should
+   make values selective, and should restore the transfer at full scale.
+
+This is the next experiment if the user wants it.
