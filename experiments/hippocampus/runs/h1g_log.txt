@@ -1,0 +1,26 @@
+ran reader_PS4_s6.json in 101.5s
+ran eval_PS4_s6.json in 2.7s
+ran reader_PS4_s7.json in 100.8s
+ran eval_PS4_s7.json in 2.6s
+ran reader_PS4_s8.json in 98.9s
+ran eval_PS4_s8.json in 2.7s
+ran reader_PS4_s9.json in 106.4s
+ran eval_PS4_s9.json in 2.9s
+ran reader_PS8_s6.json in 155.6s
+ran eval_PS8_s6.json in 2.6s
+ran reader_PS8_s7.json in 136.5s
+ran eval_PS8_s7.json in 3.1s
+ran reader_PS8_s8.json in 125.0s
+ran eval_PS8_s8.json in 3.1s
+ran reader_PS8_s9.json in 127.4s
+ran eval_PS8_s9.json in 2.8s
+
+reader | shuffled: REV / FWD | ranked: REV / FWD | shuffled classes rev ; fwd | curves rev | fwd | secs
+  PS4 s6 | 0.187 / 0.084 | 0.117 / 0.052 | {'correct': 0.1874, 'rel_ok_entity_wrong': 0.6838, 'entity_ok_rel_wrong': 0.0008, 'other_in_context': 0.0057, 'not_in_context': 0.1222} ; {'correct': 0.0843, 'rel_ok_entity_wrong': 0.6657, 'entity_ok_rel_wrong': 0.0022, 'other_in_context': 0.0044, 'not_in_context': 0.2433} | 0.04 0.13 0.15 0.15 0.16 0.17 0.17 0.19 | 0.02 0.05 0.07 0.08 0.07 0.07 0.08 0.07 | 101.5
+  PS4 s7 | 0.924 / 0.066 | 0.934 / 0.070 | {'correct': 0.9242, 'rel_ok_entity_wrong': 0.0676, 'entity_ok_rel_wrong': 0.0057, 'other_in_context': 0.0, 'not_in_context': 0.0024} ; {'correct': 0.0658, 'rel_ok_entity_wrong': 0.6361, 'entity_ok_rel_wrong': 0.0007, 'other_in_context': 0.0178, 'not_in_context': 0.2796} | 0.06 0.20 0.47 0.75 0.86 0.91 0.92 0.93 | 0.01 0.04 0.04 0.06 0.06 0.06 0.07 0.06 | 100.8
+  PS4 s8 | 0.972 / 0.103 | 0.967 / 0.138 | {'correct': 0.9715, 'rel_ok_entity_wrong': 0.0236, 'entity_ok_rel_wrong': 0.0049, 'other_in_context': 0.0, 'not_in_context': 0.0} ; {'correct': 0.1028, 'rel_ok_entity_wrong': 0.6509, 'entity_ok_rel_wrong': 0.0022, 'other_in_context': 0.0104, 'not_in_context': 0.2337} | 0.04 0.18 0.29 0.76 0.94 0.96 0.97 0.97 | 0.03 0.05 0.07 0.06 0.08 0.09 0.10 0.10 | 98.9
+  PS4 s9 | 0.188 / 0.104 | 0.195 / 0.109 | {'correct': 0.1883, 'rel_ok_entity_wrong': 0.7099, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0098, 'not_in_context': 0.0921} ; {'correct': 0.1043, 'rel_ok_entity_wrong': 0.7115, 'entity_ok_rel_wrong': 0.0022, 'other_in_context': 0.0052, 'not_in_context': 0.1768} | 0.03 0.08 0.14 0.17 0.19 0.19 0.19 0.19 | 0.02 0.05 0.07 0.07 0.09 0.10 0.10 0.11 | 106.4
+  PS8 s6 | 0.959 / 0.081 | 0.826 / 0.112 | {'correct': 0.9593, 'rel_ok_entity_wrong': 0.0285, 'entity_ok_rel_wrong': 0.0057, 'other_in_context': 0.0008, 'not_in_context': 0.0057} ; {'correct': 0.0814, 'rel_ok_entity_wrong': 0.6294, 'entity_ok_rel_wrong': 0.0015, 'other_in_context': 0.0052, 'not_in_context': 0.2825} | 0.05 0.10 0.20 0.76 0.93 0.96 0.96 0.96 | 0.03 0.06 0.07 0.06 0.06 0.08 0.08 0.09 | 155.6
+  PS8 s7 | 0.976 / 0.060 | 0.985 / 0.075 | {'correct': 0.9756, 'rel_ok_entity_wrong': 0.0139, 'entity_ok_rel_wrong': 0.0081, 'other_in_context': 0.0, 'not_in_context': 0.0024} ; {'correct': 0.0599, 'rel_ok_entity_wrong': 0.5902, 'entity_ok_rel_wrong': 0.0007, 'other_in_context': 0.0081, 'not_in_context': 0.341} | 0.06 0.15 0.21 0.88 0.96 0.97 0.98 0.98 | 0.02 0.06 0.06 0.06 0.05 0.06 0.07 0.07 | 136.5
+  PS8 s8 | 0.976 / 0.157 | 0.979 / 0.236 | {'correct': 0.9764, 'rel_ok_entity_wrong': 0.0139, 'entity_ok_rel_wrong': 0.0041, 'other_in_context': 0.0, 'not_in_context': 0.0057} ; {'correct': 0.1568, 'rel_ok_entity_wrong': 0.5607, 'entity_ok_rel_wrong': 0.0015, 'other_in_context': 0.0022, 'not_in_context': 0.2788} | 0.13 0.19 0.95 0.97 0.97 0.98 0.98 0.98 | 0.02 0.05 0.05 0.05 0.12 0.14 0.15 0.16 | 125.0
+  PS8 s9 | 0.970 / 0.092 | 0.972 / 0.106 | {'correct': 0.9698, 'rel_ok_entity_wrong': 0.0212, 'entity_ok_rel_wrong': 0.0057, 'other_in_context': 0.0, 'not_in_context': 0.0033} ; {'correct': 0.0925, 'rel_ok_entity_wrong': 0.6065, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0096, 'not_in_context': 0.2914} | 0.04 0.09 0.32 0.93 0.96 0.97 0.97 0.97 | 0.02 0.05 0.07 0.06 0.07 0.07 0.08 0.07 | 127.4

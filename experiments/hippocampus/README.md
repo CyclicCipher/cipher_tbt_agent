@@ -156,6 +156,12 @@ The plan is written, with the compression mechanisms in §2b.
 - The other seed did not, and forward was not learned in the successful run.
 - More seeds and longer runs are next.
 
+**H1g (PoPE reliability): done.**
+- Reverse content matching breaks through in **4 of 4 seeds with twice the updates** (2 of 4 without).
+- Forward is never learned.
+- ⚠ The 8,000-step runs broke the 2-minute rule (125–156 s).
+- Next: non-causal attention (H1h).
+
 `PLAN.md` §0 holds the learnings so far.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.
