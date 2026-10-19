@@ -31,6 +31,7 @@ class Store:
         self.surprise, self.evidence, self.last = [], [], []
         self.where = {}                                        # episode tokens -> row ids (for diagnostics)
         self.step = 0
+        self.expansion = None                                  # H2b: (vocab,) learned partner token per token, or -1
 
     def __len__(self):
         return self.rows.shape[0]
@@ -84,6 +85,10 @@ class Store:
         if len(self) == 0:
             return torch.full((qtoks.shape[0], R), -1, dtype=torch.long, device=self.device)
         q = self.key(qtoks.to(self.device))
+        if self.expansion is not None:                          # add the learned partners' codes to the query
+            ex = self.expansion.to(self.device)[qtoks.to(self.device)]
+            c = self.codes[ex.clamp(min=0)] * (ex >= 0)[..., None]
+            q = torch.maximum(q, c.amax(1)) if self.index == "sparse" else q + c.sum(1)
         if self.index == "sparse":
             s = q @ self.keys.T                                 # exact overlap counts
             s = s + 0.5 * torch.rand(s.shape, device=self.device, generator=gen)   # random tie-break, < 1 bit

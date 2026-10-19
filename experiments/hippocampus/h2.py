@@ -30,12 +30,12 @@ PHASES, QUERIES, CAP, ZIPF = 24, 2000, 3000, 1.0
 PRIOR_AGE = QUERIES                                   # value = (evidence + 1) / (age + PRIOR_AGE), age in queries
 
 
-def stream_world():
+def stream_world(stream_seed=STREAM_SEED):
     facts = set()
     for w in STREAM_WORLDS:
         facts |= set(make_facts(seed=w).facts)
     facts = sorted(facts)
-    rng = random.Random(STREAM_SEED)
+    rng = random.Random(stream_seed)
     rng.shuffle(facts)                                                # arrival order
     ranks = list(range(1, len(facts) + 1))
     rng.shuffle(ranks)
@@ -99,18 +99,23 @@ def evict(store, policy, cap, pop, rng):
     return n
 
 
-def run_stream(policy, seed):
+def run_stream(policy, seed, stream_seed=STREAM_SEED, expand=False):
+    """H2: stream_seed 0, no expansion. H2b adds stream seeds 1, 2 and the learned query expansion."""
     t0 = time.time()
     net = Net(VOCAB, ctx=CTX, **MODEL).to(DEV)
     net.load_state_dict(torch.load(OUT / f"reader_s{seed}.pt", map_location=DEV))
     net.eval()
-    gen = torch.Generator(device=DEV).manual_seed(STREAM_SEED)
-    rng = random.Random(STREAM_SEED)
-    facts, pop, fwd, rev = stream_world()
+    gen = torch.Generator(device=DEV).manual_seed(stream_seed)
+    rng = random.Random(stream_seed)
+    facts, pop, fwd, rev = stream_world(stream_seed)
     chunks = [facts[i * len(facts) // PHASES:(i + 1) * len(facts) // PHASES] for i in range(PHASES)]
     probe = [question(f, k, fwd, rev) for f in chunks[0] for k in ("fwd", "rev")]
     store = Store(VOCAB, "sparse")
+    if expand:
+        from expand import expansion_table
+        store.expansion = expansion_table()
     cap = None if policy == "uncapped" else CAP
+    per_fact = {}                                                     # fact -> [hits, asks]: the per-fact score
     seen, log = [], []
     tot = {"fwd": [0, 0], "rev": [0, 0]}
     for ph, chunk in enumerate(chunks, 1):
@@ -127,6 +132,9 @@ def run_stream(policy, seed):
             for q, h in zip(part, hits):
                 ph_hits[q[2]][0] += h
                 ph_hits[q[2]][1] += 1
+                pf_ = per_fact.setdefault((q[3], q[2]), [0, 0])
+                pf_[0] += h
+                pf_[1] += 1
             credit(store, part, pred, ids)
             store.step += len(part)
         for k in tot:
@@ -138,13 +146,17 @@ def run_stream(policy, seed):
         pf = [h for h, q in zip(ph_probe, probe) if q[2] == "fwd"]
         pr = [h for h, q in zip(ph_probe, probe) if q[2] == "rev"]
         rr = [x for x, q in zip(recall, probe) if q[2] == "rev"]
+        fr = [x for x, q in zip(recall, probe) if q[2] == "fwd"]
         log.append(dict(phase=ph, written=len(w), evicted=evicted, rows=len(store),
                         online_fwd=round(ph_hits["fwd"][0] / ph_hits["fwd"][1], 4),
                         online_rev=round(ph_hits["rev"][0] / ph_hits["rev"][1], 4),
                         probe_fwd=round(sum(pf) / len(pf), 4), probe_rev=round(sum(pr) / len(pr), 4),
-                        probe_rev_recall=round(sum(rr) / len(rr), 4)))
-    return dict(policy=policy, seed=seed, cap=cap, phases=PHASES, queries=QUERIES, zipf=ZIPF, prior_age=PRIOR_AGE,
-                facts=len(facts), log=log,
+                        probe_rev_recall=round(sum(rr) / len(rr), 4), probe_fwd_recall=round(sum(fr) / len(fr), 4)))
+    pf_score = {k: round(sum(h / n for (f, kk), (h, n) in per_fact.items() if kk == k) /
+                         max(1, sum(1 for (f, kk) in per_fact if kk == k)), 4) for k in ("fwd", "rev")}
+    return dict(policy=policy, seed=seed, stream_seed=stream_seed, expand=expand, cap=cap, phases=PHASES,
+                queries=QUERIES, zipf=ZIPF, prior_age=PRIOR_AGE, facts=len(facts), log=log,
+                per_fact_fwd=pf_score["fwd"], per_fact_rev=pf_score["rev"],
                 online_fwd=round(tot["fwd"][0] / tot["fwd"][1], 4), online_rev=round(tot["rev"][0] / tot["rev"][1], 4),
                 written_total=sum(l["written"] for l in log), rows_final=len(store),
                 bytes_final=len(store) * store.row_bytes(), secs=round(time.time() - t0, 1))
