@@ -5,8 +5,40 @@ to design a 'hippocampus module' for a standard transformer, how would you do it
 folder with its own planning doc. What will the architecture of this hippocampus be? A neural net? A database? Some kind
 of VSA/HDC system?"
 
-Nothing here has been run. Every experiment below is planned, and each will be pre-registered in its own
-`EXPERIMENT_*.md` before it runs.
+Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
+
+---
+
+## 0. Status and learnings (updated 2026-10-18, after H1 and H1b)
+
+**Results so far:**
+
+| experiment | result |
+|---|---|
+| **H1** (`EXPERIMENT_H1.md`) | One write per fact gives reverse access at 38–53%. Weights alone give ≤ 0.9% even after 64 exposures, with the converse tokens taught on the same world (chance 0.12%). Forward: 1 write against 8–64 exposures. Retrieval recall is 1.00, so the reader is the limit. The surprise gate re-wrote 19–21% of facts on a second presentation (one-to-many facts). |
+| **H1b** (`EXPERIMENT_H1B.md`) | The reader with `torch.compile`, 4,500 steps and cosine decay (**B2**) gives **83–93% reverse and 95–96% forward from one write**. The familiarity gate gives **0 duplicates**. The slot embedding (B3) hurt (stuck at 0.50). |
+
+**Learnings that change the design:**
+1. **The reversal curse is a property of where knowledge is stored.** A store read by attention does not have it: the
+   in-context mechanism, plus a direction-free index. This is the module's main justification so far.
+2. **The write gate needs recognition before surprise.** Surprise is the wrong measure for set-valued answers: a reader
+   that correctly spreads probability over k answers has surprise ≥ log₂ k. The familiarity check (pattern completion on
+   the index, verified against the stored tokens) dedupes exactly and cheaply, and is the hippocampus's own recognition
+   signal. The write rule is now: **write iff not familiar AND surprise > τ.**
+3. **Readers stall at about 0.5 reverse, then break through as the learning rate decays.**
+   - The plateau is consistent with a partly relation-blind reader (a random episode with b as object scores 0.386).
+   - The breakthrough came only with the decaying learning rate and more steps.
+   - The reader's training schedule matters as much as its architecture.
+   - Save predictions in future runs, to classify the errors.
+4. **Factoring position into (episode, slot) did not help here.** That is not a general verdict on factored position;
+   it did not pay in this reader.
+5. **At 3,000 episodes, the sparse and the dense index perform alike.** Pattern separation has not yet been tested at a
+   scale where it should matter. Retrieval *crowding* is expected first: an entity with more episodes than the R = 12
+   read slots. H2 tests this.
+6. **Compression tiers 1–2 (§2b) work:** exact dedupe, and 14-byte rows. Tiers 3–5 are untested.
+
+**Reader configuration carried forward:** B2. That is 4 layers, d = 128, read R = 12, θ = 20 bits, τ = 2 bits,
+compile + fused AdamW, 4,500 steps, cosine to 10%, and the familiarity gate.
 
 ---
 
@@ -101,9 +133,13 @@ measured.
      attends to it as to ordinary context.
    - **Version 2 (H4):** insert stored layer-ℓ keys and values instead of re-reading the tokens. This is cheaper, but the
      stored states go stale when the weights change.
-2. **Write.** After a segment is processed, compute each episode's surprise, meaning its loss under the system *with* the
-   current memory. Write it only if the surprise exceeds τ, that is, only if it refutes everything the system already
-   knows (ZipLearn's "create only on refutation").
+2. **Write.** After a segment is processed, first ask the store whether it **recognises** each episode. Recognition is
+   pattern completion on the index (a row whose index contains the episode's whole code), verified against that row's
+   tokens. Recognised episodes are not written. For the rest, compute the surprise, meaning the loss under the system
+   *with* the current memory. Write only if it exceeds τ: only if it refutes everything the system already knows
+   (ZipLearn's "create only on refutation").
+   - *Learned in H1/H1b:* surprise alone re-wrote 14–21% of facts on a second presentation, because set-valued answers
+     look surprising to a correct reader. Recognition dedupes exactly.
 3. **Sleep** (consolidation), every S writes:
    - replay episodes by priority: surprise × (1 + evidence) × recency;
    - for each one, put it in context and let the model generate its in-context inferences: the reverse statement, and
@@ -131,9 +167,9 @@ experiment that measures it.
 
 | # | mechanism | what it saves | measured in |
 |---|---|---|---|
-| 1 | **Write gate: store only refutations.** An episode is written only if the system *with* its current memory finds it surprising (> τ bits). What the weights or the store already predict costs nothing. This is ZipLearn's "create only on refutation". | duplicates and predictable material | **H1**: duplicates written when the same facts are presented again |
-| 2 | **Minimal rows.** A row is the episode's token ids plus about 8 bytes of metadata. The index codes are a fixed function of the token ids, so they cost nothing to store. The overlap matrix is a cache, and an inverted index over token ids is the scalable replacement. | index storage | **H1**: bytes per stored fact |
-| 3 | **Consolidation, then eviction.** Sleep moves an episode's content into the weights (with its self-generated inferences). An episode the weights then predict without memory is dropped. The store becomes a *buffer* of not-yet-compressed knowledge: its steady-state size tracks the rate of new information × the consolidation lag, not the total knowledge. | everything consolidated | **H2/H3**: store size over a stream |
+| 1 | **Write gate: store only refutations.** First recognition (familiarity: already stored?), then surprise (> τ bits). What the weights or the store already hold costs nothing. This is ZipLearn's "create only on refutation". | duplicates and predictable material | **H1/H1b, WORKS:** surprise alone let through 19–21% duplicates; with recognition, **0** |
+| 2 | **Minimal rows.** A row is the episode's token ids plus about 8 bytes of metadata. The index codes are a fixed function of the token ids, so they cost nothing to store. The overlap matrix is a cache, and an inverted index over token ids is the scalable replacement. | index storage | **H1, WORKS:** 14 bytes per fact (the cache is 256 bytes per row) |
+| 3 | **Consolidation, then eviction.** Sleep moves an episode's content into the weights (with its self-generated inferences). An episode the weights then predict without memory is dropped. The store becomes a *buffer* of not-yet-compressed knowledge: its steady-state size tracks the rate of new information × the consolidation lag, not the total knowledge. | everything consolidated | **H2** (eviction by value without consolidation), **H3** (consolidation) |
 | 4 | **Merge into schemas** (ZipLearn rule 3, MERGE). Episodes that differ in one slot become one schema plus a list of slot values. Repeated structure is stored once. | shared structure | **H2** (designed when it is built) |
 | 5 | **Entropy-coded rows** (optional). Store an episode as its arithmetic code under the model, about −log₂ p bits, in place of raw token ids. It can be decoded only with the weights that encoded it, so rows are re-encoded at sleep. | per-row bits, down to the surprise | **H4** option |
 
@@ -156,9 +192,11 @@ is the same two-part code (description + exceptions) that ZipLearn priced.
 
 ---
 
-## 4. Experiments (planned; each pre-registered before it runs)
+## 4. Experiments (each pre-registered before it runs)
 
-- **H1 — store plus read on synthetic facts.**
+- **H1 — store plus read on synthetic facts. DONE** (§0). Arm D (causal-state index) was dropped from the pre-registration
+  as a RAG-like arm; it may come back if direction-free retrieval needs defending.
+- **H1b — a stronger reader and the familiarity gate. DONE** (§0).
   - Reuse `../intelligent_constraints/data.py`, with entity codes frozen random so the test facts' entities are as
     representable as the training ones.
   - **Train the read skill** on training facts: their episodes are in the store, and questions are asked in both
@@ -172,8 +210,13 @@ is the same two-part code (description + exceptions) that ZipLearn priced.
       retrieval.
   - **Main predictions:** B answers reverse questions about once-written facts far above A. D's reverse retrieval is
     worse than B's.
-- **H2 — continual stream.** Facts arrive in sequence and the store is capped. Measure retention and interference, with
-  eviction by value against first-in-first-out.
+- **H2 — continual stream** (`EXPERIMENT_H2.md`, pre-registered).
+  - 11,930 facts (worlds 100–103) arrive in 24 phases, interleaved with 2,000 queries per phase drawn by Zipf
+    popularity.
+  - The store is uncapped, or capped at 3,000 rows with fifo, random, value or oracle eviction.
+  - **Value** = (evidence + 1) / (age + 2,000): a usefulness rate with a prior, where evidence counts the times a row
+    supplied the reader's answer.
+  - **Measures:** crowding (interference without weight interference), forgetting by value, and online accuracy.
 - **H3 — consolidation.** Sleep with and without self-generated reverse inferences, then empty the store and test the
   weights. Replay order (parts first vs random) is a factor, following ZipLearn E14.
 - **H4 — contextual codes and stored states.** Codes from layer-ℓ states, and stored keys/values instead of re-reading
@@ -202,6 +245,14 @@ is the same two-part code (description + exceptions) that ZipLearn priced.
    interleaved replay lets gradient descent find what episodes share.
 7. **Expected size of the gains** (from ZipLearn E37): large on rare, new and shifted data, small on bulk text the
    weights already know.
+8. **Retrieval crowding** (seen in H2's smoke test): when an entity has more episodes than the R read slots, a reverse
+   cue overlaps all of them equally. Recall then falls (1.00 → 0.42 as the store grows to 11,930 rows). Candidate fixes:
+   - a query code that includes the converse relation's *learned* partner;
+   - a two-stage read (a coarse set, then reranking by the reader);
+   - a larger R;
+   - eviction or consolidation that keeps an entity's live episodes few.
+9. **Readers stall, then break through** (H1b). Budgets and schedules must allow for the late transition. Seeds can
+   differ in when it comes.
 
 ---
 

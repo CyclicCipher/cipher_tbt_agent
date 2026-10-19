@@ -183,7 +183,7 @@ SLOTS = [0] + [1, 2, 3, 4] * R + [5, 6]          # H1b: [MEM], (a, r, b, [SEP]) 
 
 
 def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500, fast=False, cosine=False, slots=False,
-               familiarity=False):
+               familiarity=False, save=None):
     """H1 defaults; H1b: fast (torch.compile + fused AdamW), cosine (decay to 10%), slots (slot embedding),
     familiarity (recognition before the surprise gate)."""
     t0 = time.time()
@@ -234,6 +234,8 @@ def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500, fast
     wrong = Store(VOCAB, index)                                # leak control: another world's facts in the store
     wrong.write(episodes(make_facts(seed=LEAK_WORLD)))
     res["leak_control"] = eval_mem(net, wrong, sets, gen)
+    if save:                                                   # the reader's weights (git-ignored), for H2/H3
+        torch.save(net.state_dict(), save)
     res["secs"] = round(time.time() - t0, 1)
     return res
 

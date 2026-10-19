@@ -50,6 +50,19 @@ class Store:
         self.surprise += [None] * n if surprise is None else [float(s) for s in surprise]
         self.evidence += [0] * n
         self.last += [self.step] * n
+        self.born = getattr(self, "born", []) + [self.step] * n
+
+    def remove(self, ids):
+        """Evict rows (H2): rebuild the table without them."""
+        drop = set(int(i) for i in ids)
+        keep = [i for i in range(len(self)) if i not in drop]
+        k = torch.tensor(keep, dtype=torch.long, device=self.device)
+        self.rows, self.keys = self.rows[k], self.keys[k]
+        for name in ("surprise", "evidence", "last", "born"):
+            setattr(self, name, [getattr(self, name)[i] for i in keep])
+        self.where = {}
+        for i, t in enumerate(self.rows.tolist()):
+            self.where.setdefault(tuple(t), []).append(i)
 
     def familiar(self, toks):
         """Recognition: True where an identical episode is already stored. A candidate is any row whose index contains
