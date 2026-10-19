@@ -36,6 +36,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H3D.md` | H3d: the same with pseudo-rehearsal (the weights replay what they already know); arm `sleep_pr` of `h3c.py` |
 | `EXPERIMENT_H3E.md` | H3e: the dose of self-replay, first-sleep fallback fixed; arms `sleep_pr_fix`, `sleep_pr_dose` |
 | `EXPERIMENT_H5.md`, `h5.py` | H5: a Willshaw CA3 network (clipped Hebbian, autoassociative) against the table, by code sparsity |
+| `EXPERIMENT_H5B.md` | H5b: the Willshaw network with slot-bound codes (`h5.py --slots`) |
 | `runs/` | results, one JSON per run |
 
 ## Standing rules

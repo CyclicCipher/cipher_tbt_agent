@@ -20,8 +20,9 @@ import time
 from pathlib import Path
 
 import torch
+from collections import Counter
 
-from h1 import N_ENT, N_REL, TEST_WORLD, conv, make_facts, rel
+from h1 import N_ENT, N_REL, TEST_WORLD, TRAIN_WORLDS, conv, make_facts, rel
 
 DEV = "cuda" if torch.cuda.is_available() else "cpu"
 HERE = Path(__file__).parent
@@ -38,6 +39,20 @@ def codes(k, seed=12345):
     return C.to(DEV)
 
 
+def learn_slots():
+    """H5b: from the training worlds, for each question type (its relation-like token), which slot of the answer
+    episode holds the question's entity, and which slot holds the answer. Counted, not assumed."""
+    ent_slot, ans_slot = {}, {}
+    for w in TRAIN_WORLDS:
+        for a, r, b in make_facts(seed=w).facts:
+            ep = (a, rel(r), b)
+            for (e, t), ans in (((a, rel(r)), b), ((b, conv(r)), a)):
+                ent_slot.setdefault(t, Counter())[ep.index(e)] += 1
+                ans_slot.setdefault(t, Counter())[ep.index(ans)] += 1
+    return ({t: c.most_common(1)[0][0] for t, c in ent_slot.items()},
+            {t: c.most_common(1)[0][0] for t, c in ans_slot.items()})
+
+
 def facts_union(n_worlds):
     facts = set()
     for w in range(100, 100 + n_worlds):
@@ -48,9 +63,15 @@ def facts_union(n_worlds):
 
 
 @torch.no_grad()
-def run(k, sizes, n_probe=1000):
+def run(k, sizes, n_probe=1000, slots=False):
+    """slots=False: H5 (an episode is the union of its tokens' codes). slots=True: H5b (each token's code is permuted
+    by a fixed random permutation per slot within the episode: subject, relation, object)."""
     t0 = time.time()
     C = codes(k)
+    g = torch.Generator().manual_seed(777)
+    perms = [torch.randperm(D, generator=g).to(DEV) for _ in range(3)] if slots else [torch.arange(D, device=DEV)] * 3
+    S = [C[:, pm] for pm in perms]                                   # S[j][t]: token t's code bound to slot j
+    ent_slot, ans_slot = learn_slots() if slots else (None, None)
     facts = facts_union(4)                                           # up to ~11,930 episodes
     fwd, rev = {}, {}
     W = torch.zeros(D, D, device=DEV, dtype=torch.bool)
@@ -60,7 +81,7 @@ def run(k, sizes, n_probe=1000):
         for a, r, b in facts[stored:n]:                              # clipped Hebbian write, one episode at a time
             fwd.setdefault((a, r), set()).add(b)
             rev.setdefault((r, b), set()).add(a)
-            x = (C[a] + C[rel(r)] + C[b]).clamp(max=1).bool()
+            x = (S[0][a] + S[1][rel(r)] + S[2][b]).clamp(max=1).bool()
             W |= x[:, None] & x[None, :]
         stored = n
         probe = rng.sample(facts[:n], min(n_probe, n))
@@ -69,16 +90,24 @@ def run(k, sizes, n_probe=1000):
             if kind == "fwd":
                 cue_toks = [(a, rel(r)) for a, r, b in probe]
                 correct = [fwd[(a, r)] for a, r, b in probe]
+                qtype = [rel(r) for a, r, b in probe]
             else:
                 # the converse token r° never occurs in a stored episode; the learned expansion maps it to r, so the
                 # cue is the stored tokens the question points at: b and r (the Willshaw threshold is the cue's size)
                 cue_toks = [(b, rel(r)) for a, r, b in probe]
                 correct = [rev[(r, b)] for a, r, b in probe]
+                qtype = [conv(r) for a, r, b in probe]
             Wf = W.float()
-            cue = torch.stack([C[list(t)].amax(0) for t in cue_toks])            # (n, D)
+            if slots:                                                            # entity at its learned slot, relation at 1
+                cue = torch.stack([torch.maximum(S[ent_slot[q]][e], S[1][t]) for (e, t), q in zip(cue_toks, qtype)])
+            else:
+                cue = torch.stack([C[list(t)].amax(0) for t in cue_toks])        # (n, D)
             s = cue @ Wf                                                         # dendritic sums (W symmetric)
             recalled = ((s >= cue.sum(1, keepdim=True) - 0.5) | cue.bool()).float()
-            score = recalled @ C[:N_ENT].T / k                                   # (n, entities)
+            if slots:                                                            # decode at the learned answer slot
+                score = torch.stack([recalled[i] @ S[ans_slot[q]][:N_ENT].T for i, q in enumerate(qtype)]) / k
+            else:
+                score = recalled @ C[:N_ENT].T / k                               # (n, entities)
             for i, toks in enumerate(cue_toks):
                 for t in toks:
                     if t < N_ENT:
@@ -90,17 +119,20 @@ def run(k, sizes, n_probe=1000):
                         top1_rev=res["rev"], at12_fwd=res["fwd@12"], at12_rev=res["rev@12"]))
         print(f"k={k} stored={n} density={out[-1]['density']} top1 fwd={res['fwd']} rev={res['rev']}  "
               f"@12 fwd={res['fwd@12']} rev={res['rev@12']}", flush=True)
-    return dict(k=k, D=D, sizes=sizes, curve=out, secs=round(time.time() - t0, 1))
+    return dict(k=k, D=D, slots=slots, slot_map=(None if not slots else
+                {"ent": {int(t): v for t, v in ent_slot.items()}, "ans": {int(t): v for t, v in ans_slot.items()}}),
+                sizes=sizes, curve=out, secs=round(time.time() - t0, 1))
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=int, required=True)
+    ap.add_argument("--slots", action="store_true")
     a = ap.parse_args()
-    p = OUT / f"willshaw_k{a.k}.json"
+    p = OUT / f"willshaw{'_slots' if a.slots else ''}_k{a.k}.json"
     if p.exists():
         print(f"{p} exists: not re-run")
         raise SystemExit
-    r = run(a.k, [250, 500, 1000, 2000, 4000, 8000, 11930])
+    r = run(a.k, [250, 500, 1000, 2000, 4000, 8000, 11930], slots=a.slots)
     OUT.mkdir(parents=True, exist_ok=True)
     json.dump(r, open(p, "w"), indent=1)
