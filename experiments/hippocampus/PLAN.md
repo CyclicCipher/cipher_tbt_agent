@@ -116,8 +116,12 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 
 24. **Reverse content matching is learnable (PoPE, about 8,000 updates); forward content matching is not, so far**
     (H1d–H1h). For single-fact questions this does not matter: the ranked read path answers both directions at
-    0.96–0.97. It matters once retrieval cannot rank (several relevant episodes, chains). Open: more updates than
-    2-minute runs allow, or a structural difficulty in matching on a copied feature.
+    0.96–0.97. It matters once retrieval cannot rank (several relevant episodes, chains).
+    - **Code review (the user asked): no bug; the cause is the layout.** With the question after the memory and causal
+      attention, forward must match the question's entity against a *copied* subject, while reverse matches the
+      object's *own* token.
+    - Forward predictions are objects of the wrong episode (57%) or blends (32%).
+    - **Fix to test when needed: question before the memory.**
 
 **Decisions (the user):**
 - **2026-10-18: the store stays a table; the neural substrate (H5–H5c) is not used.** In the user's words, "it's an

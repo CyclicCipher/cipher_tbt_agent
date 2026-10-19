@@ -96,6 +96,44 @@ Every run took 68–94 s, within the 2-minute rule; the measured budget worked.
   - matching on a *copied* feature (the subject, carried to the object's position) is structurally harder than matching
     on a token's own identity.
 
+## Code review after H1h (the user: "it could be caused by an embarrassingly simple mistake … double-check the code")
+
+**Checked and correct:**
+- `questions` (prompt/answer alignment);
+- `eval_sets`;
+- `contexts` (the flip reverses episode order only, never tokens within an episode);
+- retrieval for forward questions (recall 0.999–1.000 in every shuffled evaluation);
+- the training data. All 3,002 forward and 3,002 reverse examples of a training world have their answer episode in
+  context. Decoded examples read correctly, e.g. question "e0 r1 → e676" with the episode "e0 r1 e676" among 12
+  r1-episodes.
+
+**No code bug was found.**
+
+**What the reader does on forward questions** (eval only: the reverse-capable PoPE reader PS8 s7, world 0, shuffled):
+
+| prediction | forward | reverse |
+|---|---|---|
+| the exact answer | 4.5% | 81.8% (+16.3% other correct answers in the set) |
+| the **object of another episode** | **57%** | ~1% |
+| not in context (a blended readout) | 32% | 0.3% |
+
+The reader knows *which slot* to answer from (an object) but cannot find *which episode*.
+
+**The mistake is in the layout I chose, not in the code.**
+- The question comes **after** the memory, and attention is causal, so no episode position ever sees the question. All
+  matching must happen at the final position, as query–key content matching.
+- **Reverse** matches the question's entity against the object position's **own token**, a raw identity.
+- **Forward** must match it against the **subject copied** two positions forward into the object position by an
+  earlier head, superposed on the object's own token in the same embedding space. That is a far harder match.
+- Non-causal attention (PN) would let episodes see the question, but it also blurs the offset copies in both directions,
+  and it failed even on reverse within the budget.
+
+**The simple fix (not yet run):** put the question **before** the memory, or both before and after. Then every
+episode position can compare itself with the question as it is read. The subject position flags a match, the object
+position two later picks up the flag, and the final position copies the flagged object. Forward becomes "flag and
+copy", the same difficulty as reverse. It is a layout change, not more compute. The user's direction is to move on to
+H6, so this is recorded as the first thing to test when content matching is needed again.
+
 **Practical position:** the ranked read path (E1: retrieval ranks the full match first, the reader copies) answers
 forward and reverse at about 0.96–0.97 for single-fact questions. Content matching only matters once retrieval cannot
 rank: several relevant episodes, or chains.
