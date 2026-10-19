@@ -15,6 +15,9 @@ scalar s; untied, the output codes are learned at the same scale.
 `seg_ids` (hippocampus H1b): a fixed per-position segment id (e.g. the slot within a retrieved episode) whose learned
 embedding is added to the input, so a role shared by many positions is learned once.
 
+`rope=True` (hippocampus H1e): rotary position encoding on queries and keys instead of learned absolute positions,
+so a fixed offset ("two tokens earlier") is the same operation at every position.
+
 `transport="sum"` (Experiment 1c) removes attention: the MLP blocks read the fixed sum of the two token codes, so an
 entity arrives at the MLP as exactly its own code. `set_mlp_off(True)` zeroes every MLP's output (the per-run check of
 how much of the facts the MLPs hold).
@@ -61,12 +64,16 @@ class Block(nn.Module):
         self.n_head = n_head
         self.mlp = MLP(d, m, dagger, n_layer)
 
-    def forward(self, x):
+    def forward(self, x, rope=None):
         if not self.attn:
             return x + self.mlp(self.ln2(x))
         B, T, d = x.shape
         q, k, v = self.qkv(self.ln1(x)).split(d, dim=2)
         q, k, v = (t.view(B, T, self.n_head, d // self.n_head).transpose(1, 2) for t in (q, k, v))
+        if rope is not None:                                   # rotary: rotate q, k by their positions
+            cos, sin = rope
+            q, k = (torch.cat([t[..., ::2] * cos - t[..., 1::2] * sin, t[..., ::2] * sin + t[..., 1::2] * cos], -1)
+                    for t in (q, k))
         a = Fn.scaled_dot_product_attention(q, k, v, is_causal=True)
         x = x + self.proj(a.transpose(1, 2).reshape(B, T, d))
         return x + self.mlp(self.ln2(x))
@@ -74,19 +81,26 @@ class Block(nn.Module):
 
 class Net(nn.Module):
     def __init__(self, vocab, d=128, n_layer=2, n_head=4, m=256, dagger=False, tied=True, ctx=2, frozen=False,
-                 transport="attn", seg_ids=None):
+                 transport="attn", seg_ids=None, rope=False):
         super().__init__()
         self.tok = nn.Embedding(vocab, d)
         self.transport = transport
-        if transport == "attn":
+        self.rope = rope
+        if transport == "attn" and not rope:
             self.pos = nn.Embedding(ctx, d)
         self.frozen = frozen
         nn.init.normal_(self.tok.weight, std=1.0 if frozen else 0.02)
         if frozen:
             self.tok.weight.requires_grad_(False)
             self.scale = nn.Parameter(torch.ones(()))
-        if transport == "attn":
+        if transport == "attn" and not rope:
             nn.init.normal_(self.pos.weight, std=0.02)
+        if rope:
+            hd = d // n_head
+            inv = 1.0 / (10000 ** (torch.arange(0, hd, 2).float() / hd))
+            ang = torch.arange(ctx).float()[:, None] * inv[None, :]          # (ctx, hd/2)
+            self.register_buffer("rope_cos", ang.cos(), persistent=False)
+            self.register_buffer("rope_sin", ang.sin(), persistent=False)
         self.blocks = nn.ModuleList(Block(d, n_head, m, dagger, n_layer, attn=(transport == "attn"))
                                     for _ in range(n_layer))
         self.lnf = nn.LayerNorm(d)
@@ -108,14 +122,19 @@ class Net(nn.Module):
             b.mlp.off = on
 
     def forward(self, idx):
+        rope = None
         if self.transport == "sum":
             x = self.tok(idx).sum(1, keepdim=True)
+        elif self.rope:
+            x = self.tok(idx)
+            T = idx.shape[1]
+            rope = (self.rope_cos[:T], self.rope_sin[:T])
         else:
             x = self.tok(idx) + self.pos(torch.arange(idx.shape[1], device=idx.device))
         if self.has_seg:
             x = x + self.seg(self.seg_ids[:idx.shape[1]])
         for b in self.blocks:
-            x = b(x)
+            x = b(x, rope)
         W = self.tok.weight if self.tied else self.out
         logits = self.lnf(x[:, -1]) @ W.T        # logits for the answer after the last prompt token
         return logits * self.scale / W.shape[1] ** 0.5 if self.frozen else logits

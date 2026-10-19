@@ -39,6 +39,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H5B.md` | H5b: the Willshaw network with slot-bound codes (`h5.py --slots`) |
 | `EXPERIMENT_H5C.md`, `h5c.py` | H5c: conjunctive (dentate-gyrus-like) pair units feeding third-slot maps |
 | `EXPERIMENT_H1D.md`, `run_h1d.py` | H1d: content matching without a rank cue (warm start; mixed read order) |
+| `EXPERIMENT_H1E.md`, `run_h1e.py` | H1e: rotary positions (RoPE) for content matching |
 | `runs/` | results, one JSON per run |
 
 ## Standing rules

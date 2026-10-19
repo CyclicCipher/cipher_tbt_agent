@@ -21,10 +21,10 @@ ARMS = {"W1": lambda s: dict(expand=True, read_order="shuffled", init_from=E1 / 
 SEEDS = (4, 5)
 
 
-def both_orders(path, seed):
+def both_orders(path, seed, rope=False):
     """World 0 with the reader at `path`, under the ranked and the shuffled read order."""
     t0 = time.time()
-    net = Net(VOCAB, ctx=CTX, **MODEL).to(DEV)
+    net = Net(VOCAB, ctx=CTX, rope=rope, **MODEL).to(DEV)
     net.load_state_dict(torch.load(path, map_location=DEV))
     net.eval()
     out = {}
