@@ -17,6 +17,7 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 |---|---|
 | **H1** (`EXPERIMENT_H1.md`) | One write per fact gives reverse access at 38–53%. Weights alone give ≤ 0.9% even after 64 exposures, with the converse tokens taught on the same world (chance 0.12%). Forward: 1 write against 8–64 exposures. Retrieval recall is 1.00, so the reader is the limit. The surprise gate re-wrote 19–21% of facts on a second presentation (one-to-many facts). |
 | **H1b** (`EXPERIMENT_H1B.md`) | The reader with `torch.compile`, 4,500 steps and cosine decay (**B2**) gives **83–93% reverse and 95–96% forward from one write**. The familiarity gate gives **0 duplicates**. The slot embedding (B3) hurt (stuck at 0.50). |
+| **H5** (`EXPERIMENT_H5.md`) | A **Willshaw CA3 network** (clipped Hebbian, autoassociative, one-shot) on the same sparse codes. With **k ≤ 20 active bits it holds all 11,930 episodes without saturating** (k = 40 saturates). What it loses against the table is **episode structure**: a union-coded cue completes every episode containing its tokens, in either role, blended together (top-1 0.11, @12 0.83 at 11,930). |
 | **H3e** (`EXPERIMENT_H3E.md`) | The first-sleep fallback fixed: long tail **0.60–0.63** at about 550 rows (full store 0.86 at 5,950). A larger self-replay share is a **stability–plasticity trade**: old facts are kept slightly better (+0.05–0.08) but fewer new ones are consolidated, and the long tail drops. The total sleep compute is the binding constraint within the 2-minute rule. |
 | **H3d** (`EXPERIMENT_H3D.md`) | Sleep with **pseudo-rehearsal** (the weights replay their own confident answers): long tail **0.60** (vs 0.39 plain sleep, 0.35 no sleep, 0.86 uncapped) with an **11× smaller store** (about 550 vs 5,950 rows); weights alone 0.63; no online or reading cost. First-sleep retention 0.48 (vs 0.2): forgetting halved, not stopped. One implementation deviation (a spurious first-sleep pseudo set). |
 | **H3c** (`EXPERIMENT_H3C.md`) | Sleep inside a stream (5,957 facts, a 1,500-row store, 4 sleeps): **catastrophic interference.** Facts consolidated and evicted at the first sleep are overwritten by later sleeps (retention 0.18–0.24). The long tail improves only +0.04 (0.39 vs 0.35; uncapped 0.86). Reading survives. |
@@ -87,6 +88,11 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 
 19. **Within a fixed sleep budget, the replay mix only trades old against new** (H3e). Sleep compute per fact is the
     lever. The best stream configuration keeps about 70% of the full store's per-fact accuracy at about 9% of its rows.
+
+20. **A neural CA3 has the capacity, but needs role/slot binding** (H5). With sparse codes (k ≤ 20) a 512 KB
+    Willshaw net stores ~12k episodes unsaturated. Unordered union codes, though, blend every episode that matches a
+    cue. Separate rows plus an ordered reader (the table) keep the structure the network loses. H5b tests per-slot
+    permutation binding.
 
 **Reader configuration carried forward (updated):** **E1.** That is B2 plus the learned expansion in every store,
 ranked read order, readers `runs/h1c/reader_E1_s{4..7}.pt`.

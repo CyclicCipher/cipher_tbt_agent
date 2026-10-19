@@ -114,6 +114,11 @@ The plan is written, with the compression mechanisms in §2b.
 - A larger replay share trades new for old: a stability–plasticity trade, not a gain.
 - The total sleep compute binds.
 
+**H5 (a Willshaw CA3 network instead of the table): done.**
+- With sparse codes (k ≤ 20) a fixed 512 KB network holds all 11,930 episodes without saturating.
+- It loses episode/role structure: union-coded cues blend every matching episode (top-1 0.11 at 11,930).
+- H5b adds per-slot binding.
+
 `PLAN.md` §0 holds the learnings so far.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.

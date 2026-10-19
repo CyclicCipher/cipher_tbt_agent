@@ -1,0 +1,72 @@
+{
+ "k": 10,
+ "D": 2048,
+ "sizes": [
+  250,
+  500,
+  1000,
+  2000,
+  4000,
+  8000,
+  11930
+ ],
+ "curve": [
+  {
+   "stored": 250,
+   "density": 0.0387,
+   "top1_fwd": 0.964,
+   "top1_rev": 0.972,
+   "at12_fwd": 1.0,
+   "at12_rev": 1.0
+  },
+  {
+   "stored": 500,
+   "density": 0.0663,
+   "top1_fwd": 0.892,
+   "top1_rev": 0.892,
+   "at12_fwd": 1.0,
+   "at12_rev": 1.0
+  },
+  {
+   "stored": 1000,
+   "density": 0.1038,
+   "top1_fwd": 0.743,
+   "top1_rev": 0.704,
+   "at12_fwd": 1.0,
+   "at12_rev": 1.0
+  },
+  {
+   "stored": 2000,
+   "density": 0.1542,
+   "top1_fwd": 0.396,
+   "top1_rev": 0.401,
+   "at12_fwd": 1.0,
+   "at12_rev": 1.0
+  },
+  {
+   "stored": 4000,
+   "density": 0.2295,
+   "top1_fwd": 0.209,
+   "top1_rev": 0.224,
+   "at12_fwd": 0.995,
+   "at12_rev": 0.995
+  },
+  {
+   "stored": 8000,
+   "density": 0.3496,
+   "top1_fwd": 0.157,
+   "top1_rev": 0.139,
+   "at12_fwd": 0.911,
+   "at12_rev": 0.929
+  },
+  {
+   "stored": 11930,
+   "density": 0.4422,
+   "top1_fwd": 0.109,
+   "top1_rev": 0.091,
+   "at12_fwd": 0.836,
+   "at12_rev": 0.83
+  }
+ ],
+ "secs": 6.8
+}

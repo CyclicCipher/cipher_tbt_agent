@@ -59,6 +59,54 @@ saturation.
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/h5/willshaw_k*.json`, log `runs/h5_log.txt`)
 
-*(to be filled in after the runs)*
+Each run took seconds.
+
+| k | episodes stored | matrix density | top-1 fwd / rev | **@12 fwd / rev** |
+|---|---|---|---|---|
+| 40 | 250 | 0.40 | 0.968 / 0.976 | 1.000 / 1.000 |
+| 40 | 1,000 | 0.72 | 0.522 / 0.510 | 1.000 / 1.000 |
+| 40 | 2,000 | 0.86 | 0.305 / 0.304 | 1.000 / 1.000 |
+| 40 | 4,000 | 0.96 | 0.182 / 0.216 | 0.994 / 0.994 |
+| 40 | 8,000 | 0.994 | 0.099 / 0.083 | 0.630 / 0.653 |
+| 40 | 11,930 | 0.999 | 0.007 / 0.008 | **0.078 / 0.080** |
+| 20 | 250 | 0.14 | 0.972 / 0.972 | 1.000 / 1.000 |
+| 20 | 1,000 | 0.31 | 0.661 / 0.645 | 1.000 / 1.000 |
+| 20 | 4,000 | 0.59 | 0.179 / 0.232 | 0.994 / 0.994 |
+| 20 | 8,000 | 0.78 | 0.151 / 0.136 | 0.910 / 0.929 |
+| 20 | 11,930 | 0.87 | 0.109 / 0.091 | **0.836 / 0.830** |
+| 10 | 250 | 0.04 | 0.964 / 0.972 | 1.000 / 1.000 |
+| 10 | 1,000 | 0.10 | 0.743 / 0.704 | 1.000 / 1.000 |
+| 10 | 4,000 | 0.23 | 0.209 / 0.224 | 0.995 / 0.995 |
+| 10 | 8,000 | 0.35 | 0.157 / 0.139 | 0.911 / 0.929 |
+| 10 | 11,930 | 0.44 | 0.109 / 0.091 | **0.836 / 0.830** |
+
+(The sizes 500 and 2,000 for k = 10/20 follow the same pattern; see the log.)
+
+**Against the predictions:**
+- **W1 (k = 40):** @12 ≥ 0.95 up to 1,000 ✓. "Below 0.5 by 4,000" **refuted**: 0.994 at 4,000, 0.63 at 8,000, and
+  below 0.5 only at 11,930 (0.08). The network saturates later than my estimate.
+- **W2 (k = 20):** ≥ 0.95 up to 2,000 ✓. "Below 0.5 by 11,930" **refuted**: 0.83.
+- **W3 (k = 10, ≥ 0.9 at all sizes): REFUTED narrowly.** 0.836 at 11,930.
+- **W4 (direction-free):** @12 forward and reverse are within 0.024 everywhere ✓. Top-1 is within 0.05 except one
+  point (k = 20, 500 episodes: 0.926 vs 0.874, a gap of 0.052).
+- **W5:** top-1 falls far below @12 as the store fills: 0.97 → 0.11 at 11,930, for every k.
+
+**What H5 establishes:**
+1. **Capacity is not the limit with sparse codes.** At k ≤ 20 the fixed 512 KB network holds all 11,930 episodes
+   without saturating. **k = 10 and k = 20 give identical results** at 8,000 and 11,930, which shows that their shared
+   ceiling (0.83 @12) is not spurious bits. Only k = 40, the table's current code, saturates (density 0.999).
+2. **What the network loses against the table is episode structure, not capacity.**
+   - An episode is stored as an unordered union of its tokens' codes. A cue {x, r} completes *every* episode containing
+     x and r, with x in either role, and returns their union blended together.
+   - Decoding then sees many fully overlapping entities, which tie: top-1 falls to 0.11, and @12 to 0.83 once more than
+     about 12 entities share the cue.
+   - The table keeps episodes separate, and the reader resolves roles by reading their tokens in order.
+3. **The cost comparison favours the table at this scale:** 14 bytes per episode (167 KB at 11,930) against a fixed
+   512 KB.
+
+**Next (H5b):** role-bound codes. Each token's code is permuted by a fixed random permutation **per slot within the
+episode** (subject, relation, object): generic sequence-position binding, like a positional encoding, not a schema.
+Which slot a question's tokens fill, and which slot it asks for, is learned from the same co-occurrence counts as the
+expansion.
