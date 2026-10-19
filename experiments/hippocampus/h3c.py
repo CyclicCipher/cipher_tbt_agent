@@ -30,7 +30,9 @@ HERE = Path(__file__).parent
 OUT = HERE / "runs" / "h3c"
 WORLDS, PHASES, QUERIES, CAP, ZIPF = (100, 101), 24, 1000, 1500, 1.0
 SLEEP_AT, SLEEP_STEPS, CONS, REH = (6, 12, 18, 24), 1000, 192, 64
-PR_CONS, PR_PSEUDO = 128, 64                                         # H3d: 128 consolidation + 64 pseudo + 64 reading
+PR = {"sleep_pr": (128, 64, 1),          # H3d: 128 consolidation + 64 pseudo + 64 reading; pseudo path if any known
+      "sleep_pr_fix": (128, 64, 100),     # H3e: the same, pseudo path only if >= 100 answers are known
+      "sleep_pr_dose": (96, 96, 100)}     # H3e: a larger pseudo share
 
 
 def world(stream_seed):
@@ -96,7 +98,7 @@ def run(arm, seed, stream_seed):
     sets50 = eval_sets(F50)
     heldout_before = eval_mem(net, store50, sets50, gen)
     X = Y = None
-    if arm in ("sleep", "sleep_pr"):
+    if arm == "sleep" or arm in PR:
         X, Y = training_set(Store, "sparse", gen)
     facts, pop, fwd, rev = world(stream_seed)
     chunks = [facts[i * len(facts) // PHASES:(i + 1) * len(facts) // PHASES] for i in range(PHASES)]
@@ -127,15 +129,16 @@ def run(arm, seed, stream_seed):
             tot[k][0] += ph_hits[k][0]
             tot[k][1] += ph_hits[k][1]
         sl = None
-        if arm in ("sleep", "sleep_pr") and ph in SLEEP_AT:
+        if (arm == "sleep" or arm in PR) and ph in SLEEP_AT:
             rows = store.rows.cpu()
             cX, cY, _ = consolidation_examples(net, store, gen, inferences=True)
             n_pseudo = 0
-            if arm == "sleep_pr":
+            if arm in PR:
+                pr_cons, pr_pseudo, pr_min = PR[arm]
                 pX, pY = what_weights_know(net)
                 n_pseudo = len(pX)
-                if n_pseudo:
-                    sleep_train(net, cX, cY, X, Y, gen, SLEEP_STEPS, PR_CONS, REH, pseudo=(pX, pY, PR_PSEUDO))
+                if n_pseudo >= pr_min:
+                    sleep_train(net, cX, cY, X, Y, gen, SLEEP_STEPS, pr_cons, REH, pseudo=(pX, pY, pr_pseudo))
                 else:                                                  # nothing known yet (the first sleep)
                     sleep_train(net, cX, cY, X, Y, gen, SLEEP_STEPS, CONS, REH)
             else:
@@ -181,7 +184,7 @@ def run(arm, seed, stream_seed):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arm", choices=["value", "sleep", "uncapped", "sleep_pr"], required=True)
+    ap.add_argument("--arm", choices=["value", "sleep", "uncapped"] + list(PR), required=True)
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--stream_seed", type=int, default=0)
     a = ap.parse_args()

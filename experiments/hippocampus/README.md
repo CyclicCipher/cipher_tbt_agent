@@ -34,6 +34,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H3B.md`, `run_h3b.py` | H3b: longer sleep, 1:1 vs 3:1 mixes, self-checked eviction |
 | `EXPERIMENT_H3C.md`, `h3c.py`, `run_h3c.py` | H3c: sleep inside the continual stream (keeping the long tail) |
 | `EXPERIMENT_H3D.md` | H3d: the same with pseudo-rehearsal (the weights replay what they already know); arm `sleep_pr` of `h3c.py` |
+| `EXPERIMENT_H3E.md` | H3e: the dose of self-replay, first-sleep fallback fixed; arms `sleep_pr_fix`, `sleep_pr_dose` |
 | `runs/` | results, one JSON per run |
 
 ## Standing rules

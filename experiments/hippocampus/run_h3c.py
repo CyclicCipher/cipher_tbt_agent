@@ -4,7 +4,8 @@ import json
 
 from h3c import OUT, run
 
-ARMS, SEEDS, STREAM_SEEDS = ("value", "sleep", "uncapped", "sleep_pr"), (4, 5), (0, 1)   # sleep_pr: H3d
+ARMS = ("value", "sleep", "uncapped", "sleep_pr", "sleep_pr_fix", "sleep_pr_dose")   # sleep_pr: H3d; *_fix/_dose: H3e
+SEEDS, STREAM_SEEDS = (4, 5), (0, 1)
 
 
 def get(arm, seed, ss):
