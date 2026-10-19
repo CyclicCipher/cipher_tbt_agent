@@ -35,5 +35,15 @@ re-run, 16-bit, diverse tasks, no competitor-faithful arms, commits to `exp/mdl-
 
 ## Where it stands (2026-10-18)
 
-The plan is written, with the compression mechanisms in §2b. **H1** (store plus read on synthetic facts) is
-pre-registered. It reuses `../intelligent_constraints/` `data.py` and `model.py`.
+The plan is written, with the compression mechanisms in §2b.
+
+**H1 (store plus read on synthetic facts): done.**
+- One write per fact gives **reverse** access at 38–53%. Weights alone give ≤ 0.9% even after 64 exposures (chance
+  0.12%).
+- Forward: 1 write against 8–64 exposures for the weights.
+- Retrieval recall is 1.00, so **the limit is the reader's skill** (reverse reading is still improving at the 3,500-step
+  budget), not the store.
+- The surprise gate writes every new fact once, but lets through 19–21% duplicates on re-presentation (one-to-many
+  facts: probability spread over several answers). The fix is a familiarity gate from the index itself.
+
+H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.

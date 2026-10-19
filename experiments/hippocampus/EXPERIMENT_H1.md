@@ -107,6 +107,72 @@ C never see world 0 except through one write per fact.
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/h1/`, log `runs/h1_log.txt`)
 
-*(to be filled in after the runs)*
+Every run took 39–110 s, within the 2-minute rule. The driver's exit code 1 came from `tee`: the `runs/` folder did
+not exist yet when it started. All 10 runs completed, and the log was copied from the task output.
+
+| arm | seed | fwd one-way hits (mass) | **REV one-way clean hits (mass)** | recall rev | oracle rev | leak rev | rev paired |
+|---|---|---|---|---|---|---|---|
+| A e=1 | 0 / 1 | 0.090 / 0.114 | 0.002 / 0.000 | – | – | – | 0.984 / 0.982 |
+| A e=8 | 0 / 1 | 0.940 / 0.945 | 0.001 / 0.005 | – | – | – | 0.998 / 0.998 |
+| A e=64 | 0 / 1 | 1.000 / 1.000 | 0.005 / 0.009 | – | – | – | 1.000 / 1.000 |
+| **B sparse store** | 0 / 1 | 0.952 / 0.953 | **0.531 (0.44) / 0.384 (0.29)** | 1.000 / 1.000 | 0.528 / 0.404 | 0.000 / 0.001 | 0.541 / 0.406 |
+| C dense store | 0 / 1 | 0.976 / 0.973 | 0.447 (0.35) / 0.414 (0.31) | 0.983 / 0.983 | 0.447 / 0.414 | 0.000 / 0.002 | 0.495 / 0.394 |
+
+Forward recall is 0.999 for B and 1.000 for C. Chance is 0.0012.
+
+**Reader training curves** (forward / reverse hits on the full store, steps 500 → 3,500):
+- B s0: 0.85/0.21 → 0.95/0.53;
+- B s1: 0.90/0.24 → 0.94/0.39 (still rising);
+- C s0 and C s1 plateau at about 0.45 and 0.41 reverse.
+
+**Gate** (first presentation, then the second):
+
+| arm, seed | written on first presentation (of 2,999) | duplicates on second |
+|---|---|---|
+| B s0 | 2,997 | 579 (577 one-to-many) |
+| B s1 | 2,996 | 606 (567 one-to-many, 38 one-to-one) |
+| C s0 | 2,998 | 573 |
+| C s1 | 2,998 | 623 |
+
+**Store size:** 14 bytes per minimal row. The overlap cache is 256 bytes per row (2048 bits); the dense cache is 256
+bytes (128 fp16 values).
+
+**Against the predictions:**
+- **Apparatus: passes.** Leak is ≤ 0.002. Recall is ≥ 0.98 forward, and reverse recall is 1.00 for B and 0.98 for C.
+- **P1 (weights need exposures and stay cursed): holds.**
+  - A's forward score is 0.09–0.11 after 1 exposure, 0.94 after 8, and 1.00 after 64.
+  - A's reverse score is ≤ 0.009 at every e, even with world 0's paired facts teaching it the converse tokens.
+- **P2 (one write suffices in both directions): not met as pre-registered.**
+  - Forward 0.952 / 0.953 passes (barely).
+  - Reverse 0.531 / **0.384** fails "≥ 0.5 in both seeds" on seed 1.
+  - Far from the refutation line (≤ 0.1).
+- **P3 (C ≤ B): holds narrowly.** Means 0.43 against 0.46, within seed noise. At 3,000 episodes, pattern separation
+  makes no measurable difference. C is slightly *better* forward.
+- **P4 (read against retrieval): holds.** Oracle ≈ B, because recall is already 1.00.
+  - **Retrieval is not the bottleneck; the reader is.** With the right episode in context, the 4-layer reader answers
+    the reverse question 40–53% of the time, and B s1 was still improving at the step limit.
+- **P5 (compression by the gate): split.**
+  - First presentation: ≥ 99.9% of the facts written. ✓
+  - Minimal row: 14 bytes. ✓
+  - Duplicates on re-presentation: **19–21%, refuting ≤ 10%.** As predicted, almost all are in one-to-many relations.
+  - The cause is the gate's measure. A reader that correctly spreads probability over k answers has surprise
+    ≥ log₂ k, and above τ = 2 bits whenever its confidence is a bit below perfect.
+  - **Better gates, not pre-registered:**
+    - (a) **Familiarity from the index itself:** an episode whose code overlaps an existing row completely is already
+      stored. This is exact, cheap, and the hippocampus's own recognition signal.
+    - (b) Gate on whether b is *among* the reader's predicted answers, not on its probability.
+
+**What H1 establishes:**
+- One write per fact gives reverse access at 38–53%. The weights give ≤ 0.9% even after 64 exposures, with the converse
+  tokens taught on the same world.
+- The reversal curse is a property of where knowledge is stored, and a store read by attention does not have it.
+- The forward data efficiency is 1 write against 8–64 exposures.
+- **The limits are the reader's skill** (reverse reading is learned slowly, and still rising at 3,500 steps) **and the
+  gate's measure**, not retrieval.
+
+**Next, not pre-registered:**
+- a stronger or longer-trained reader within the 2-minute budget;
+- the familiarity gate;
+- then H2 (a continual stream with eviction) and H3 (consolidation).

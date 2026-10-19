@@ -1,0 +1,25 @@
+tee: runs/h1_log.txt: No such file or directory
+ran B_s0.json in 104.0s
+ran B_s1.json in 109.4s
+ran C_s0.json in 105.4s
+ran C_s1.json in 109.5s
+ran A_e1_s0.json in 53.6s
+ran A_e1_s1.json in 38.5s
+ran A_e8_s0.json in 44.5s
+ran A_e8_s1.json in 41.2s
+ran A_e64_s0.json in 51.8s
+ran A_e64_s1.json in 51.6s
+
+arm      s | fwd 1-way hits/mass | REV 1-way clean hits/mass recall | rev paired | oracle rev | leak rev | gate: 1st again (by kind) | secs
+B        0 |   0.952 0.921     |   0.531 0.441 1.000 | 0.541      |   0.528    |  0.000   | 2997 579 {'many-to-one': 2, 'one-to-many': 577, 'one-to-one': 0} | 104.0
+B        1 |   0.953 0.884     |   0.384 0.291 1.000 | 0.406      |   0.404    |  0.001   | 2996 606 {'many-to-one': 1, 'one-to-many': 567, 'one-to-one': 38} | 109.4
+C        0 |   0.976 0.939     |   0.447 0.352 0.983 | 0.495      |   0.447    |  0.000   | 2998 573 {'many-to-one': 0, 'one-to-many': 572, 'one-to-one': 1} | 105.4
+C        1 |   0.973 0.931     |   0.414 0.312 0.983 | 0.394      |   0.414    |  0.002   | 2998 623 {'many-to-one': 1, 'one-to-many': 620, 'one-to-one': 2} | 109.5
+A e=1    0 |   0.090 0.037     |   0.002 0.001   -    | 0.984      |    -       |    -     |            -              | 53.6
+A e=1    1 |   0.114 0.057     |   0.000 0.001   -    | 0.982      |    -       |    -     |            -              | 38.5
+A e=8    0 |   0.940 0.625     |   0.001 0.002   -    | 0.998      |    -       |    -     |            -              | 44.5
+A e=8    1 |   0.945 0.646     |   0.005 0.003   -    | 0.998      |    -       |    -     |            -              | 41.2
+A e=64   0 |   1.000 0.985     |   0.005 0.006   -    | 1.000      |    -       |    -     |            -              | 51.8
+A e=64   1 |   1.000 0.986     |   0.009 0.007   -    | 1.000      |    -       |    -     |            -              | 51.6
+
+[exited with code 1]

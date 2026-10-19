@@ -1,0 +1,281 @@
+{
+ "arm": "A",
+ "e": 8,
+ "seed": 1,
+ "steps1": 3000,
+ "lr": 0.001,
+ "batch": 256,
+ "model": {
+  "d": 128,
+  "n_layer": 4,
+  "n_head": 4,
+  "m": 512
+ },
+ "log": [
+  {
+   "phase": 1,
+   "step": 500,
+   "loss": 0.4994,
+   "fwd_oneway": {
+    "hits": 0.1605,
+    "mass": 0.1241
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0007
+   },
+   "rev_paired": {
+    "hits": 0.9889,
+    "mass": 0.7883
+   }
+  },
+  {
+   "phase": 1,
+   "step": 1000,
+   "loss": 0.3365,
+   "fwd_oneway": {
+    "hits": 0.1612,
+    "mass": 0.1552
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0009
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.973
+   }
+  },
+  {
+   "phase": 1,
+   "step": 1500,
+   "loss": 0.3796,
+   "fwd_oneway": {
+    "hits": 0.1612,
+    "mass": 0.1577
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0006
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.986
+   }
+  },
+  {
+   "phase": 1,
+   "step": 2000,
+   "loss": 0.2759,
+   "fwd_oneway": {
+    "hits": 0.1612,
+    "mass": 0.159
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0004
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.9901
+   }
+  },
+  {
+   "phase": 1,
+   "step": 2500,
+   "loss": 0.1909,
+   "fwd_oneway": {
+    "hits": 0.1612,
+    "mass": 0.1592
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0004
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.9908
+   }
+  },
+  {
+   "phase": 1,
+   "step": 3000,
+   "loss": 0.2685,
+   "fwd_oneway": {
+    "hits": 0.1612,
+    "mass": 0.1595
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0006
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.9921
+   }
+  },
+  {
+   "phase": 2,
+   "epoch": 1,
+   "step": 3012,
+   "loss": 3.9432,
+   "fwd_oneway": {
+    "hits": 0.1139,
+    "mass": 0.0569
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0008
+   },
+   "rev_paired": {
+    "hits": 0.9818,
+    "mass": 0.8066
+   }
+  },
+  {
+   "phase": 2,
+   "epoch": 2,
+   "step": 3024,
+   "loss": 2.8981,
+   "fwd_oneway": {
+    "hits": 0.1679,
+    "mass": 0.0706
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0012
+   },
+   "rev_paired": {
+    "hits": 0.9937,
+    "mass": 0.8816
+   }
+  },
+  {
+   "phase": 2,
+   "epoch": 3,
+   "step": 3036,
+   "loss": 2.4414,
+   "fwd_oneway": {
+    "hits": 0.2892,
+    "mass": 0.0969
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.0014
+   },
+   "rev_paired": {
+    "hits": 0.9976,
+    "mass": 0.9062
+   }
+  },
+  {
+   "phase": 2,
+   "epoch": 4,
+   "step": 3048,
+   "loss": 1.9949,
+   "fwd_oneway": {
+    "hits": 0.4852,
+    "mass": 0.1821
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0024,
+    "mass": 0.0019
+   },
+   "rev_paired": {
+    "hits": 0.9976,
+    "mass": 0.9202
+   }
+  },
+  {
+   "phase": 2,
+   "epoch": 5,
+   "step": 3060,
+   "loss": 1.5806,
+   "fwd_oneway": {
+    "hits": 0.6812,
+    "mass": 0.3212
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.0021
+   },
+   "rev_paired": {
+    "hits": 0.996,
+    "mass": 0.9197
+   }
+  },
+  {
+   "phase": 2,
+   "epoch": 6,
+   "step": 3072,
+   "loss": 1.1514,
+   "fwd_oneway": {
+    "hits": 0.807,
+    "mass": 0.447
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0049,
+    "mass": 0.0028
+   },
+   "rev_paired": {
+    "hits": 0.9945,
+    "mass": 0.9228
+   }
+  },
+  {
+   "phase": 2,
+   "epoch": 7,
+   "step": 3084,
+   "loss": 0.8532,
+   "fwd_oneway": {
+    "hits": 0.8942,
+    "mass": 0.5517
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0024,
+    "mass": 0.0022
+   },
+   "rev_paired": {
+    "hits": 0.9984,
+    "mass": 0.934
+   }
+  },
+  {
+   "phase": 2,
+   "epoch": 8,
+   "step": 3096,
+   "loss": 0.9786,
+   "fwd_oneway": {
+    "hits": 0.9445,
+    "mass": 0.6456
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0049,
+    "mass": 0.0034
+   },
+   "rev_paired": {
+    "hits": 0.9976,
+    "mass": 0.9453
+   }
+  }
+ ],
+ "final": {
+  "phase": 2,
+  "epoch": 8,
+  "step": 3096,
+  "loss": 0.9786,
+  "fwd_oneway": {
+   "hits": 0.9445,
+   "mass": 0.6456
+  },
+  "rev_oneway_clean": {
+   "hits": 0.0049,
+   "mass": 0.0034
+  },
+  "rev_paired": {
+   "hits": 0.9976,
+   "mass": 0.9453
+  }
+ },
+ "secs": 41.2
+}

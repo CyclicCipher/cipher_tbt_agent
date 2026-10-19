@@ -1,0 +1,155 @@
+{
+ "arm": "A",
+ "e": 1,
+ "seed": 1,
+ "steps1": 3000,
+ "lr": 0.001,
+ "batch": 256,
+ "model": {
+  "d": 128,
+  "n_layer": 4,
+  "n_head": 4,
+  "m": 512
+ },
+ "log": [
+  {
+   "phase": 1,
+   "step": 500,
+   "loss": 0.4994,
+   "fwd_oneway": {
+    "hits": 0.1605,
+    "mass": 0.1241
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0007
+   },
+   "rev_paired": {
+    "hits": 0.9889,
+    "mass": 0.7883
+   }
+  },
+  {
+   "phase": 1,
+   "step": 1000,
+   "loss": 0.3365,
+   "fwd_oneway": {
+    "hits": 0.1612,
+    "mass": 0.1552
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0008,
+    "mass": 0.0009
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.973
+   }
+  },
+  {
+   "phase": 1,
+   "step": 1500,
+   "loss": 0.3796,
+   "fwd_oneway": {
+    "hits": 0.1612,
+    "mass": 0.1577
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0006
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.986
+   }
+  },
+  {
+   "phase": 1,
+   "step": 2000,
+   "loss": 0.2759,
+   "fwd_oneway": {
+    "hits": 0.1612,
+    "mass": 0.159
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0004
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.9901
+   }
+  },
+  {
+   "phase": 1,
+   "step": 2500,
+   "loss": 0.1909,
+   "fwd_oneway": {
+    "hits": 0.1612,
+    "mass": 0.1592
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0004
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.9908
+   }
+  },
+  {
+   "phase": 1,
+   "step": 3000,
+   "loss": 0.2685,
+   "fwd_oneway": {
+    "hits": 0.1612,
+    "mass": 0.1595
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0006
+   },
+   "rev_paired": {
+    "hits": 1.0,
+    "mass": 0.9921
+   }
+  },
+  {
+   "phase": 2,
+   "epoch": 1,
+   "step": 3012,
+   "loss": 3.9432,
+   "fwd_oneway": {
+    "hits": 0.1139,
+    "mass": 0.0569
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0,
+    "mass": 0.0008
+   },
+   "rev_paired": {
+    "hits": 0.9818,
+    "mass": 0.8066
+   }
+  }
+ ],
+ "final": {
+  "phase": 2,
+  "epoch": 1,
+  "step": 3012,
+  "loss": 3.9432,
+  "fwd_oneway": {
+   "hits": 0.1139,
+   "mass": 0.0569
+  },
+  "rev_oneway_clean": {
+   "hits": 0.0,
+   "mass": 0.0008
+  },
+  "rev_paired": {
+   "hits": 0.9818,
+   "mass": 0.8066
+  }
+ },
+ "secs": 38.5
+}
