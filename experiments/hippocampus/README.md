@@ -42,6 +42,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H1E.md`, `run_h1e.py` | H1e: rotary positions (RoPE) for content matching |
 | `EXPERIMENT_H1F.md`, `run_h1f.py` | H1f: PoPE attention (the repo's, from `../transformers/h1_lid.py`) for content matching |
 | `EXPERIMENT_H1G.md`, `run_h1g.py` | H1g: PoPE content matching, reliability over seeds 6–9; more updates (batch 128 × 8,000) |
+| `EXPERIMENT_H1H.md`, `run_h1h.py` | H1h: non-causal attention for forward content matching |
 | `runs/` | results, one JSON per run |
 
 ## Decisions (the user)

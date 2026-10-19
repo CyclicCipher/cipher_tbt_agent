@@ -22,6 +22,9 @@ so a fixed offset ("two tokens earlier") is the same operation at every position
 embeddings, arXiv:2509.10534), reused unchanged from `../transformers/h1_lid.py` (`Attn(d, n_head, "pope")`): content in
 the magnitude, position alone in the phase. No absolute position embedding.
 
+`causal=False` (hippocampus H1h): every attention layer sees the whole input (an encoder). Safe for the reader: it
+predicts one answer after the input, and the answer is never in the input.
+
 `transport="sum"` (Experiment 1c) removes attention: the MLP blocks read the fixed sum of the two token codes, so an
 entity arrives at the MLP as exactly its own code. `set_mlp_off(True)` zeroes every MLP's output (the per-run check of
 how much of the facts the MLPs hold).
@@ -55,9 +58,10 @@ class MLP(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, d, n_head, m, dagger, n_layer, attn=True, pope=False):
+    def __init__(self, d, n_head, m, dagger, n_layer, attn=True, pope=False, causal=True):
         super().__init__()
         self.attn = attn
+        self.causal = causal
         self.pope = None
         if attn and pope:                                      # the repo's one PoPE implementation, not a copy
             import sys
@@ -66,6 +70,7 @@ class Block(nn.Module):
             from h1_lid import Attn
             self.ln1 = nn.LayerNorm(d)
             self.pope = Attn(d, n_head, "pope")
+            self.pope.causal = causal
         elif attn:
             self.ln1 = nn.LayerNorm(d)
             self.qkv = nn.Linear(d, 3 * d)
@@ -89,14 +94,14 @@ class Block(nn.Module):
             cos, sin = rope
             q, k = (torch.cat([t[..., ::2] * cos - t[..., 1::2] * sin, t[..., ::2] * sin + t[..., 1::2] * cos], -1)
                     for t in (q, k))
-        a = Fn.scaled_dot_product_attention(q, k, v, is_causal=True)
+        a = Fn.scaled_dot_product_attention(q, k, v, is_causal=self.causal)
         x = x + self.proj(a.transpose(1, 2).reshape(B, T, d))
         return x + self.mlp(self.ln2(x))
 
 
 class Net(nn.Module):
     def __init__(self, vocab, d=128, n_layer=2, n_head=4, m=256, dagger=False, tied=True, ctx=2, frozen=False,
-                 transport="attn", seg_ids=None, rope=False, pope=False):
+                 transport="attn", seg_ids=None, rope=False, pope=False, causal=True):
         super().__init__()
         self.tok = nn.Embedding(vocab, d)
         self.transport = transport
@@ -117,8 +122,8 @@ class Net(nn.Module):
             ang = torch.arange(ctx).float()[:, None] * inv[None, :]          # (ctx, hd/2)
             self.register_buffer("rope_cos", ang.cos(), persistent=False)
             self.register_buffer("rope_sin", ang.sin(), persistent=False)
-        self.blocks = nn.ModuleList(Block(d, n_head, m, dagger, n_layer, attn=(transport == "attn"), pope=pope)
-                                    for _ in range(n_layer))
+        self.blocks = nn.ModuleList(Block(d, n_head, m, dagger, n_layer, attn=(transport == "attn"), pope=pope,
+                                          causal=causal) for _ in range(n_layer))
         self.lnf = nn.LayerNorm(d)
         self.tied = tied
         if not tied:

@@ -273,7 +273,7 @@ SLOTS = [0] + [1, 2, 3, 4] * R + [5, 6]          # H1b: [MEM], (a, r, b, [SEP]) 
 
 def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500, fast=False, cosine=False, slots=False,
                familiarity=False, save=None, expand=False, read_order="ranked", init_from=None, rope=False,
-               pope=False):
+               pope=False, causal=True):
     """H1 defaults; H1b: fast (torch.compile + fused AdamW), cosine (decay to 10%), slots (slot embedding),
     familiarity (recognition before the surprise gate)."""
     t0 = time.time()
@@ -285,7 +285,7 @@ def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500, fast
     sets = eval_sets(F0)
     full = Store(VOCAB, index)                                 # for the training curve only: every fact written
     full.write(episodes(F0))
-    net = Net(VOCAB, ctx=CTX, seg_ids=SLOTS if slots else None, rope=rope, pope=pope, **MODEL).to(DEV)
+    net = Net(VOCAB, ctx=CTX, seg_ids=SLOTS if slots else None, rope=rope, pope=pope, causal=causal, **MODEL).to(DEV)
     if init_from:                                              # H1d: warm start from a trained reader
         net.load_state_dict(torch.load(init_from, map_location=DEV))
     opt = opt_for(net, lr, fused=fast)
@@ -310,7 +310,7 @@ def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500, fast
                R=R, theta=THETA, tau=TAU, model=MODEL, train_examples=len(X), log=log,
                options=dict(fast=fast, cosine=cosine, slots=slots, familiarity=familiarity, expand=expand,
                             read_order=read_order, init_from=str(init_from) if init_from else None, rope=rope,
-                            pope=pope),
+                            pope=pope, causal=causal),
                final=final, final_oracle=final_oracle, leak_control=None,
                gate=dict(facts=len(facts), written_first=len(w1), written_again=len(w2),
                          again_by_kind={k: sum(kinds[f[1]] == k for f in w2) for k in sorted(set(kinds))},
