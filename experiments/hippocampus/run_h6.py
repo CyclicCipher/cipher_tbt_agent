@@ -1,9 +1,10 @@
-"""Experiment H6 driver: arms none / recent / retrieve x seeds 0, 1; then the summary. Reuses existing results."""
+"""Experiments H6 and H6b driver: none / recent / retrieve (H6) and pair / pair_g3 / pair_g5 (H6b) x seeds 0, 1.
+Reuses existing results (H6's runs are not repeated)."""
 import json
 
 from h6 import OUT, STEPS, run
 
-ARMS, SEEDS = ("none", "recent", "retrieve"), (0, 1)
+ARMS, SEEDS = ("none", "recent", "retrieve", "pair", "pair_g3", "pair_g5"), (0, 1)   # pair*: H6b
 
 
 def get(arm, seed):

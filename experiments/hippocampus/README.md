@@ -44,6 +44,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H1G.md`, `run_h1g.py` | H1g: PoPE content matching, reliability over seeds 6–9; more updates (batch 128 × 8,000) |
 | `EXPERIMENT_H1H.md`, `run_h1h.py` | H1h: non-causal attention for forward content matching |
 | `EXPERIMENT_H6.md`, `text6.py`, `h6.py`, `run_h6.py` | H6: the store on real text (Latin, Caesar, Middle High German); the second reading |
+| `EXPERIMENT_H6B.md` | H6b: a retrieval-confidence gate (pair scoring, normalised share; gates 0.3 and 0.5) |
 | `runs/` | results, one JSON per run |
 
 ## Decisions (the user)

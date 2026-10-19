@@ -38,6 +38,7 @@ MEM, SEP, PAD = V, V + 1, V + 2
 VOCAB = V + 3
 SEQ = 1 + R * CHUNK + 1 + P + W - 1
 CUE, REREAD = 64, 0.25                                  # cue: the last 64 characters; share of re-read training windows
+PAIR = {"pair": None, "pair_g3": 0.3, "pair_g5": 0.5}  # H6b: pair scoring; the gate on the best share (None = no gate)
 MODEL = dict(d=128, n_layer=4, n_head=4, m=512)
 STREAM, PASSAGE = 50000, 20000
 STEPS = 3000                                            # set from a measured run before pre-registration
@@ -63,6 +64,8 @@ def select(policy, T, idf, t, gen, train=True, reread=None):
                 delivered WITH its continuation (RETRO-style), so the reader can copy what followed it then. Only
                 passages that end before the previous context are candidates, except on a re-read training example
                 (`reread`), where an earlier copy of the current region is also in the store."""
+    if policy in PAIR:                                  # H6b: pair scoring, optionally gated
+        return select_pair(T, idf, t, gen, train=train, reread=reread, gate=PAIR[policy])
     B = len(t)
     p0 = t - P
     cb = p0 // CHUNK
@@ -91,6 +94,43 @@ def select(policy, T, idf, t, gen, train=True, reread=None):
     j = torch.gather(cand, 1, best[:, None])[:, 0]
     ok = torch.gather(valid, 1, best[:, None])[:, 0]
     return torch.where(ok, j, torch.full_like(j, -1))
+
+
+def select_pair(T, idf, t, gen, train=True, reread=None, gate=None, return_score=False):
+    """H6b: candidates scored by the words of a PAIR of chunks (j, j+1), 64 characters like the cue, as the share of the
+    cue's idf mass they contain (0..1). The passage delivered starts at j (j .. j+3, with the continuation). With `gate`,
+    a best share below the gate shows no memory at all."""
+    B = len(t)
+    cb = (t - P) // CHUNK
+    if train:
+        H = HIST // CHUNK
+        cand = cb[:, None] - H + torch.arange(H + 3, device=DEV)[None]
+    else:
+        cand = torch.arange(int(cb.max()), device=DEV)[None].expand(B, -1)
+    valid = (cand >= 0) & (cand + R - 1 < cb[:, None])
+    if reread is not None:
+        cue_chunk = (t - CUE) // CHUNK
+        region = (cand >= cue_chunk[:, None] - 1) & (cand <= (t // CHUNK)[:, None])
+        valid = valid | (region & reread[:, None])
+    n_sets = len(T["sets"])
+    a = T["sets"][cand.clamp(0, n_sets - 1)]                              # (B, H, MAXW)
+    b = T["sets"][(cand + 1).clamp(0, n_sets - 1)]
+    b = torch.where((b[..., None] == a[..., None, :]).any(-1), torch.full_like(b, -1), b)   # no double counting
+    sets = torch.cat([a, b], -1)                                          # (B, H, 2*MAXW)
+    q = unique_rows(T["wid"][(t - CUE)[:, None] + torch.arange(CUE, device=DEV)[None]])
+    qmass = (idf[q.clamp(min=0)] * (q >= 0)).sum(-1).clamp(min=1e-6)     # the cue's idf mass
+    hit = ((sets[..., None] == q[:, None, None, :]) & (sets[..., None] >= 0)).any(-1)
+    share = (hit * idf[sets.clamp(min=0)]).sum(-1) / qmass[:, None]
+    noisy = share + 1e-4 * torch.rand(share.shape, device=DEV, generator=gen)
+    noisy = torch.where(valid, noisy, torch.full_like(noisy, -1e9))
+    best = noisy.argmax(1)
+    j = torch.gather(cand, 1, best[:, None])[:, 0]
+    sc = torch.gather(share, 1, best[:, None])[:, 0]
+    ok = torch.gather(valid, 1, best[:, None])[:, 0]
+    if gate is not None:
+        ok = ok & (sc >= gate)
+    j = torch.where(ok, j, torch.full_like(j, -1))
+    return (j, torch.where(torch.gather(valid, 1, best[:, None])[:, 0], sc, torch.zeros_like(sc))) if return_score else j
 
 
 def inputs(T, t, j):
@@ -171,7 +211,7 @@ def run(policy, seed, steps, batch=48, lr=1e-3):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arm", choices=["none", "recent", "retrieve"], required=True)
+    ap.add_argument("--arm", choices=["none", "recent", "retrieve"] + list(PAIR), required=True)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=0, help="0 = the pre-registered budget; >0 = a smoke test, not saved")
     a = ap.parse_args()
