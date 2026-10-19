@@ -28,6 +28,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H1.md` | H1: pre-registration, then results |
 | `EXPERIMENT_H1B.md`, `run_h1b.py` | H1b: a stronger reader (compile, cosine, slot embedding) and the familiarity gate |
 | `EXPERIMENT_H2.md`, `h2.py`, `run_h2.py` | H2: a continual stream; crowding; eviction by value against fifo, random and oracle |
+| `EXPERIMENT_H2B.md`, `expand.py`, `run_h2b.py` | H2b: learned query expansion against crowding |
 | `runs/` | results, one JSON per run |
 
 ## Standing rules
@@ -61,6 +62,12 @@ The plan is written, with the compression mechanisms in §2b.
 - **Eviction by value** (a usefulness rate from the reader's own answers) is within 0.03 of an oracle, beats fifo and
   random by 0.14–0.18, and **beats keeping everything at a quarter of the size**.
 - One of the two new readers stayed on the reverse plateau, so plateau escape is the read path's main fragility.
+
+**H2b (learned query expansion against crowding): done.**
+- It fixes retrieval: reverse recall is 1.00 at 11,930 rows.
+- But readers trained without it collapse (0.96 → 0.07 reverse): **the reader co-adapts to its retrieval**, and must be
+  trained with it.
+- Value eviction wins popularity-weighted, not per fact.
 
 `PLAN.md` §0 holds the learnings so far.
 

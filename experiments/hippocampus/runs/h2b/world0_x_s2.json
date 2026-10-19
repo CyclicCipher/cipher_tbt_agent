@@ -1,0 +1,40 @@
+{
+ "seed": 2,
+ "expand": true,
+ "written": 2996,
+ "final": {
+  "fwd_oneway": {
+   "hits": 0.9601,
+   "mass": 0.9249,
+   "recall": 0.9985
+  },
+  "rev_oneway_clean": {
+   "hits": 0.132,
+   "mass": 0.0798,
+   "recall": 1.0
+  },
+  "rev_paired": {
+   "hits": 0.1155,
+   "mass": 0.0689,
+   "recall": 1.0
+  }
+ },
+ "final_oracle": {
+  "fwd_oneway": {
+   "hits": 0.9586,
+   "mass": 0.9251,
+   "recall": 0.9985
+  },
+  "rev_oneway_clean": {
+   "hits": 0.1247,
+   "mass": 0.0762,
+   "recall": 1.0
+  },
+  "rev_paired": {
+   "hits": 0.1242,
+   "mass": 0.0712,
+   "recall": 1.0
+  }
+ },
+ "secs": 4.3
+}

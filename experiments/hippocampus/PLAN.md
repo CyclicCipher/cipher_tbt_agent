@@ -17,6 +17,7 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 |---|---|
 | **H1** (`EXPERIMENT_H1.md`) | One write per fact gives reverse access at 38–53%. Weights alone give ≤ 0.9% even after 64 exposures, with the converse tokens taught on the same world (chance 0.12%). Forward: 1 write against 8–64 exposures. Retrieval recall is 1.00, so the reader is the limit. The surprise gate re-wrote 19–21% of facts on a second presentation (one-to-many facts). |
 | **H1b** (`EXPERIMENT_H1B.md`) | The reader with `torch.compile`, 4,500 steps and cosine decay (**B2**) gives **83–93% reverse and 95–96% forward from one write**. The familiarity gate gives **0 duplicates**. The slot embedding (B3) hurt (stuck at 0.50). |
+| **H2b** (`EXPERIMENT_H2B.md`) | Learned query expansion (converse token → its relation, from index co-occurrence) makes reverse recall 1.00 at any store size. But the H2 readers, trained without it, fall to 0.07–0.13 reverse: **reader–retrieval co-adaptation**. The plateau is not simply relation-blind reading. Per-fact scoring: value eviction wins only popularity-weighted. |
 | **H2** (`EXPERIMENT_H2.md`) | A stream of 11,930 facts with Zipf queries. **Crowding** is the store's form of interference: uncapped, the first phase's reverse accuracy falls 2.5–3× as the store grows (recall 1.00 → 0.42). **Eviction by value** (a usefulness rate from the reader's own answers) beats fifo and random by 0.14–0.18, comes within 0.004–0.027 of an oracle, and **beats keeping everything** (0.64 vs 0.58, 0.82 vs 0.73) at a quarter of the size. Two new B2 readers: one escaped the plateau (0.96), one did not (0.475). Three of the four B2 readers so far escaped. |
 
 **Learnings that change the design:**
@@ -46,7 +47,14 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 9. **The reader's plateau escape is the read path's main fragility** (3 of 4 seeds). Before H3 builds on a reader,
    check that it escaped (reverse ≥ 0.8 on world 0). H2's seed 3 reader (0.963) qualifies; seed 2 (0.475) does not.
 10. **Streams with Zipf(1) popularity concentrate ~10% of queries on one fact.** Report several stream seeds and a
-    per-fact score next time.
+    per-fact score next time. *(Done in H2b: "value beats uncapped" holds popularity-weighted, but not per fact.)*
+11. **The reader co-adapts to its retrieval** (H2b).
+    - Learned query expansion (each converse token learns its relation from co-occurrence) fixed crowding at retrieval:
+      reverse recall stayed 1.00 at 11,930 rows.
+    - But readers trained without it collapsed to about 1/12 reverse accuracy. The good reader matched the relation
+      itself and left entity matching to retrieval.
+    - **A read path is reader + retrieval; any retrieval change must be trained with.** H1c trains readers with the
+      expansion.
 
 **Reader configuration carried forward:** B2. That is 4 layers, d = 128, read R = 12, θ = 20 bits, τ = 2 bits,
 compile + fused AdamW, 4,500 steps, cosine to 10%, and the familiarity gate.
