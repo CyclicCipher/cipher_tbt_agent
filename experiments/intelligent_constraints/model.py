@@ -142,7 +142,9 @@ class Net(nn.Module):
         for b in self.blocks:
             b.mlp.off = on
 
-    def forward(self, idx):
+    def forward(self, idx, last=None):
+        """Logits for the answer after the last token; with `last` = n (hippocampus H6, language modelling), the logits
+        at each of the last n positions, (B, n, vocab)."""
         rope = None
         if self.transport == "sum":
             x = self.tok(idx).sum(1, keepdim=True)
@@ -159,5 +161,6 @@ class Net(nn.Module):
         for b in self.blocks:
             x = b(x, rope)
         W = self.tok.weight if self.tied else self.out
-        logits = self.lnf(x[:, -1]) @ W.T        # logits for the answer after the last prompt token
+        h = x[:, -last:] if last else x[:, -1]
+        logits = self.lnf(h) @ W.T               # logits for the answer after the last prompt token (or the last n)
         return logits * self.scale / W.shape[1] ** 0.5 if self.frozen else logits

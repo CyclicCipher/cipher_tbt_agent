@@ -43,6 +43,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H1F.md`, `run_h1f.py` | H1f: PoPE attention (the repo's, from `../transformers/h1_lid.py`) for content matching |
 | `EXPERIMENT_H1G.md`, `run_h1g.py` | H1g: PoPE content matching, reliability over seeds 6–9; more updates (batch 128 × 8,000) |
 | `EXPERIMENT_H1H.md`, `run_h1h.py` | H1h: non-causal attention for forward content matching |
+| `EXPERIMENT_H6.md`, `text6.py`, `h6.py`, `run_h6.py` | H6: the store on real text (Latin, Caesar, Middle High German); the second reading |
 | `runs/` | results, one JSON per run |
 
 ## Decisions (the user)
@@ -167,6 +168,9 @@ The plan is written, with the compression mechanisms in §2b.
 - Forward content matching is still not learned (0.06), and reverse is slowed.
 - Causal masking was not the obstacle.
 - Forward content matching remains open; the ranked read path covers single-fact questions.
+- Code review: no bug; the cause is the question coming after the memory.
+
+**H6 (real text)** is pre-registered.
 
 `PLAN.md` §0 holds the learnings so far.
 
