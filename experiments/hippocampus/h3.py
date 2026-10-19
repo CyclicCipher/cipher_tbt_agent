@@ -90,15 +90,36 @@ def consolidation_examples(net, store, gen, inferences=True):
     return torch.cat(cX), torch.cat(cY), out
 
 
-def sleep_train(net, cX, cY, X, Y, gen, steps, cons, rehearse):
-    """Sleep: `steps` updates, each `cons` consolidation examples + `rehearse` examples of the reading task."""
+def sleep_train(net, cX, cY, X, Y, gen, steps, cons, rehearse, pseudo=None):
+    """Sleep: `steps` updates, each `cons` consolidation examples + `rehearse` examples of the reading task, and
+    (H3d) `pseudo` = (pX, pY, k): k examples of what the weights already knew before this sleep."""
     opt = opt_for(net, SLEEP_LR, fused=True)
     train_net = torch.compile(net)
     net.train()
     for t in range(1, steps + 1):
         i = torch.randint(0, len(cX), (cons,), device=DEV, generator=gen)
         j = torch.randint(0, len(X), (rehearse,), device=DEV, generator=gen)
-        step(train_net, opt, torch.cat([cX[i], X[j]]), torch.cat([cY[i], Y[j]]), SLEEP_LR, t, total=steps)
+        bx, by = [cX[i], X[j]], [cY[i], Y[j]]
+        if pseudo is not None:
+            pX, pY, k = pseudo
+            m = torch.randint(0, len(pX), (k,), device=DEV, generator=gen)
+            bx.append(pX[m])
+            by.append(pY[m])
+        step(train_net, opt, torch.cat(bx), torch.cat(by), SLEEP_LR, t, total=steps)
+
+
+def what_weights_know(net, n_ent=N_ENT, n_rel=N_REL, conf=CONF):
+    """H3d pseudo-rehearsal: the weights' confident (p >= conf) empty-memory answers over the whole question space,
+    every (entity, relation) forward and every (entity, converse) reverse question. Returns (pX, pY) on DEV."""
+    P = torch.tensor([(e, N_ENT + r) for e in range(n_ent) for r in range(2 * n_rel)])
+    X_, Y_ = [], []
+    for i in range(0, len(P), 2000):
+        part = P[i:i + 2000]
+        c, a = predict(net, empty_ctx(part)).max(-1)
+        keep = (c >= conf).cpu()
+        X_.append(empty_ctx(part[keep]))
+        Y_.append(a[keep.to(DEV)])
+    return torch.cat(X_), torch.cat(Y_)
 
 
 def self_check(net, rows):

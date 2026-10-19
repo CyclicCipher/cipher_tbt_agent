@@ -33,6 +33,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H3.md`, `h3.py`, `run_h3.py` | H3: consolidation (sleep with and without self-generated reverse inferences), then eviction |
 | `EXPERIMENT_H3B.md`, `run_h3b.py` | H3b: longer sleep, 1:1 vs 3:1 mixes, self-checked eviction |
 | `EXPERIMENT_H3C.md`, `h3c.py`, `run_h3c.py` | H3c: sleep inside the continual stream (keeping the long tail) |
+| `EXPERIMENT_H3D.md` | H3d: the same with pseudo-rehearsal (the weights replay what they already know); arm `sleep_pr` of `h3c.py` |
 | `runs/` | results, one JSON per run |
 
 ## Standing rules

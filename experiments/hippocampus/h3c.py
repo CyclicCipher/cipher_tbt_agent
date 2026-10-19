@@ -7,6 +7,8 @@ the store -> the normal read; none -> an empty memory, so the weights answer).
   sleep     after phases 6, 12, 18, 24: consolidate the store's episodes (forward + the reader's own reverse
             inferences), SLEEP steps at 3:1 with rehearsal of reading, then self-checked eviction (H3b)
   uncapped  no cap, no sleep (reference)
+  sleep_pr  sleep + pseudo-rehearsal (H3d): each sleep also replays the weights' own confident answers over the whole
+            question space, recorded just before it (128 consolidation + 64 pseudo + 64 reading per batch)
 At the end: per-fact accuracy on EVERY stream fact (forward and reverse, combined system), the weights alone, the
 held-out world's reading, and how well the weights still hold the facts consolidated at the first sleep.
 """
@@ -22,12 +24,13 @@ from h1 import CTX, DEV, MODEL, N_ENT, VOCAB, Net, contexts, conv, eval_mem, eva
     store_factory, training_set
 from h2 import credit, question
 from h3 import (READERS, HELDOUT_WORLD, THETA_FULL, consolidation_examples, empty_ctx, predict, self_check,
-                sleep_train, written_store)
+                sleep_train, what_weights_know, written_store)
 
 HERE = Path(__file__).parent
 OUT = HERE / "runs" / "h3c"
 WORLDS, PHASES, QUERIES, CAP, ZIPF = (100, 101), 24, 1000, 1500, 1.0
 SLEEP_AT, SLEEP_STEPS, CONS, REH = (6, 12, 18, 24), 1000, 192, 64
+PR_CONS, PR_PSEUDO = 128, 64                                         # H3d: 128 consolidation + 64 pseudo + 64 reading
 
 
 def world(stream_seed):
@@ -93,7 +96,7 @@ def run(arm, seed, stream_seed):
     sets50 = eval_sets(F50)
     heldout_before = eval_mem(net, store50, sets50, gen)
     X = Y = None
-    if arm == "sleep":
+    if arm in ("sleep", "sleep_pr"):
         X, Y = training_set(Store, "sparse", gen)
     facts, pop, fwd, rev = world(stream_seed)
     chunks = [facts[i * len(facts) // PHASES:(i + 1) * len(facts) // PHASES] for i in range(PHASES)]
@@ -124,16 +127,26 @@ def run(arm, seed, stream_seed):
             tot[k][0] += ph_hits[k][0]
             tot[k][1] += ph_hits[k][1]
         sl = None
-        if arm == "sleep" and ph in SLEEP_AT:
+        if arm in ("sleep", "sleep_pr") and ph in SLEEP_AT:
             rows = store.rows.cpu()
             cX, cY, _ = consolidation_examples(net, store, gen, inferences=True)
-            sleep_train(net, cX, cY, X, Y, gen, SLEEP_STEPS, CONS, REH)
+            n_pseudo = 0
+            if arm == "sleep_pr":
+                pX, pY = what_weights_know(net)
+                n_pseudo = len(pX)
+                if n_pseudo:
+                    sleep_train(net, cX, cY, X, Y, gen, SLEEP_STEPS, PR_CONS, REH, pseudo=(pX, pY, PR_PSEUDO))
+                else:                                                  # nothing known yet (the first sleep)
+                    sleep_train(net, cX, cY, X, Y, gen, SLEEP_STEPS, CONS, REH)
+            else:
+                sleep_train(net, cX, cY, X, Y, gen, SLEEP_STEPS, CONS, REH)
             top_f, top_r, _, _ = self_check(net, rows)
             out = (top_f & top_r).nonzero().flatten().tolist()
             if not sleeps:
                 first_sleep_facts = [(int(rows[i, 0]), int(rows[i, 1]) - N_ENT, int(rows[i, 2])) for i in out]
             store.remove(out)
-            sl = dict(phase=ph, rows=len(rows), consolidation_examples=len(cX), evicted=len(out))
+            sl = dict(phase=ph, rows=len(rows), consolidation_examples=len(cX), evicted=len(out),
+                      pseudo_examples=n_pseudo)
             sleeps.append(sl)
         log.append(dict(phase=ph, written=len(w), value_evicted=ev, rows=len(store), sleep=sl,
                         online_fwd=round(ph_hits["fwd"][0] / ph_hits["fwd"][1], 4),
@@ -168,7 +181,7 @@ def run(arm, seed, stream_seed):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arm", choices=["value", "sleep", "uncapped"], required=True)
+    ap.add_argument("--arm", choices=["value", "sleep", "uncapped", "sleep_pr"], required=True)
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--stream_seed", type=int, default=0)
     a = ap.parse_args()

@@ -1,9 +1,10 @@
-"""Experiment H3c driver: value / sleep / uncapped x E1 readers 4, 5 x stream seeds 0, 1. Reuses existing results."""
+"""Experiments H3c and H3d driver: value / sleep / uncapped / sleep_pr x E1 readers 4, 5 x stream seeds 0, 1.
+Reuses existing results (H3c's runs are not repeated)."""
 import json
 
 from h3c import OUT, run
 
-ARMS, SEEDS, STREAM_SEEDS = ("value", "sleep", "uncapped"), (4, 5), (0, 1)
+ARMS, SEEDS, STREAM_SEEDS = ("value", "sleep", "uncapped", "sleep_pr"), (4, 5), (0, 1)   # sleep_pr: H3d
 
 
 def get(arm, seed, ss):
