@@ -170,7 +170,11 @@ The plan is written, with the compression mechanisms in §2b.
 - Forward content matching remains open; the ranked read path covers single-fact questions.
 - Code review: no bug; the cause is the question coming after the memory.
 
-**H6 (real text)** is pre-registered.
+**H6 (real text): done.**
+- **One-shot learning of a passage:** a second reading is 0.29–0.53 bits/char cheaper.
+- **Under shift:** Middle High German −0.43 bits/char.
+- **The cost:** +0.06 bits/char on non-repeating Latin, because a passage is shown even when irrelevant.
+- Next: a retrieval-confidence gate.
 
 `PLAN.md` §0 holds the learnings so far.
 

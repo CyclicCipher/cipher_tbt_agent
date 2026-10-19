@@ -82,6 +82,53 @@ except what the memory shows:
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/h6/`, log `runs/h6_log.txt`)
 
-*(to be filled in after the runs)*
+All runs took 92–97 s, within the 2-minute rule.
+
+| arm | seed | **bits/char: heldout** | caesar | **mhg** | **second reading: first → second (ratio)** | final training loss |
+|---|---|---|---|---|---|---|
+| none | 0 | 2.128 | 2.051 | 5.401 | 2.135 → 2.135 (1.000) | 2.127 |
+| none | 1 | 2.135 | 2.050 | 5.434 | 2.149 → 2.150 (1.000) | 2.141 |
+| recent | 0 | 2.114 | 2.053 | 5.073 | 2.125 → 2.115 (0.996) | 2.111 |
+| recent | 1 | 2.135 | 2.062 | 5.272 | 2.153 → 2.140 (0.994) | 2.151 |
+| **retrieve** | 0 | 2.167 | 2.097 | **4.894** | 2.176 → **1.883 (0.865)** | 1.953 |
+| **retrieve** | 1 | 2.210 | 2.131 | **5.090** | 2.223 → **1.697 (0.763)** | 1.971 |
+
+**Means over seeds:**
+
+| arm | heldout | caesar | mhg | second-reading ratio |
+|---|---|---|---|---|
+| none | 2.132 | 2.050 | 5.418 | 1.000 |
+| recent | 2.125 | 2.058 | 5.173 | 0.995 |
+| retrieve | 2.188 | 2.114 | 4.992 | 0.814 |
+
+**Against the predictions:**
+- **T1 (one-reading learning, ratio ≤ 0.6): not met. Not refuted either** (the line was > 0.9).
+  - Retrieve's second pass is **0.29 and 0.53 bits/char lower** than its first (ratios 0.865 and 0.763).
+  - none and recent are unchanged (1.000 and 0.994–0.996), as predicted: they cannot see the first pass.
+  - The reader learned to copy from memory, partially, within 3,000 steps.
+- **T2 (in-distribution gain): REFUTED.** On held-out Latin, retrieve is **worse** than none by 0.056 bits/char
+  (2.188 vs 2.132), and worse than recent. Caesar is worse by 0.064.
+- **T3 (larger gain under shift): holds.** On Middle High German, retrieve beats none by **0.43 bits/char** (4.99 vs
+  5.42, about 8%) and recent by 0.18. On held-out Latin the "gain" is −0.06.
+- **Reported:**
+  - Recent against none: a longer context barely matters in Latin prose (−0.007 heldout, +0.008 caesar) but helps the
+    epic (−0.25 mhg).
+  - Retrieve's lower training loss (1.95–1.97 vs 2.11–2.15) comes from the 25% copyable re-read windows.
+
+**What H6 establishes:**
+1. **On real text, the store gives one-shot learning of a passage.** A second reading is 0.29–0.53 bits/char cheaper
+   after a single first reading, with no gradient step. The weights-only and longer-context models gain nothing.
+2. **It pays where text repeats:** formulaic Middle High German verse (−0.43 bits/char) and re-read passages. This is
+   the shape ZipLearn found for adaptation (E37: large under shift, small in distribution).
+3. **It costs on non-repeating text** (+0.06 bits/char on held-out Latin and Caesar).
+   - A retrieved passage is shown for every window, relevant or not, so the reader sometimes copies from an irrelevant
+     match. This is the "false retrievals inject noise" risk of `PLAN.md` §5.
+   - The capacity spent learning to copy is not available for ordinary prediction.
+4. **The obvious next step is a retrieval-confidence gate,** as in H3's combined switch: show the memory only when
+   the best match is strong, and padding otherwise. That should keep the gains on repeating text and remove most of the
+   cost on prose.
+5. **Caveats:** a small, short-trained model (about 0.9M parameters, 3,000 steps, about 2.1 bits/char) and two seeds.
+   The direction of each effect is consistent across seeds; the sizes are not stable (second-reading ratio 0.86 vs
+   0.76).

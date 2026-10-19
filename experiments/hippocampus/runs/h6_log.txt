@@ -1,0 +1,19 @@
+ran none_s0.json in 91.9s
+ran none_s1.json in 92.7s
+ran recent_s0.json in 94.6s
+ran recent_s1.json in 94.8s
+ran retrieve_s0.json in 95.8s
+ran retrieve_s1.json in 96.7s
+
+arm seed | bits/char: heldout  caesar  mhg | second reading: first -> second (ratio) | final train loss | secs
+  none     0 | 2.128  2.051  5.401 | 2.135 -> 2.135 (1.000) | 2.127 | 91.9
+  none     1 | 2.135  2.050  5.434 | 2.149 -> 2.150 (1.000) | 2.141 | 92.7
+  recent   0 | 2.114  2.053  5.073 | 2.125 -> 2.115 (0.996) | 2.111 | 94.6
+  recent   1 | 2.135  2.062  5.272 | 2.153 -> 2.140 (0.994) | 2.151 | 94.8
+  retrieve 0 | 2.167  2.097  4.894 | 2.176 -> 1.883 (0.865) | 1.953 | 95.8
+  retrieve 1 | 2.210  2.131  5.090 | 2.223 -> 1.697 (0.763) | 1.971 | 96.7
+
+means over seeds (bits/char):
+  none     heldout 2.132  caesar 2.050  mhg 5.418  second-reading ratio 1.000
+  recent   heldout 2.125  caesar 2.058  mhg 5.173  second-reading ratio 0.995
+  retrieve heldout 2.188  caesar 2.114  mhg 4.992  second-reading ratio 0.814
