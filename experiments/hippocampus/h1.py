@@ -207,6 +207,37 @@ def gated_write(net, store, facts, gen, chunk=256, familiarity=False, stats=None
     return written
 
 
+def store_factory(expand=False, read_order="ranked"):
+    """A Store constructor whose stores all read the same way: with or without the learned expansion, ranked or
+    shuffled."""
+    table = None
+    if expand:
+        from expand import expansion_table
+        table = expansion_table()
+
+    def make(*a, **k):
+        st_ = StoreClass(*a, **k)
+        st_.read_order = read_order
+        if table is not None:
+            st_.expansion = table
+        return st_
+    return make
+
+
+def training_set(Store, index, gen):
+    """The reader's training contexts: worlds 1-20, each written whole (ungated) into its own store, every fact asked in
+    both directions."""
+    X, Y = [], []
+    for w in TRAIN_WORLDS:
+        F = make_facts(seed=w)
+        st = Store(VOCAB, index)
+        st.write(episodes(F))
+        P, A = questions(F)
+        X.append(contexts(st, P, gen)[0])
+        Y.append(A.to(DEV))
+    return torch.cat(X), torch.cat(Y)
+
+
 SLOTS = [0] + [1, 2, 3, 4] * R + [5, 6]          # H1b: [MEM], (a, r, b, [SEP]) per episode, question tokens
 
 
@@ -217,26 +248,8 @@ def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500, fast
     t0 = time.time()
     torch.manual_seed(seed)
     gen = torch.Generator(device=DEV).manual_seed(seed)
-    if expand:
-        from expand import expansion_table
-        table = expansion_table()
-
-    def Store(*a, **k):                                        # every store in this run reads the same way (H1c)
-        st_ = StoreClass(*a, **k)
-        st_.read_order = read_order
-        if expand:
-            st_.expansion = table
-        return st_
-
-    X, Y = [], []
-    for w in TRAIN_WORLDS:                                     # the reader's training worlds: written whole, ungated
-        F = make_facts(seed=w)
-        st = Store(VOCAB, index)
-        st.write(episodes(F))
-        P, A = questions(F)
-        X.append(contexts(st, P, gen)[0])
-        Y.append(A.to(DEV))
-    X, Y = torch.cat(X), torch.cat(Y)
+    Store = store_factory(expand, read_order)                  # every store in this run reads the same way (H1c)
+    X, Y = training_set(Store, index, gen)
     F0 = make_facts(seed=TEST_WORLD)
     sets = eval_sets(F0)
     full = Store(VOCAB, index)                                 # for the training curve only: every fact written

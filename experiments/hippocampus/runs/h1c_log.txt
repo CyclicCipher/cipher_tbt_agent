@@ -1,0 +1,40 @@
+ran reader_E1_s4.json in 94.6s
+ran reader_E1_s5.json in 93.5s
+ran reader_E1_s6.json in 91.4s
+ran reader_E1_s7.json in 91.8s
+ran reader_E2_s4.json in 93.6s
+ran reader_E2_s5.json in 95.2s
+ran stream_uncapped_E1s4_ss0.json in 14.9s
+ran stream_uncapped_E1s4_ss1.json in 8.4s
+ran stream_uncapped_E1s4_ss2.json in 8.6s
+ran stream_value_E1s4_ss0.json in 15.2s
+ran stream_value_E1s4_ss1.json in 8.1s
+ran stream_value_E1s4_ss2.json in 8.0s
+ran stream_uncapped_E1s5_ss0.json in 9.1s
+ran stream_uncapped_E1s5_ss1.json in 12.1s
+ran stream_uncapped_E1s5_ss2.json in 11.3s
+ran stream_value_E1s5_ss0.json in 12.4s
+ran stream_value_E1s5_ss1.json in 9.4s
+ran stream_value_E1s5_ss2.json in 9.0s
+
+readers, world 0: arm seed | fwd | REV one-way clean (recall) | reverse classes | reverse curve | secs
+  E1 4 | 0.958 | 0.973 (1.00) | {'correct': 0.9731, 'rel_ok_entity_wrong': 0.0269, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0, 'not_in_context': 0.0} | 0.86 0.95 0.96 0.97 0.97 0.97 0.97 0.97 0.98 | 94.6
+  E1 5 | 0.956 | 0.968 (1.00) | {'correct': 0.9682, 'rel_ok_entity_wrong': 0.0318, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0, 'not_in_context': 0.0} | 0.88 0.96 0.96 0.97 0.98 0.98 0.97 0.97 0.97 | 93.5
+  E1 6 | 0.950 | 0.973 (1.00) | {'correct': 0.9731, 'rel_ok_entity_wrong': 0.0269, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0, 'not_in_context': 0.0} | 0.89 0.97 0.97 0.98 0.97 0.97 0.98 0.97 0.98 | 91.4
+  E1 7 | 0.950 | 0.979 (1.00) | {'correct': 0.9788, 'rel_ok_entity_wrong': 0.0212, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0, 'not_in_context': 0.0} | 0.88 0.96 0.97 0.97 0.97 0.97 0.98 0.98 0.98 | 91.8
+  E2 4 | 0.064 | 0.199 (1.00) | {'correct': 0.1989, 'rel_ok_entity_wrong': 0.6496, 'entity_ok_rel_wrong': 0.0008, 'other_in_context': 0.0041, 'not_in_context': 0.1467} | 0.05 0.16 0.19 0.19 0.18 0.18 0.20 0.19 0.19 | 93.6
+  E2 5 | 0.054 | 0.209 (1.00) | {'correct': 0.2086, 'rel_ok_entity_wrong': 0.6235, 'entity_ok_rel_wrong': 0.0008, 'other_in_context': 0.0024, 'not_in_context': 0.1646} | 0.07 0.18 0.19 0.20 0.20 0.21 0.20 0.21 0.21 | 95.2
+
+streams (E1 readers, expansion): policy reader ss | online fwd rev mean | per-fact fwd rev mean | probe rev @6 -> @24 (recall) | rows
+  uncapped 4 0 | 0.744 0.860 0.802 | 0.782 0.789 0.785 | 0.853 -> 0.734 (1.00) | 11929
+  uncapped 4 1 | 0.780 0.847 0.814 | 0.778 0.797 0.787 | 0.837 -> 0.749 (1.00) | 11926
+  uncapped 4 2 | 0.776 0.795 0.785 | 0.777 0.790 0.784 | 0.851 -> 0.718 (1.00) | 11925
+  value    4 0 | 0.741 0.861 0.801 | 0.611 0.660 0.635 | 0.853 -> 0.473 (0.26) | 3000
+  value    4 1 | 0.771 0.848 0.809 | 0.619 0.662 0.640 | 0.837 -> 0.513 (0.31) | 3000
+  value    4 2 | 0.788 0.818 0.803 | 0.620 0.658 0.639 | 0.851 -> 0.473 (0.28) | 3000
+  uncapped 5 0 | 0.778 0.850 0.814 | 0.777 0.786 0.781 | 0.875 -> 0.752 (1.00) | 11927
+  uncapped 5 1 | 0.790 0.839 0.814 | 0.769 0.789 0.779 | 0.835 -> 0.720 (1.00) | 11925
+  uncapped 5 2 | 0.771 0.790 0.781 | 0.777 0.785 0.781 | 0.855 -> 0.710 (1.00) | 11926
+  value    5 0 | 0.784 0.850 0.817 | 0.613 0.657 0.635 | 0.875 -> 0.463 (0.24) | 3000
+  value    5 1 | 0.790 0.842 0.816 | 0.619 0.660 0.640 | 0.835 -> 0.521 (0.32) | 3000
+  value    5 2 | 0.780 0.811 0.796 | 0.621 0.652 0.637 | 0.855 -> 0.471 (0.27) | 3000

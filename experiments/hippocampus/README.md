@@ -29,6 +29,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H1B.md`, `run_h1b.py` | H1b: a stronger reader (compile, cosine, slot embedding) and the familiarity gate |
 | `EXPERIMENT_H2.md`, `h2.py`, `run_h2.py` | H2: a continual stream; crowding; eviction by value against fifo, random and oracle |
 | `EXPERIMENT_H2B.md`, `expand.py`, `run_h2b.py` | H2b: learned query expansion against crowding |
+| `EXPERIMENT_H1C.md`, `run_h1c.py` | H1c: readers trained with the expansion (reliability), and streams with them |
 | `runs/` | results, one JSON per run |
 
 ## Standing rules
@@ -68,6 +69,13 @@ The plan is written, with the compression mechanisms in §2b.
 - But readers trained without it collapse (0.96 → 0.07 reverse): **the reader co-adapts to its retrieval**, and must be
   trained with it.
 - Value eviction wins popularity-weighted, not per fact.
+
+**H1c (readers trained with the expansion): done.**
+- **4 of 4 seeds reach 0.97–0.98 reverse, with no plateau.**
+- Crowding is fixed end to end.
+- Without crowding, value eviction ties the full store on popularity-weighted accuracy at a quarter of the size, and
+  loses the long tail.
+- E1 is the reader from here.
 
 `PLAN.md` §0 holds the learnings so far.
 

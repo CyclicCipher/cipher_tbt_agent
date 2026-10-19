@@ -26,6 +26,7 @@ def get(path, fn):
 
 
 def main():
+    OUT.mkdir(parents=True, exist_ok=True)
     readers = {(a, s): get(OUT / f"reader_{a}_s{s}.json",
                            lambda a=a, s=s: dict(run_memory("sparse", s, steps=H1B_STEPS,
                                                             save=OUT / f"reader_{a}_s{s}.pt", **H1B["B2"], **ARMS[a]),
