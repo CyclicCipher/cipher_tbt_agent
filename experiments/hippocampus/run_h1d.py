@@ -21,7 +21,7 @@ ARMS = {"W1": lambda s: dict(expand=True, read_order="shuffled", init_from=E1 / 
 SEEDS = (4, 5)
 
 
-def both_orders(path, seed, rope=False, pope=False):
+def both_orders(path, seed, rope=False, pope=False, keep_pred=False):
     """World 0 with the reader at `path`, under the ranked and the shuffled read order."""
     t0 = time.time()
     net = Net(VOCAB, ctx=CTX, rope=rope, pope=pope, **MODEL).to(DEV)
@@ -35,7 +35,7 @@ def both_orders(path, seed, rope=False, pope=False):
         store = Store(VOCAB, "sparse")
         perm = torch.randperm(len(F0.facts), generator=torch.Generator().manual_seed(seed)).tolist()
         gated_write(net, store, [F0.facts[j] for j in perm], gen, familiarity=True)
-        out[order] = eval_mem(net, store, eval_sets(F0), gen, classify=True)
+        out[order] = eval_mem(net, store, eval_sets(F0), gen, classify=True, keep_pred=keep_pred)
     out["secs"] = round(time.time() - t0, 1)
     return out
 

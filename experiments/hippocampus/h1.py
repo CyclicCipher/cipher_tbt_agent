@@ -131,8 +131,29 @@ def classify_reverse(store, s, ids, logits):
     return {k: round(v / len(s), 4) for k, v in c.items()}
 
 
+def classify_forward(store, s, ids, logits):
+    """H1g: what kind of answer did the reader give to each forward question (a, r)?"""
+    pred = logits.float()[:, :N_ENT].argmax(-1).tolist()
+    rows = store.rows.tolist() if len(store) else []
+    c = dict(correct=0, rel_ok_entity_wrong=0, entity_ok_rel_wrong=0, other_in_context=0, not_in_context=0)
+    for i, ((a, r_tok), correct, _) in enumerate(s):
+        p = pred[i]
+        read = [rows[j] for j in ids[i].tolist() if j >= 0]
+        if p in correct:
+            c["correct"] += 1
+        elif any(t[2] == p and t[1] == r_tok for t in read):
+            c["rel_ok_entity_wrong"] += 1
+        elif any(t[2] == p and t[0] == a for t in read):
+            c["entity_ok_rel_wrong"] += 1
+        elif any(p in t for t in read):
+            c["other_in_context"] += 1
+        else:
+            c["not_in_context"] += 1
+    return {k: round(v / len(s), 4) for k, v in c.items()}
+
+
 @torch.no_grad()
-def eval_mem(net, store, sets, gen, oracle=False, classify=False):
+def eval_mem(net, store, sets, gen, oracle=False, classify=False, keep_pred=False):
     net.eval()
     out = {}
     for name, s in sets.items():
@@ -146,6 +167,10 @@ def eval_mem(net, store, sets, gen, oracle=False, classify=False):
         out[name] = dict(hits=hits, mass=mass, recall=round(recall, 4))
         if classify and name.startswith("rev"):
             out[name]["classes"] = classify_reverse(store, s, ids, logits)
+        if classify and name.startswith("fwd"):
+            out[name]["classes"] = classify_forward(store, s, ids, logits)
+        if keep_pred:                                           # H1g: the predictions themselves, for later analysis
+            out[name]["pred"] = logits.float()[:, :N_ENT].argmax(-1).tolist()
     net.train()
     return out
 

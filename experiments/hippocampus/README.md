@@ -41,7 +41,13 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H1D.md`, `run_h1d.py` | H1d: content matching without a rank cue (warm start; mixed read order) |
 | `EXPERIMENT_H1E.md`, `run_h1e.py` | H1e: rotary positions (RoPE) for content matching |
 | `EXPERIMENT_H1F.md`, `run_h1f.py` | H1f: PoPE attention (the repo's, from `../transformers/h1_lid.py`) for content matching |
+| `EXPERIMENT_H1G.md`, `run_h1g.py` | H1g: PoPE content matching, reliability over seeds 6–9; more updates (batch 128 × 8,000) |
 | `runs/` | results, one JSON per run |
+
+## Decisions (the user)
+
+- **2026-10-18: the store stays a table.** The neural substrate (H5–H5c) is not used because of its 50 MB cost (about
+  300× the table's).
 
 ## Standing rules
 

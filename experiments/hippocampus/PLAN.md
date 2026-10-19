@@ -112,6 +112,12 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
     it (≤ 0.23). PoPE did, in one seed of two (0.97, order-independent), as PoPE's own argument predicts. Not yet
     reliable: seed-dependent, and forward not learned in that run.
 
+**Decisions (the user):**
+- **2026-10-18: the store stays a table; the neural substrate (H5–H5c) is not used.** In the user's words, "it's an
+  interesting experiment but let's not use the neural approach because of the 50 MB cost". The conjunctive layer
+  matched the table (top-1 1.000) at about 300× its memory (50 MB against 14 bytes per episode). H5's results stand as
+  evidence of what a neural CA3 would need; the line does not build on it.
+
 **Reader configuration carried forward (updated):** **E1.** That is B2 plus the learned expansion in every store,
 ranked read order, readers `runs/h1c/reader_E1_s{4..7}.pt`.
 
@@ -299,8 +305,7 @@ is the same two-part code (description + exceptions) that ZipLearn priced.
   weights. Replay order (parts first vs random) is a factor, following ZipLearn E14.
 - **H4 — contextual codes and stored states.** Codes from layer-ℓ states, and stored keys/values instead of re-reading
   tokens: cost against staleness.
-- **H5 — a neural substrate.** Replace the table with a sparse Hopfield or HTM-style CA3 network, and measure capacity
-  and interference against the table, which is the ideal.
+- **H5 — a neural substrate. DONE (H5–H5c); not adopted** (the user, 2026-10-18: the 50 MB cost). The table stays the store.
 - **H6 — real text.** The Latin corpus, long-tail facts, and distribution shift (Middle High German), where ZipLearn
   found the big gains. Diverse tasks are a standing rule.
 
