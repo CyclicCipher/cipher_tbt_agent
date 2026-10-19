@@ -1,0 +1,18 @@
+ran reader_W1_s4.json in 88.7s
+ran eval_W1_s4.json in 2.4s
+ran reader_W1_s5.json in 91.5s
+ran eval_W1_s5.json in 4.3s
+ran reader_M1_s4.json in 93.7s
+ran eval_M1_s4.json in 2.8s
+ran reader_M1_s5.json in 90.9s
+ran eval_M1_s5.json in 2.6s
+ran eval_E1_s4.json in 2.5s
+ran eval_E1_s5.json in 2.5s
+
+reader | world 0 REV one-way clean: ranked / shuffled | fwd: ranked / shuffled | shuffled reverse classes
+  E1 s4 (reference) | 0.970 / 0.101 | 0.953 / 0.088 | {'correct': 0.1011, 'rel_ok_entity_wrong': 0.8973, 'entity_ok_rel_wrong': 0.0016, 'other_in_context': 0.0, 'not_in_context': 0.0}
+  E1 s5 (reference) | 0.966 / 0.128 | 0.952 / 0.121 | {'correct': 0.128, 'rel_ok_entity_wrong': 0.8688, 'entity_ok_rel_wrong': 0.0024, 'other_in_context': 0.0008, 'not_in_context': 0.0}
+  W1 s4 | 0.253 / 0.234 | 0.104 / 0.095 | {'correct': 0.2339, 'rel_ok_entity_wrong': 0.7262, 'entity_ok_rel_wrong': 0.0016, 'other_in_context': 0.0008, 'not_in_context': 0.0375} | train 88.7s
+  W1 s5 | 0.215 / 0.226 | 0.092 / 0.107 | {'correct': 0.2258, 'rel_ok_entity_wrong': 0.7327, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0008, 'not_in_context': 0.0407} | train 91.5s
+  M1 s4 | 0.602 / 0.164 | 0.674 / 0.099 | {'correct': 0.1638, 'rel_ok_entity_wrong': 0.8044, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0041, 'not_in_context': 0.0277} | train 93.7s
+  M1 s5 | 0.628 / 0.197 | 0.633 / 0.115 | {'correct': 0.1972, 'rel_ok_entity_wrong': 0.771, 'entity_ok_rel_wrong': 0.0016, 'other_in_context': 0.0033, 'not_in_context': 0.0269} | train 90.9s

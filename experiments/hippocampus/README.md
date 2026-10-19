@@ -132,6 +132,11 @@ The plan is written, with the compression mechanisms in §2b.
 - But 50 MB, against the table's 167 KB.
 - The table is the cheap form; the conjunctive layer is the neural one.
 
+**H1d (content matching without a rank cue): done, negative.**
+- Neither a warm start nor a mixed order teaches it (0.16–0.23 shuffled).
+- Shuffled training erases the ranked skill.
+- Next: rotary positions (H1e).
+
 `PLAN.md` §0 holds the learnings so far.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.
