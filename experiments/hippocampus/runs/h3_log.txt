@@ -1,0 +1,10 @@
+ran F_s4.json in 48.3s
+ran F_s5.json in 41.9s
+ran I_s4.json in 43.0s
+ran I_s5.json in 44.0s
+
+arm seed | inference kept/correct | WEIGHTS ONLY fwd rev (before -> after) | memory rev before -> after | held-out rev before -> after | consolidated fwd/rev/both of rows -> rows | combined fwd rev: before sleep, after sleep, after eviction | secs
+  F 4 | - | 0.001 0.002 -> 0.985 0.000 | 0.975 -> 0.978 | 0.976 -> 0.979 | 2969/2/2 of 2994 -> 2992 | 0.950 0.979, 0.951 0.976, 0.952 0.973 (read 1.00) | 48.3
+  F 5 | - | 0.001 0.000 -> 0.987 0.000 | 0.972 -> 0.974 | 0.981 -> 0.987 | 2949/2/2 of 2994 -> 2992 | 0.959 0.978, 0.960 0.976, 0.960 0.972 (read 1.00) | 41.9
+  I 4 | 2841/0.9838 | 0.001 0.002 -> 0.613 0.588 | 0.975 -> 0.974 | 0.976 -> 0.977 | 1936/1826/1222 of 2994 -> 1772 | 0.950 0.979, 0.964 0.975, 0.831 0.838 (read 0.65) | 43.0
+  I 5 | 2834/0.9827 | 0.001 0.000 -> 0.609 0.651 | 0.972 -> 0.977 | 0.981 -> 0.980 | 1951/1935/1266 of 2994 -> 1728 | 0.959 0.978, 0.955 0.975, 0.825 0.858 (read 0.65) | 44.0

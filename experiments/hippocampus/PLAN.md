@@ -9,7 +9,7 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 
 ---
 
-## 0. Status and learnings (updated 2026-10-18, after H1, H1b, H2, H2b and H1c)
+## 0. Status and learnings (updated 2026-10-18, after H1, H1b, H2, H2b, H1c and H3)
 
 **Results so far:**
 
@@ -17,6 +17,7 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 |---|---|
 | **H1** (`EXPERIMENT_H1.md`) | One write per fact gives reverse access at 38–53%. Weights alone give ≤ 0.9% even after 64 exposures, with the converse tokens taught on the same world (chance 0.12%). Forward: 1 write against 8–64 exposures. Retrieval recall is 1.00, so the reader is the limit. The surprise gate re-wrote 19–21% of facts on a second presentation (one-to-many facts). |
 | **H1b** (`EXPERIMENT_H1B.md`) | The reader with `torch.compile`, 4,500 steps and cosine decay (**B2**) gives **83–93% reverse and 95–96% forward from one write**. The familiarity gate gives **0 duplicates**. The slot embedding (B3) hurt (stuck at 0.50). |
+| **H3** (`EXPERIMENT_H3.md`) | Sleep (empty-memory replay plus rehearsal of reading) consolidates the store into the weights. **Forward-only replay brings the reversal curse back in the weights** (fwd 0.985, rev **0.000**). **Replaying the reader's own reverse inferences** (98% correct, no labels) gives the weights reverse 0.59–0.65 (fwd 0.61). Reading survives sleep (±0.01, held-out world too). Eviction at p ≥ 0.1 was too lax: 41% of rows evicted, the combined system −0.13. |
 | **H1c** (`EXPERIMENT_H1C.md`) | Readers trained **with** the expansion (E1): **4 of 4 seeds at 0.968–0.979 reverse**, with no plateau (0.86–0.89 at step 500). A shuffled read order (E2) gives 0.20: reliability comes from retrieval ranking by full match, with the reader copying from the top. Crowding is fixed end to end (old facts keep 0.83–0.89× of reverse accuracy, against 0.31–0.40×). Without crowding, value eviction ties the full store popularity-weighted (0.80–0.81) at a quarter of the size, but loses the long tail per fact (0.64 vs 0.78). |
 | **H2b** (`EXPERIMENT_H2B.md`) | Learned query expansion (converse token → its relation, from index co-occurrence) makes reverse recall 1.00 at any store size. But the H2 readers, trained without it, fall to 0.07–0.13 reverse: **reader–retrieval co-adaptation**. The plateau is not simply relation-blind reading. Per-fact scoring: value eviction wins only popularity-weighted. |
 | **H2** (`EXPERIMENT_H2.md`) | A stream of 11,930 facts with Zipf queries. **Crowding** is the store's form of interference: uncapped, the first phase's reverse accuracy falls 2.5–3× as the store grows (recall 1.00 → 0.42). **Eviction by value** (a usefulness rate from the reader's own answers) beats fifo and random by 0.14–0.18, comes within 0.004–0.027 of an oracle, and **beats keeping everything** (0.64 vs 0.58, 0.82 vs 0.73) at a quarter of the size. Two new B2 readers: one escaped the plateau (0.96), one did not (0.475). Three of the four B2 readers so far escaped. |
@@ -63,6 +64,14 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 13. **H2's "forgetting beats remembering" was a crowding artefact** (H1c). Without crowding, value eviction is a pure
     compression trade: the same popularity-weighted accuracy at a quarter of the size, and the long tail lost.
     Consolidation (H3) is how to keep the long tail without the rows.
+
+14. **The reversal curse is a property of how weights are trained, not of the knowledge** (H3). One-way replay of a
+    store that reads both ways gives one-way weights. **Self-generated inferences** (the reader's own reverse answers)
+    carry reverse into the weights without reverse data: the complementary-learning-systems mechanism, working.
+15. **Rehearsal makes sleep safe for reading** (H3): no loss on the consolidated world or a held-out one.
+16. **Eviction must be self-checked** (H3). Evict an episode only if the weights' *top* answer equals the stored answer
+    in both directions. The store holds the answer, so no label is needed. A probability threshold (p ≥ 0.1) evicted
+    facts the weights get wrong (−0.13).
 
 **Reader configuration carried forward (updated):** **E1.** That is B2 plus the learned expansion in every store,
 ranked read order, readers `runs/h1c/reader_E1_s{4..7}.pt`.
@@ -199,7 +208,7 @@ experiment that measures it.
 |---|---|---|---|
 | 1 | **Write gate: store only refutations.** First recognition (familiarity: already stored?), then surprise (> τ bits). What the weights or the store already hold costs nothing. This is ZipLearn's "create only on refutation". | duplicates and predictable material | **H1/H1b, WORKS:** surprise alone let through 19–21% duplicates; with recognition, **0** |
 | 2 | **Minimal rows.** A row is the episode's token ids plus about 8 bytes of metadata. The index codes are a fixed function of the token ids, so they cost nothing to store. The overlap matrix is a cache, and an inverted index over token ids is the scalable replacement. | index storage | **H1, WORKS:** 14 bytes per fact (the cache is 256 bytes per row) |
-| 3 | **Consolidation, then eviction.** Sleep moves an episode's content into the weights (with its self-generated inferences). An episode the weights then predict without memory is dropped. The store becomes a *buffer* of not-yet-compressed knowledge: its steady-state size tracks the rate of new information × the consolidation lag, not the total knowledge. | everything consolidated | **H2** (eviction by value without consolidation), **H3** (consolidation) |
+| 3 | **Consolidation, then eviction.** Sleep moves an episode's content into the weights (with its self-generated inferences). An episode the weights then predict without memory is dropped. The store becomes a *buffer* of not-yet-compressed knowledge: its steady-state size tracks the rate of new information × the consolidation lag, not the total knowledge. | everything consolidated | **H2** (eviction by value without consolidation); **H3, PARTLY WORKS:** consolidation moves both directions into the weights with self-generated inferences (0.6 / 0.6 in 2,000 steps); eviction needs a self-check (a lax threshold cost 0.13) |
 | 4 | **Merge into schemas** (ZipLearn rule 3, MERGE). Episodes that differ in one slot become one schema plus a list of slot values. Repeated structure is stored once. | shared structure | **H2** (designed when it is built) |
 | 5 | **Entropy-coded rows** (optional). Store an episode as its arithmetic code under the model, about −log₂ p bits, in place of raw token ids. It can be decoded only with the weights that encoded it, so rows are re-encoded at sleep. | per-row bits, down to the surprise | **H4** option |
 

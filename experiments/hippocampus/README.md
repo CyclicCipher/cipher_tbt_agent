@@ -78,7 +78,12 @@ The plan is written, with the compression mechanisms in §2b.
   loses the long tail.
 - E1 is the reader from here.
 
-**H3** (consolidation) is pre-registered.
+**H3 (consolidation): done.**
+- Sleep moves the store into the weights.
+- **Forward-only replay brings the reversal curse back in the weights (0.985 / 0.000).**
+- **Replaying the reader's own reverse inferences gives reverse 0.59–0.65 with no reverse labels.**
+- Reading survives sleep.
+- Eviction needs a self-check: a lax threshold cost 0.13.
 
 `PLAN.md` §0 holds the learnings so far.
 
