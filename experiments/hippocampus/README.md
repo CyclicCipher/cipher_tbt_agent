@@ -22,7 +22,11 @@ The full design and the reasons are in `PLAN.md`.
 
 | file | what |
 |---|---|
-| `PLAN.md` | the problem, the architecture (database + HDC index + neural read-out and consolidation), measures, planned experiments H1–H6, risks, prior art |
+| `PLAN.md` | the problem, the architecture (database + HDC index + neural read-out and consolidation), §2b compression (the user's condition), measures, planned experiments H1–H6, risks, prior art |
+| `store.py` | the store: a table of episodes indexed by sparse binary codes (union per episode); the dense control |
+| `h1.py`, `run_h1.py` | Experiment H1 (arms A weights-only, B sparse store, C dense store) and its driver |
+| `EXPERIMENT_H1.md` | H1: pre-registration, then results |
+| `runs/` | results, one JSON per run |
 
 ## Standing rules
 
@@ -31,4 +35,5 @@ re-run, 16-bit, diverse tasks, no competitor-faithful arms, commits to `exp/mdl-
 
 ## Where it stands (2026-10-18)
 
-The plan is written. Nothing has been run. H1 (store plus read on synthetic facts) is next, pending the user.
+The plan is written, with the compression mechanisms in §2b. **H1** (store plus read on synthetic facts) is
+pre-registered. It reuses `../intelligent_constraints/` `data.py` and `model.py`.

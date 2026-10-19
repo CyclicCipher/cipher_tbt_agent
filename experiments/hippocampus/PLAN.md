@@ -123,6 +123,26 @@ measured.
 
 ---
 
+## 2b. Compression: how the store stays small (the user's condition, 2026-10-18)
+
+The user approved the plan "as long as there is a solution for efficiently compressing knowledge in the hippocampus". A
+table of raw episodes grows with everything written, unless five mechanisms keep it down. Each one is tied to the
+experiment that measures it.
+
+| # | mechanism | what it saves | measured in |
+|---|---|---|---|
+| 1 | **Write gate: store only refutations.** An episode is written only if the system *with* its current memory finds it surprising (> τ bits). What the weights or the store already predict costs nothing. This is ZipLearn's "create only on refutation". | duplicates and predictable material | **H1**: duplicates written when the same facts are presented again |
+| 2 | **Minimal rows.** A row is the episode's token ids plus about 8 bytes of metadata. The index codes are a fixed function of the token ids, so they cost nothing to store. The overlap matrix is a cache, and an inverted index over token ids is the scalable replacement. | index storage | **H1**: bytes per stored fact |
+| 3 | **Consolidation, then eviction.** Sleep moves an episode's content into the weights (with its self-generated inferences). An episode the weights then predict without memory is dropped. The store becomes a *buffer* of not-yet-compressed knowledge: its steady-state size tracks the rate of new information × the consolidation lag, not the total knowledge. | everything consolidated | **H2/H3**: store size over a stream |
+| 4 | **Merge into schemas** (ZipLearn rule 3, MERGE). Episodes that differ in one slot become one schema plus a list of slot values. Repeated structure is stored once. | shared structure | **H2** (designed when it is built) |
+| 5 | **Entropy-coded rows** (optional). Store an episode as its arithmetic code under the model, about −log₂ p bits, in place of raw token ids. It can be decoded only with the weights that encoded it, so rows are re-encoded at sleep. | per-row bits, down to the surprise | **H4** option |
+
+**The accounting.** The quantity to minimise is the bits in the weights plus the bits in the store. A good hippocampus
+lowers the total by holding only what the weights cannot yet predict, for only as long as it takes to consolidate. This
+is the same two-part code (description + exceptions) that ZipLearn priced.
+
+---
+
 ## 3. Measures (common to the experiments)
 
 | measure | definition |
