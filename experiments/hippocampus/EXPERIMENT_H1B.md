@@ -61,6 +61,56 @@ The reference is H1's B: reverse one-way clean hits@1 of 0.531 / 0.384, mean 0.4
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/h1b/`, log `runs/h1b_log.txt`)
 
-*(to be filled in after the runs)*
+| arm | seed | fwd hits (mass) | **REV one-way clean hits (mass)** | recall | oracle rev | leak rev | duplicates on re-presentation (surprise gate alone would write) | secs |
+|---|---|---|---|---|---|---|---|---|
+| B (H1, reference) | 0 / 1 | 0.952 / 0.953 | 0.531 / 0.384 | 1.000 | 0.528 / 0.404 | 0.000 / 0.001 | 579 / 606 (surprise gate only) | 104 / 109 |
+| **B2** | 0 | 0.962 (0.94) | **0.931 (0.86)** | 1.000 | 0.929 | 0.001 | **0** (434) | 87.6 |
+| **B2** | 1 | 0.948 (0.89) | **0.828 (0.74)** | 1.000 | 0.831 | 0.000 | **0** (464) | 86.8 |
+| B3 (+ slots) | 0 | 0.965 (0.95) | 0.500 (0.44) | 1.000 | 0.493 | 0.002 | 0 (430) | 89.6 |
+| B3 (+ slots) | 1 | 0.957 (0.94) | 0.494 (0.44) | 1.000 | 0.500 | 0.002 | 0 (450) | 89.7 |
+
+Every arm wrote ≥ 2,997 of the 2,999 facts on first presentation.
+
+**Training curves** (forward / reverse on the full store):
+- B2 s0: …3,500: 0.95/0.53 → 4,000: 0.96/0.72 → 4,500: 0.97/**0.93**.
+- B2 s1: …3,000: 0.90/0.47 → 3,500: 0.93/0.69 → 4,500: 0.95/0.83.
+- **B3, both seeds, sit at 0.46–0.52 reverse from step 1,500 to the end.**
+
+**Against the predictions:**
+- **Apparatus: passes.** Leak ≤ 0.002, recall 1.00, runs of 87–90 s.
+- **P1 (more and better training helps): holds, strongly.** B2's mean reverse is 0.88, against 0.46 in H1.
+- **P2 (the slot embedding helps): REFUTED.** B3's mean is 0.50, 0.38 *below* B2.
+- **P3 (target ≥ 0.6 in both seeds): met by B2** (0.931 / 0.828). Not "strongly", because ≥ 0.9 holds in seed 0
+  only.
+- **P4 (familiarity gate): holds.** 0 duplicates in every run, against 430–464 (14–15%) for the surprise gate alone.
+  First presentation ≥ 99.9%.
+- **P5 (forward ≥ 0.95): fails narrowly in one run** (B2 s1, 0.948). Every other run is 0.957–0.965.
+
+**What happened: a plateau, then a transition.**
+- Every reader reaches about 0.5 reverse quickly, then stalls.
+- B2 escaped the plateau late in training, as the cosine schedule lowered the learning rate: a sharp rise (s0 went from
+  0.53 to 0.93 in the last 1,000 steps).
+- H1's constant-rate readers and the slot-embedding readers did not escape within budget.
+
+**A candidate reading of the plateau** (a hypothesis, not established):
+- A reader that ignores the relation would pick a random episode in which b is the *object* (3.7 per question on
+  average) and score **0.386**. That is exactly H1 B's seed 1 (0.384).
+- The plateau at about 0.5 is a little above it, consistent with partial relation matching.
+- The transition is then the reader learning to match the question's converse token r° to the episode's relation r.
+- **Diagnostic for next time:** save the predictions and count "right role, wrong relation" errors.
+
+**Why the slot embedding would hurt** (also a hypothesis): it makes the role-only solution easier, which can deepen
+the plateau. Whatever the reason, the factored position did not pay here, so it is not carried forward.
+
+**What H1b establishes:**
+- **One write per fact gives 83–93% reverse access, and 95–96% forward,** against ≤ 0.9% reverse for the weights after
+  64 exposures, which also needed 8–64 exposures for forward.
+- With the reader trained well, the store does what the weights cannot.
+- **The familiarity gate makes the store dedupe exactly,** with no duplicates at all. It is the hippocampus's
+  recognition signal: pattern completion on the index, verified against the stored tokens.
+- Together with the 14-byte rows, compression tiers 1 and 2 (`PLAN.md` §2b) now work as designed.
+
+**Carried forward:** B2's configuration (compile, cosine, familiarity gate; no slot embedding) as the reader for H2 and
+H3.

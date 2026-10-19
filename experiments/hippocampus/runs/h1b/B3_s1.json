@@ -1,0 +1,272 @@
+{
+ "arm": "B3",
+ "index": "sparse",
+ "seed": 1,
+ "steps": 4500,
+ "lr": 0.001,
+ "batch": 256,
+ "R": 12,
+ "theta": 20.0,
+ "tau": 2.0,
+ "model": {
+  "d": 128,
+  "n_layer": 4,
+  "n_head": 4,
+  "m": 512
+ },
+ "train_examples": 119816,
+ "log": [
+  {
+   "step": 500,
+   "loss": 3.3465,
+   "fwd_oneway": {
+    "hits": 0.872,
+    "mass": 0.473,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.2062,
+    "mass": 0.0529,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.2286,
+    "mass": 0.0622,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 1000,
+   "loss": 1.761,
+   "fwd_oneway": {
+    "hits": 0.943,
+    "mass": 0.8137,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.4156,
+    "mass": 0.2587,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.4233,
+    "mass": 0.2615,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 1500,
+   "loss": 1.3417,
+   "fwd_oneway": {
+    "hits": 0.9615,
+    "mass": 0.9062,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.4523,
+    "mass": 0.3375,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.4367,
+    "mass": 0.3337,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 2000,
+   "loss": 1.1108,
+   "fwd_oneway": {
+    "hits": 0.9667,
+    "mass": 0.9166,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.4605,
+    "mass": 0.3837,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.4834,
+    "mass": 0.3889,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 2500,
+   "loss": 1.0523,
+   "fwd_oneway": {
+    "hits": 0.9615,
+    "mass": 0.92,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.5004,
+    "mass": 0.4127,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.4739,
+    "mass": 0.3981,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 3000,
+   "loss": 0.9111,
+   "fwd_oneway": {
+    "hits": 0.9675,
+    "mass": 0.932,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.4849,
+    "mass": 0.4322,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.5071,
+    "mass": 0.4273,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 3500,
+   "loss": 0.781,
+   "fwd_oneway": {
+    "hits": 0.9608,
+    "mass": 0.9308,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.5012,
+    "mass": 0.4399,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.5016,
+    "mass": 0.4353,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 4000,
+   "loss": 0.7012,
+   "fwd_oneway": {
+    "hits": 0.9608,
+    "mass": 0.938,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.5061,
+    "mass": 0.4457,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.5063,
+    "mass": 0.4416,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 4500,
+   "loss": 0.6323,
+   "fwd_oneway": {
+    "hits": 0.9623,
+    "mass": 0.9359,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.4963,
+    "mass": 0.4455,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.4873,
+    "mass": 0.4338,
+    "recall": 1.0
+   }
+  }
+ ],
+ "options": {
+  "fast": true,
+  "cosine": true,
+  "slots": true,
+  "familiarity": true
+ },
+ "final": {
+  "fwd_oneway": {
+   "hits": 0.9571,
+   "mass": 0.9367,
+   "recall": 0.9993
+  },
+  "rev_oneway_clean": {
+   "hits": 0.4939,
+   "mass": 0.4397,
+   "recall": 1.0
+  },
+  "rev_paired": {
+   "hits": 0.5024,
+   "mass": 0.4427,
+   "recall": 1.0
+  }
+ },
+ "final_oracle": {
+  "fwd_oneway": {
+   "hits": 0.9527,
+   "mass": 0.9314,
+   "recall": 0.9993
+  },
+  "rev_oneway_clean": {
+   "hits": 0.4996,
+   "mass": 0.4401,
+   "recall": 1.0
+  },
+  "rev_paired": {
+   "hits": 0.5,
+   "mass": 0.4452,
+   "recall": 1.0
+  }
+ },
+ "leak_control": {
+  "fwd_oneway": {
+   "hits": 0.0015,
+   "mass": 0.002,
+   "recall": 0.0
+  },
+  "rev_oneway_clean": {
+   "hits": 0.0024,
+   "mass": 0.0015,
+   "recall": 0.0
+  },
+  "rev_paired": {
+   "hits": 0.0008,
+   "mass": 0.001,
+   "recall": 0.0008
+  }
+ },
+ "gate": {
+  "facts": 2999,
+  "written_first": 2997,
+  "written_again": 0,
+  "again_by_kind": {
+   "many-to-one": 0,
+   "one-to-many": 0,
+   "one-to-one": 0
+  },
+  "first_stats": {
+   "surprise_only": 2997,
+   "familiar": 0
+  },
+  "again_stats": {
+   "surprise_only": 450,
+   "familiar": 2997
+  },
+  "rows": 2997
+ },
+ "store": {
+  "row_bytes": 14,
+  "key_cache_bytes": 256
+ },
+ "secs": 89.7
+}

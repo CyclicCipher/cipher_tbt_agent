@@ -47,6 +47,12 @@ The plan is written, with the compression mechanisms in §2b.
 - The surprise gate writes every new fact once, but lets through 19–21% duplicates on re-presentation (one-to-many
   facts: probability spread over several answers). The fix is a familiarity gate from the index itself.
 
-**H1b** (a stronger reader, plus a familiarity gate that recognises stored episodes) is pre-registered.
+**H1b: done.**
+- With a better-trained reader (compile, 4,500 steps, cosine decay), **one write per fact gives 83–93% reverse access
+  and 95–96% forward**, against ≤ 0.9% reverse for the weights after 64 exposures.
+- Readers plateau at about 0.5 (probably partly relation-blind), then jump as the learning rate decays.
+- The slot embedding hurt (stuck at 0.50), so it is not carried forward.
+- **The familiarity gate dedupes exactly: 0 duplicates**, against 14–15% for the surprise gate alone.
+- B2's configuration is the reader for H2 and H3.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.
