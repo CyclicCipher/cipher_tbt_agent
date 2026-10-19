@@ -120,6 +120,11 @@ The plan is written, with the compression mechanisms in §2b.
 - It loses episode/role structure: union-coded cues blend every matching episode (top-1 0.11 at 11,930).
 - H5b adds per-slot binding.
 
+**H5b (slot-bound codes): done.**
+- Role confusion is gone (@12 0.99).
+- But a pairwise Hebbian matrix cannot store a conjunction (top-1 0.24).
+- Relational episodes need conjunctive units: the table's rows, or a dentate-gyrus-like layer.
+
 `PLAN.md` §0 holds the learnings so far.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.
