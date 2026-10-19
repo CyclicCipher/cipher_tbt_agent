@@ -1,0 +1,28 @@
+ran reader_s2.json in 87.9s
+ran reader_s3.json in 92.8s
+ran stream_uncapped_s2.json in 8.5s
+ran stream_fifo_s2.json in 7.9s
+ran stream_random_s2.json in 8.2s
+ran stream_value_s2.json in 9.9s
+ran stream_oracle_s2.json in 14.8s
+ran stream_uncapped_s3.json in 8.9s
+ran stream_fifo_s3.json in 8.1s
+ran stream_random_s3.json in 7.9s
+ran stream_value_s3.json in 8.0s
+ran stream_oracle_s3.json in 7.8s
+
+readers on world 0 (H1b replication): seed | fwd | REV one-way clean | duplicates | secs
+  2 | 0.956 | 0.475 | 0 | 87.9
+  3 | 0.958 | 0.963 | 2 | 92.8
+
+streams: policy seed | online fwd rev mean | probe rev @phase6 -> @24 (recall @24) | probe fwd @24 | rows | written | secs
+  uncapped 2 | 0.730 0.438 0.584 | 0.523 -> 0.211 (0.43) | 0.702 | 11929 | 11929 | 8.5
+  fifo     2 | 0.572 0.437 0.504 | 0.523 -> 0.189 (0.00) | 0.342 | 3000 | 11924 | 7.9
+  random   2 | 0.578 0.430 0.504 | 0.523 -> 0.193 (0.06) | 0.368 | 3000 | 11926 | 8.2
+  value    2 | 0.731 0.549 0.640 | 0.523 -> 0.282 (0.28) | 0.463 | 3000 | 11926 | 9.9
+  oracle   2 | 0.753 0.535 0.644 | 0.523 -> 0.272 (0.24) | 0.422 | 3000 | 11925 | 14.8
+  uncapped 3 | 0.799 0.664 0.732 | 0.915 -> 0.284 (0.41) | 0.771 | 11928 | 11928 | 8.9
+  fifo     3 | 0.607 0.687 0.647 | 0.915 -> 0.378 (0.00) | 0.356 | 3000 | 11924 | 8.1
+  random   3 | 0.623 0.707 0.665 | 0.915 -> 0.398 (0.06) | 0.380 | 3000 | 11926 | 7.9
+  value    3 | 0.771 0.877 0.824 | 0.915 -> 0.511 (0.26) | 0.461 | 3000 | 11927 | 8.0
+  oracle   3 | 0.794 0.907 0.851 | 0.915 -> 0.491 (0.24) | 0.424 | 3000 | 11924 | 7.8

@@ -56,6 +56,12 @@ The plan is written, with the compression mechanisms in §2b.
 - **The familiarity gate dedupes exactly: 0 duplicates**, against 14–15% for the surprise gate alone.
 - B2's configuration is the reader for H2 and H3.
 
-**H2** (a continual stream: crowding, and eviction by value) is pre-registered. `PLAN.md` §0 holds the learnings so far.
+**H2 (a continual stream): done.**
+- **Crowding** is the store's form of interference: reverse reads of old facts fall 2.5–3× as an uncapped store grows.
+- **Eviction by value** (a usefulness rate from the reader's own answers) is within 0.03 of an oracle, beats fifo and
+  random by 0.14–0.18, and **beats keeping everything at a quarter of the size**.
+- One of the two new readers stayed on the reverse plateau, so plateau escape is the read path's main fragility.
+
+`PLAN.md` §0 holds the learnings so far.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.

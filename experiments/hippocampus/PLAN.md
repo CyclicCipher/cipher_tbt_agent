@@ -9,7 +9,7 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 
 ---
 
-## 0. Status and learnings (updated 2026-10-18, after H1 and H1b)
+## 0. Status and learnings (updated 2026-10-18, after H1, H1b and H2)
 
 **Results so far:**
 
@@ -17,6 +17,7 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 |---|---|
 | **H1** (`EXPERIMENT_H1.md`) | One write per fact gives reverse access at 38–53%. Weights alone give ≤ 0.9% even after 64 exposures, with the converse tokens taught on the same world (chance 0.12%). Forward: 1 write against 8–64 exposures. Retrieval recall is 1.00, so the reader is the limit. The surprise gate re-wrote 19–21% of facts on a second presentation (one-to-many facts). |
 | **H1b** (`EXPERIMENT_H1B.md`) | The reader with `torch.compile`, 4,500 steps and cosine decay (**B2**) gives **83–93% reverse and 95–96% forward from one write**. The familiarity gate gives **0 duplicates**. The slot embedding (B3) hurt (stuck at 0.50). |
+| **H2** (`EXPERIMENT_H2.md`) | A stream of 11,930 facts with Zipf queries. **Crowding** is the store's form of interference: uncapped, the first phase's reverse accuracy falls 2.5–3× as the store grows (recall 1.00 → 0.42). **Eviction by value** (a usefulness rate from the reader's own answers) beats fifo and random by 0.14–0.18, comes within 0.004–0.027 of an oracle, and **beats keeping everything** (0.64 vs 0.58, 0.82 vs 0.73) at a quarter of the size. Two new B2 readers: one escaped the plateau (0.96), one did not (0.475). Three of the four B2 readers so far escaped. |
 
 **Learnings that change the design:**
 1. **The reversal curse is a property of where knowledge is stored.** A store read by attention does not have it: the
@@ -36,6 +37,16 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
    scale where it should matter. Retrieval *crowding* is expected first: an entity with more episodes than the R = 12
    read slots. H2 tests this.
 6. **Compression tiers 1–2 (§2b) work:** exact dedupe, and 14-byte rows. Tiers 3–5 are untested.
+7. **The store's interference is crowding, not overwriting** (H2). When an entity has more episodes than the R read
+   slots, its correct episode competes for a slot. This bounds how far an uncapped store can grow before reads degrade.
+   It is now the first thing to fix on the store side (§5, risk 8).
+8. **Forgetting by value is better than remembering everything, while crowding exists** (H2). A capped store that
+   evicts by a usefulness rate is smaller and more accurate. Compression and accuracy point the same way, and
+   ZipLearn's rule transfers with labels-free evidence.
+9. **The reader's plateau escape is the read path's main fragility** (3 of 4 seeds). Before H3 builds on a reader,
+   check that it escaped (reverse ≥ 0.8 on world 0). H2's seed 3 reader (0.963) qualifies; seed 2 (0.475) does not.
+10. **Streams with Zipf(1) popularity concentrate ~10% of queries on one fact.** Report several stream seeds and a
+    per-fact score next time.
 
 **Reader configuration carried forward:** B2. That is 4 layers, d = 128, read R = 12, θ = 20 bits, τ = 2 bits,
 compile + fused AdamW, 4,500 steps, cosine to 10%, and the familiarity gate.
@@ -210,7 +221,7 @@ is the same two-part code (description + exceptions) that ZipLearn priced.
       retrieval.
   - **Main predictions:** B answers reverse questions about once-written facts far above A. D's reverse retrieval is
     worse than B's.
-- **H2 — continual stream** (`EXPERIMENT_H2.md`, pre-registered).
+- **H2 — continual stream** (`EXPERIMENT_H2.md`). **DONE** (§0).
   - 11,930 facts (worlds 100–103) arrive in 24 phases, interleaved with 2,000 queries per phase drawn by Zipf
     popularity.
   - The store is uncapped, or capped at 3,000 rows with fifo, random, value or oracle eviction.
