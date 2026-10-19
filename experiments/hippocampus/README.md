@@ -108,6 +108,11 @@ The plan is written, with the compression mechanisms in §2b.
 - No online or reading cost.
 - Forgetting is halved (retention 0.48), not stopped.
 
+**H3e (self-replay dose, fallback fixed): done.**
+- Long tail **0.60–0.63 at about 550 rows** (full store: 0.86 at 5,950).
+- A larger replay share trades new for old: a stability–plasticity trade, not a gain.
+- The total sleep compute binds.
+
 `PLAN.md` §0 holds the learnings so far.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.
