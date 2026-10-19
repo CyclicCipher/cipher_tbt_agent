@@ -26,6 +26,7 @@ The full design and the reasons are in `PLAN.md`.
 | `store.py` | the store: a table of episodes indexed by sparse binary codes (union per episode); the dense control |
 | `h1.py`, `run_h1.py` | Experiment H1 (arms A weights-only, B sparse store, C dense store) and its driver |
 | `EXPERIMENT_H1.md` | H1: pre-registration, then results |
+| `EXPERIMENT_H1B.md`, `run_h1b.py` | H1b: a stronger reader (compile, cosine, slot embedding) and the familiarity gate |
 | `runs/` | results, one JSON per run |
 
 ## Standing rules
@@ -45,5 +46,7 @@ The plan is written, with the compression mechanisms in §2b.
   budget), not the store.
 - The surprise gate writes every new fact once, but lets through 19–21% duplicates on re-presentation (one-to-many
   facts: probability spread over several answers). The fix is a familiarity gate from the index itself.
+
+**H1b** (a stronger reader, plus a familiarity gate that recognises stored episodes) is pre-registered.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.

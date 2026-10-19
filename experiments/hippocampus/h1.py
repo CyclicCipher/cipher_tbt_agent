@@ -130,13 +130,17 @@ def eval_plain(net, sets):
     return out
 
 
-def opt_for(net, lr):
-    return torch.optim.AdamW(net.parameters(), lr=lr, betas=(0.9, 0.98), weight_decay=0.01)
+def opt_for(net, lr, fused=False):
+    return torch.optim.AdamW(net.parameters(), lr=lr, betas=(0.9, 0.98), weight_decay=0.01, fused=fused)
 
 
-def step(net, opt, X, Y, lr, t):
+def step(net, opt, X, Y, lr, t, total=None):
+    """total=None: constant lr after warm-up (H1); otherwise cosine decay to 10% at step `total` (H1b)."""
+    f = min(1.0, t / 200)
+    if total:
+        f *= 0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * min(t, total) / total))
     for grp in opt.param_groups:
-        grp["lr"] = lr * min(1.0, t / 200)
+        grp["lr"] = lr * f
     with torch.autocast(DEV, dtype=torch.bfloat16):
         loss = Fn.cross_entropy(net(X).float(), Y)
     opt.zero_grad(set_to_none=True)
@@ -156,21 +160,32 @@ def surprise_bits(net, store, facts, gen):
     return (-lp[torch.arange(len(facts)), Y] / math.log(2)).cpu()
 
 
-def gated_write(net, store, facts, gen, chunk=256):
+def gated_write(net, store, facts, gen, chunk=256, familiarity=False, stats=None):
     """Present facts in order, chunk by chunk; write a fact only if its surprise under the current store exceeds TAU.
-    Returns the facts written."""
+    familiarity=True (H1b) first skips facts the store recognises as already stored. Returns the facts written;
+    `stats` (a dict) collects how many the surprise gate alone would have written."""
     written = []
     for i in range(0, len(facts), chunk):
         part = facts[i:i + chunk]
         s = surprise_bits(net, store, part, gen)
-        keep = [j for j in range(len(part)) if s[j] > TAU]
+        fam = store.familiar(torch.tensor([(a, rel(r), b) for a, r, b in part])) if familiarity else [False] * len(part)
+        if stats is not None:
+            stats["surprise_only"] = stats.get("surprise_only", 0) + int((s > TAU).sum())
+            stats["familiar"] = stats.get("familiar", 0) + sum(fam)
+        keep = [j for j in range(len(part)) if s[j] > TAU and not fam[j]]
         if keep:
             store.write(torch.tensor([(part[j][0], rel(part[j][1]), part[j][2]) for j in keep]), s[keep].tolist())
         written += [part[j] for j in keep]
     return written
 
 
-def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500):
+SLOTS = [0] + [1, 2, 3, 4] * R + [5, 6]          # H1b: [MEM], (a, r, b, [SEP]) per episode, question tokens
+
+
+def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500, fast=False, cosine=False, slots=False,
+               familiarity=False):
+    """H1 defaults; H1b: fast (torch.compile + fused AdamW), cosine (decay to 10%), slots (slot embedding),
+    familiarity (recognition before the surprise gate)."""
     t0 = time.time()
     torch.manual_seed(seed)
     gen = torch.Generator(device=DEV).manual_seed(seed)
@@ -187,28 +202,32 @@ def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500):
     sets = eval_sets(F0)
     full = Store(VOCAB, index)                                 # for the training curve only: every fact written
     full.write(episodes(F0))
-    net = Net(VOCAB, ctx=CTX, **MODEL).to(DEV)
-    opt = opt_for(net, lr)
+    net = Net(VOCAB, ctx=CTX, seg_ids=SLOTS if slots else None, **MODEL).to(DEV)
+    opt = opt_for(net, lr, fused=fast)
+    train_net = torch.compile(net) if fast else net            # evaluation uses the uncompiled module (same weights)
     log = []
     for t in range(1, steps + 1):
         i = torch.randint(0, len(X), (batch,), device=DEV, generator=gen)
-        loss = step(net, opt, X[i], Y[i], lr, t)
+        loss = step(train_net, opt, X[i], Y[i], lr, t, total=steps if cosine else None)
         if t % eval_every == 0 or t == steps:
             log.append(dict(step=t, loss=round(loss, 4), **eval_mem(net, full, sets, gen)))
     # the test world: a fresh store, facts presented once in random order through the surprise gate
     order = torch.randperm(len(F0.facts), generator=torch.Generator().manual_seed(seed)).tolist()
     facts = [F0.facts[j] for j in order]
     store = Store(VOCAB, index)
-    w1 = gated_write(net, store, facts, gen)
+    st1, st2 = {}, {}
+    w1 = gated_write(net, store, facts, gen, familiarity=familiarity, stats=st1)
     final = eval_mem(net, store, sets, gen)                   # the store after one presentation
     final_oracle = eval_mem(net, store, sets, gen, oracle=True)
-    w2 = gated_write(net, store, facts, gen)                  # presented again: duplicates the gate lets through
+    w2 = gated_write(net, store, facts, gen, familiarity=familiarity, stats=st2)   # presented again
     kinds = F0.kinds
     res = dict(arm={"sparse": "B", "dense": "C"}[index], index=index, seed=seed, steps=steps, lr=lr, batch=batch,
                R=R, theta=THETA, tau=TAU, model=MODEL, train_examples=len(X), log=log,
+               options=dict(fast=fast, cosine=cosine, slots=slots, familiarity=familiarity),
                final=final, final_oracle=final_oracle, leak_control=None,
                gate=dict(facts=len(facts), written_first=len(w1), written_again=len(w2),
                          again_by_kind={k: sum(kinds[f[1]] == k for f in w2) for k in sorted(set(kinds))},
+                         first_stats=st1, again_stats=st2,
                          rows=len(store)),
                store=dict(row_bytes=store.row_bytes(),
                           key_cache_bytes=(store.keys.shape[1] // 8 if index == "sparse" else 2 * store.keys.shape[1])))
@@ -255,20 +274,27 @@ def run_weights(e, seed, steps1=3000, lr=1e-3, batch=256):
                 final=log[-1], secs=round(time.time() - t0, 1))
 
 
+H1B = {"B2": dict(fast=True, cosine=True, familiarity=True),               # H1b: stronger training + recognition
+       "B3": dict(fast=True, cosine=True, familiarity=True, slots=True)}   # ... + the slot embedding
+H1B_STEPS = 4500
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arm", choices=["A", "B", "C"], required=True)
+    ap.add_argument("--arm", choices=["A", "B", "C", "B2", "B3"], required=True)
     ap.add_argument("--e", type=int, default=1)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=0, help="smoke tests only (no file written)")
     a = ap.parse_args()
     name = f"A_e{a.e}_s{a.seed}" if a.arm == "A" else f"{a.arm}_s{a.seed}"
-    out = HERE / "runs" / "h1" / f"{name}.json"
+    out = HERE / "runs" / ("h1b" if a.arm in H1B else "h1") / f"{name}.json"
     if a.steps == 0 and out.exists():
         print(f"{out} exists: not re-run")
         raise SystemExit
     if a.arm == "A":
         r = run_weights(a.e, a.seed, **({"steps1": a.steps} if a.steps else {}))
+    elif a.arm in H1B:
+        r = run_memory("sparse", a.seed, steps=a.steps or H1B_STEPS, **H1B[a.arm])
+        r["arm"] = a.arm
     else:
         r = run_memory("sparse" if a.arm == "B" else "dense", a.seed, **({"steps": a.steps} if a.steps else {}))
     print(json.dumps({k: r[k] for k in r if k not in ("log",)}, indent=1))

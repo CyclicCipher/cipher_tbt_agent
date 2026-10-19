@@ -51,6 +51,21 @@ class Store:
         self.evidence += [0] * n
         self.last += [self.step] * n
 
+    def familiar(self, toks):
+        """Recognition: True where an identical episode is already stored. A candidate is any row whose index contains
+        the whole of the episode's code (pattern completion); it is then verified against the row's tokens, because a
+        set index cannot tell (a, r, b) from (b, r, a)."""
+        toks = toks.to(self.device)
+        if len(self) == 0:
+            return [False] * len(toks)
+        q = self.key(toks)
+        full = (q @ self.keys.T) >= q.sum(1, keepdim=True) - 0.5      # (n, N): the episode's code is contained
+        out = []
+        for i in range(len(toks)):
+            cand = full[i].nonzero().flatten()
+            out.append(bool(cand.numel()) and bool((self.rows[cand] == toks[i]).all(1).any()))
+        return out
+
     def retrieve(self, qtoks, R, theta=20.0, gen=None):
         """Row ids (n, R) of the best-matching episodes, best first; -1 where fewer than R clear the threshold."""
         if len(self) == 0:

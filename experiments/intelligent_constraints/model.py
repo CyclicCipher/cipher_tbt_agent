@@ -12,6 +12,9 @@ In the linear case this is Kosko's bidirectional associative memory (1988): forw
 embedding table and must go into the weights. The answer logits are then s * LN(x) . code / sqrt(d), with a learned
 scalar s; untied, the output codes are learned at the same scale.
 
+`seg_ids` (hippocampus H1b): a fixed per-position segment id (e.g. the slot within a retrieved episode) whose learned
+embedding is added to the input, so a role shared by many positions is learned once.
+
 `transport="sum"` (Experiment 1c) removes attention: the MLP blocks read the fixed sum of the two token codes, so an
 entity arrives at the MLP as exactly its own code. `set_mlp_off(True)` zeroes every MLP's output (the per-run check of
 how much of the facts the MLPs hold).
@@ -71,7 +74,7 @@ class Block(nn.Module):
 
 class Net(nn.Module):
     def __init__(self, vocab, d=128, n_layer=2, n_head=4, m=256, dagger=False, tied=True, ctx=2, frozen=False,
-                 transport="attn"):
+                 transport="attn", seg_ids=None):
         super().__init__()
         self.tok = nn.Embedding(vocab, d)
         self.transport = transport
@@ -90,6 +93,11 @@ class Net(nn.Module):
         self.tied = tied
         if not tied:
             self.out = nn.Parameter(torch.randn(vocab, d) * (1.0 if frozen else 0.02))
+        self.has_seg = seg_ids is not None
+        if self.has_seg:                         # created last, so configurations without it initialise as before
+            self.register_buffer("seg_ids", torch.tensor(seg_ids))
+            self.seg = nn.Embedding(int(max(seg_ids)) + 1, d)
+            nn.init.normal_(self.seg.weight, std=0.02)
 
     def set_rev(self, on):
         for b in self.blocks:
@@ -104,6 +112,8 @@ class Net(nn.Module):
             x = self.tok(idx).sum(1, keepdim=True)
         else:
             x = self.tok(idx) + self.pos(torch.arange(idx.shape[1], device=idx.device))
+        if self.has_seg:
+            x = x + self.seg(self.seg_ids[:idx.shape[1]])
         for b in self.blocks:
             x = b(x)
         W = self.tok.weight if self.tied else self.out
