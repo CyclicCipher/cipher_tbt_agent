@@ -30,6 +30,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H2.md`, `h2.py`, `run_h2.py` | H2: a continual stream; crowding; eviction by value against fifo, random and oracle |
 | `EXPERIMENT_H2B.md`, `expand.py`, `run_h2b.py` | H2b: learned query expansion against crowding |
 | `EXPERIMENT_H1C.md`, `run_h1c.py` | H1c: readers trained with the expansion (reliability), and streams with them |
+| `EXPERIMENT_H3.md`, `h3.py`, `run_h3.py` | H3: consolidation (sleep with and without self-generated reverse inferences), then eviction |
 | `runs/` | results, one JSON per run |
 
 ## Standing rules
@@ -76,6 +77,8 @@ The plan is written, with the compression mechanisms in §2b.
 - Without crowding, value eviction ties the full store on popularity-weighted accuracy at a quarter of the size, and
   loses the long tail.
 - E1 is the reader from here.
+
+**H3** (consolidation) is pre-registered.
 
 `PLAN.md` §0 holds the learnings so far.
 

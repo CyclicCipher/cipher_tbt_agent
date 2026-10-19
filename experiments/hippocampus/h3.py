@@ -3,12 +3,15 @@
 A reader trained with the learned expansion (H1c, arm E1) writes world 0 into its store. Sleep then fine-tunes it with
 an EMPTY memory on consolidation examples, interleaved 1:1 with rehearsal of the reading skill on the training worlds:
   F  forward only: each stored episode (a, r, b) replayed as the question [a, r] -> b
-  I  forward + the model's own inferences: each episode is also put alone in memory, the reader answers the reverse
-     question [b, r°]; a confident answer (p >= CONF) becomes the target of the empty-memory question [b, r°]
+  I  forward + the model's own inferences: for each episode the reader answers the reverse question [b, r°] through
+     its normal read path (retrieval from the store); a confident answer (p >= CONF) becomes the target of the
+     empty-memory question [b, r°]
 After sleep: what the weights know without memory (both directions), whether reading survived (world 0 and a held-out
 world), and how much of the store can be evicted. An episode counts as consolidated when the weights alone give
 p >= CONS_P to it in BOTH directions. The combined system reads only episodes that match both the question's entity and
-relation (overlap >= THETA_COMB bits); with none, the memory is empty and the weights answer.
+relation: if the best stored overlap is >= THETA_FULL bits (a full match), the question is read normally (12
+episodes, as the reader was trained); otherwise the memory is EMPTY and the weights answer. (A half-empty context is
+never shown: the readers were never trained on one and fail on it.)
 
 Usage:  python h3.py --arm I --seed 4      -> runs/h3/I_s4.json
 """
@@ -19,25 +22,19 @@ from pathlib import Path
 
 import torch
 
-from h1 import (CTX, DEV, MEM, MODEL, N_ENT, N_REL, PAD, R, SEP, TEST_WORLD, VOCAB, Net, eval_mem, eval_sets,
+from h1 import (CTX, DEV, MEM, MODEL, N_ENT, N_REL, PAD, R, TEST_WORLD, VOCAB, Net, contexts, eval_mem, eval_sets,
                 gated_write, make_facts, opt_for, score, step, store_factory, training_set)
 
 HERE = Path(__file__).parent
 OUT, READERS = HERE / "runs" / "h3", HERE / "runs" / "h1c"
 SLEEP_STEPS, SLEEP_LR, HALF = 2000, 5e-4, 128
-CONF, CONS_P, THETA_COMB = 0.5, 0.1, 60.0
+CONF, CONS_P, THETA_FULL = 0.5, 0.1, 60.0
 HELDOUT_WORLD = 50
 
 
 def empty_ctx(P):
     n = len(P)
     return torch.cat([torch.full((n, 1), MEM), torch.full((n, 4 * R), PAD), P.cpu()], 1).to(DEV)
-
-
-def single_ctx(eps, P):
-    n = len(P)
-    ep = torch.cat([eps.cpu(), torch.full((n, 1), SEP)], 1)
-    return torch.cat([torch.full((n, 1), MEM), torch.full((n, 4 * (R - 1)), PAD), ep, P.cpu()], 1).to(DEV)
 
 
 @torch.no_grad()
@@ -67,14 +64,15 @@ def written_store(net, Store, world, seed, gen):
 
 
 def combined(net, store, sets, gen):
-    """Read only fully matching episodes (overlap >= THETA_COMB); none -> empty memory, so the weights answer."""
-    import h1
-    saved = h1.THETA
-    h1.THETA = THETA_COMB
-    try:
-        return eval_mem(net, store, sets, gen)
-    finally:
-        h1.THETA = saved
+    """A full match in the store -> the normal read; none -> the empty memory, so the weights answer."""
+    out = {}
+    for name, s in sets.items():
+        P = torch.tensor([q for q, _, _ in s])
+        full = store.best_overlap(P) >= THETA_FULL
+        ctx = torch.where(full[:, None], contexts(store, P, gen)[0], empty_ctx(P))
+        hits, mass = score(predict(net, ctx).log(), s)
+        out[name] = dict(hits=hits, mass=mass, read_fraction=round(full.float().mean().item(), 4))
+    return out
 
 
 def run_sleep(arm, seed):
@@ -96,8 +94,8 @@ def run_sleep(arm, seed):
     cY = [rows[:, 2].to(DEV)]
     inference = None
     if arm == "I":
-        Prev = torch.stack([rows[:, 2], rows[:, 1] + N_REL], 1)   # [b, r°]
-        p = predict(net, single_ctx(rows, Prev))
+        Prev = torch.stack([rows[:, 2], rows[:, 1] + N_REL], 1)   # [b, r°], answered through the normal read
+        p = predict(net, contexts(store, Prev, gen)[0])
         conf, ans = p.max(-1)
         keep = conf >= CONF
         rev = {}
@@ -132,7 +130,7 @@ def run_sleep(arm, seed):
                    fwd_consolidated=int((pf >= CONS_P).sum()), rev_consolidated=int((pr >= CONS_P).sum()),
                    combined_after_eviction=combined(net, store, sets, gen))
     return dict(arm=arm, seed=seed, sleep_steps=SLEEP_STEPS, sleep_lr=SLEEP_LR, half=HALF, conf=CONF, cons_p=CONS_P,
-                theta_comb=THETA_COMB, consolidation_examples=len(cX), inference=inference, before=before,
+                theta_full=THETA_FULL, consolidation_examples=len(cX), inference=inference, before=before,
                 after=after, eviction=evicted, secs=round(time.time() - t0, 1))
 
 

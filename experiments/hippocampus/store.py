@@ -81,6 +81,21 @@ class Store:
             out.append(bool(cand.numel()) and bool((self.rows[cand] == toks[i]).all(1).any()))
         return out
 
+    def query(self, qtoks):
+        """The query code: the question's tokens' codes, plus the learned partners' (H2b)."""
+        q = self.key(qtoks.to(self.device))
+        if self.expansion is not None:
+            ex = self.expansion.to(self.device)[qtoks.to(self.device)]
+            c = self.codes[ex.clamp(min=0)] * (ex >= 0)[..., None]
+            q = torch.maximum(q, c.amax(1)) if self.index == "sparse" else q + c.sum(1)
+        return q
+
+    def best_overlap(self, qtoks):
+        """H3: the largest overlap (bits) of each question with any stored episode; 0 for an empty store."""
+        if len(self) == 0:
+            return torch.zeros(len(qtoks), device=self.device)
+        return (self.query(qtoks) @ self.keys.T).max(1).values
+
     def retrieve(self, qtoks, R, theta=20.0, gen=None):
         """Row ids (n, R) of the best-matching episodes, best first; -1 where fewer than R clear the threshold."""
         if len(self) == 0:
