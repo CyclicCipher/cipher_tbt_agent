@@ -1,0 +1,10 @@
+ran I5k_s4.json in 93.4s
+ran I5k_s5.json in 95.4s
+ran I5k31_s4.json in 98.2s
+ran I5k31_s5.json in 100.1s
+
+arm seed | WEIGHTS ONLY fwd rev after | memory rev before->after | held-out rev before->after | evicted (self rule) / p-rule would / of rows | combined fwd rev: after sleep -> after eviction (read share) | secs
+  I5k    4 | 0.998 0.968 | 0.975->0.979 | 0.976->0.981 | 1933 / 2486 / 2994 | 0.956 0.975 -> 0.955 0.970 (0.34) | 93.4
+  I5k    5 | 0.997 0.964 | 0.972->0.972 | 0.981->0.974 | 1921 / 2495 / 2994 | 0.959 0.972 -> 0.947 0.963 (0.34) | 95.4
+  I5k31  4 | 0.998 0.968 | 0.975->0.978 | 0.976->0.975 | 1934 / 2508 / 2994 | 0.963 0.976 -> 0.953 0.970 (0.34) | 98.2
+  I5k31  5 | 0.998 0.966 | 0.972->0.972 | 0.981->0.973 | 1924 / 2508 / 2994 | 0.962 0.972 -> 0.950 0.964 (0.34) | 100.1

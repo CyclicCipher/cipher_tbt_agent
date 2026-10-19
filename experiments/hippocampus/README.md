@@ -86,6 +86,13 @@ The plan is written, with the compression mechanisms in §2b.
 - Reading survives sleep.
 - Eviction needs a self-check: a lax threshold cost 0.13.
 
+**H3b (longer sleep, self-checked eviction): done.**
+- The weights alone hold **forward 0.998 / reverse 0.966** after 5,000 sleep steps, the reverse entirely from the
+  model's own inferences.
+- **Self-checked eviction frees 64% of the store at ≤ 0.012 cost.**
+- Reading survives.
+- Complementary learning systems, working end to end.
+
 `PLAN.md` §0 holds the learnings so far.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.

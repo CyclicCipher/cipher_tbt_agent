@@ -1,0 +1,182 @@
+{
+ "arm": "I5k31",
+ "seed": 4,
+ "sleep_steps": 5000,
+ "sleep_lr": 0.0005,
+ "cons_batch": 192,
+ "rehearse_batch": 64,
+ "conf": 0.5,
+ "cons_p": 0.1,
+ "theta_full": 60.0,
+ "consolidation_examples": 5835,
+ "inference": {
+  "generated": 2994,
+  "kept": 2841,
+  "correct_all": 0.9796,
+  "correct_kept": 0.9838
+ },
+ "before": {
+  "empty": {
+   "fwd_oneway": {
+    "hits": 0.0007,
+    "mass": 0.001
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0016,
+    "mass": 0.0017
+   },
+   "rev_paired": {
+    "hits": 0.0008,
+    "mass": 0.001
+   }
+  },
+  "memory": {
+   "fwd_oneway": {
+    "hits": 0.9504,
+    "mass": 0.929,
+    "recall": 0.9978
+   },
+   "rev_oneway_clean": {
+    "hits": 0.9747,
+    "mass": 0.9548,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.985,
+    "mass": 0.9621,
+    "recall": 1.0
+   }
+  },
+  "combined": {
+   "fwd_oneway": {
+    "hits": 0.9504,
+    "mass": 0.9274,
+    "read_fraction": 0.9978
+   },
+   "rev_oneway_clean": {
+    "hits": 0.9788,
+    "mass": 0.9568,
+    "read_fraction": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.9842,
+    "mass": 0.9641,
+    "read_fraction": 1.0
+   }
+  },
+  "heldout": {
+   "fwd_oneway": {
+    "hits": 0.9481,
+    "mass": 0.9289,
+    "recall": 0.9985
+   },
+   "rev_oneway_clean": {
+    "hits": 0.9757,
+    "mass": 0.958,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.9807,
+    "mass": 0.9595,
+    "recall": 1.0
+   }
+  }
+ },
+ "after": {
+  "empty": {
+   "fwd_oneway": {
+    "hits": 0.9978,
+    "mass": 0.9765
+   },
+   "rev_oneway_clean": {
+    "hits": 0.9682,
+    "mass": 0.947
+   },
+   "rev_paired": {
+    "hits": 0.9786,
+    "mass": 0.9577
+   }
+  },
+  "memory": {
+   "fwd_oneway": {
+    "hits": 0.9615,
+    "mass": 0.9506,
+    "recall": 0.9978
+   },
+   "rev_oneway_clean": {
+    "hits": 0.978,
+    "mass": 0.9629,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.9858,
+    "mass": 0.9698,
+    "recall": 1.0
+   }
+  },
+  "combined": {
+   "fwd_oneway": {
+    "hits": 0.963,
+    "mass": 0.9494,
+    "read_fraction": 0.9978
+   },
+   "rev_oneway_clean": {
+    "hits": 0.9764,
+    "mass": 0.9603,
+    "read_fraction": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.9897,
+    "mass": 0.9726,
+    "read_fraction": 1.0
+   }
+  },
+  "heldout": {
+   "fwd_oneway": {
+    "hits": 0.9473,
+    "mass": 0.9245,
+    "recall": 0.9985
+   },
+   "rev_oneway_clean": {
+    "hits": 0.9749,
+    "mass": 0.9543,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.9726,
+    "mass": 0.9517,
+    "recall": 1.0
+   }
+  }
+ },
+ "eviction": {
+  "rule": "self",
+  "rows_before": 2994,
+  "consolidated": 1934,
+  "rows_after": 1060,
+  "fwd_consolidated": 2990,
+  "rev_consolidated": 2512,
+  "p_rule_both": 2508,
+  "self_rule_both": 1934,
+  "top_fwd": 2498,
+  "top_rev": 2430,
+  "combined_after_eviction": {
+   "fwd_oneway": {
+    "hits": 0.9534,
+    "mass": 0.9282,
+    "read_fraction": 0.4001
+   },
+   "rev_oneway_clean": {
+    "hits": 0.9698,
+    "mass": 0.941,
+    "read_fraction": 0.3407
+   },
+   "rev_paired": {
+    "hits": 0.9715,
+    "mass": 0.9432,
+    "read_fraction": 0.3655
+   }
+  }
+ },
+ "secs": 98.2
+}
