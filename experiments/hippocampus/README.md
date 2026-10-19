@@ -40,6 +40,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H5C.md`, `h5c.py` | H5c: conjunctive (dentate-gyrus-like) pair units feeding third-slot maps |
 | `EXPERIMENT_H1D.md`, `run_h1d.py` | H1d: content matching without a rank cue (warm start; mixed read order) |
 | `EXPERIMENT_H1E.md`, `run_h1e.py` | H1e: rotary positions (RoPE) for content matching |
+| `EXPERIMENT_H1F.md`, `run_h1f.py` | H1f: PoPE attention (the repo's, from `../transformers/h1_lid.py`) for content matching |
 | `runs/` | results, one JSON per run |
 
 ## Standing rules
@@ -137,6 +138,11 @@ The plan is written, with the compression mechanisms in §2b.
 - Neither a warm start nor a mixed order teaches it (0.16–0.23 shuffled).
 - Shuffled training erases the ranked skill.
 - Next: rotary positions (H1e).
+
+**H1e (RoPE): done, negative.**
+- Relative positions alone do not unlock content matching (0.19–0.22 shuffled).
+- The copy route is kept (0.96–0.97).
+- **H1f (PoPE, the user's suggestion)** is pre-registered.
 
 `PLAN.md` §0 holds the learnings so far.
 

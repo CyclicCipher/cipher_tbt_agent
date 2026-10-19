@@ -18,6 +18,10 @@ embedding is added to the input, so a role shared by many positions is learned o
 `rope=True` (hippocampus H1e): rotary position encoding on queries and keys instead of learned absolute positions,
 so a fixed offset ("two tokens earlier") is the same operation at every position.
 
+`pope=True` (hippocampus H1f): the attention of every block is the repo's PoPE attention (Polar coordinate positional
+embeddings, arXiv:2509.10534), reused unchanged from `../transformers/h1_lid.py` (`Attn(d, n_head, "pope")`): content in
+the magnitude, position alone in the phase. No absolute position embedding.
+
 `transport="sum"` (Experiment 1c) removes attention: the MLP blocks read the fixed sum of the two token codes, so an
 entity arrives at the MLP as exactly its own code. `set_mlp_off(True)` zeroes every MLP's output (the per-run check of
 how much of the facts the MLPs hold).
@@ -51,10 +55,18 @@ class MLP(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, d, n_head, m, dagger, n_layer, attn=True):
+    def __init__(self, d, n_head, m, dagger, n_layer, attn=True, pope=False):
         super().__init__()
         self.attn = attn
-        if attn:
+        self.pope = None
+        if attn and pope:                                      # the repo's one PoPE implementation, not a copy
+            import sys
+            from pathlib import Path
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "transformers"))
+            from h1_lid import Attn
+            self.ln1 = nn.LayerNorm(d)
+            self.pope = Attn(d, n_head, "pope")
+        elif attn:
             self.ln1 = nn.LayerNorm(d)
             self.qkv = nn.Linear(d, 3 * d)
             self.proj = nn.Linear(d, d)
@@ -66,6 +78,9 @@ class Block(nn.Module):
 
     def forward(self, x, rope=None):
         if not self.attn:
+            return x + self.mlp(self.ln2(x))
+        if self.pope is not None:
+            x = x + self.pope(self.ln1(x))
             return x + self.mlp(self.ln2(x))
         B, T, d = x.shape
         q, k, v = self.qkv(self.ln1(x)).split(d, dim=2)
@@ -81,19 +96,20 @@ class Block(nn.Module):
 
 class Net(nn.Module):
     def __init__(self, vocab, d=128, n_layer=2, n_head=4, m=256, dagger=False, tied=True, ctx=2, frozen=False,
-                 transport="attn", seg_ids=None, rope=False):
+                 transport="attn", seg_ids=None, rope=False, pope=False):
         super().__init__()
         self.tok = nn.Embedding(vocab, d)
         self.transport = transport
         self.rope = rope
-        if transport == "attn" and not rope:
+        self.pope = pope
+        if transport == "attn" and not rope and not pope:
             self.pos = nn.Embedding(ctx, d)
         self.frozen = frozen
         nn.init.normal_(self.tok.weight, std=1.0 if frozen else 0.02)
         if frozen:
             self.tok.weight.requires_grad_(False)
             self.scale = nn.Parameter(torch.ones(()))
-        if transport == "attn" and not rope:
+        if transport == "attn" and not rope and not pope:
             nn.init.normal_(self.pos.weight, std=0.02)
         if rope:
             hd = d // n_head
@@ -101,7 +117,7 @@ class Net(nn.Module):
             ang = torch.arange(ctx).float()[:, None] * inv[None, :]          # (ctx, hd/2)
             self.register_buffer("rope_cos", ang.cos(), persistent=False)
             self.register_buffer("rope_sin", ang.sin(), persistent=False)
-        self.blocks = nn.ModuleList(Block(d, n_head, m, dagger, n_layer, attn=(transport == "attn"))
+        self.blocks = nn.ModuleList(Block(d, n_head, m, dagger, n_layer, attn=(transport == "attn"), pope=pope)
                                     for _ in range(n_layer))
         self.lnf = nn.LayerNorm(d)
         self.tied = tied
@@ -129,6 +145,8 @@ class Net(nn.Module):
             x = self.tok(idx)
             T = idx.shape[1]
             rope = (self.rope_cos[:T], self.rope_sin[:T])
+        elif self.pope:                                        # position enters inside PoPE attention only
+            x = self.tok(idx)
         else:
             x = self.tok(idx) + self.pos(torch.arange(idx.shape[1], device=idx.device))
         if self.has_seg:
