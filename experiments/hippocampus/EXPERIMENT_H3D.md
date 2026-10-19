@@ -52,6 +52,44 @@ about 90 s at 1,000.
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/h3c/sleep_pr_*.json`, log `runs/h3d_log.txt`)
 
-*(to be filled in after the runs)*
+All runs took 82–86 s.
+
+| reader | stream seed | **final, all facts, combined: fwd / rev / mean** | weights alone fwd / rev | online mean | rows at end | evicted per sleep | pseudo examples per sleep | first-sleep retention fwd / rev | held-out rev |
+|---|---|---|---|---|---|---|---|---|---|
+| 4 | 0 | 0.583 / 0.620 / **0.601** | 0.637 / 0.619 | 0.824 | 583 | 324, 823, 856, 917 | 2, 870, 4,371, 5,756 | 0.46 / 0.49 (324 facts) | 0.979 → 0.973 |
+| 4 | 1 | 0.580 / 0.623 / **0.602** | 0.622 / 0.619 | 0.797 | 551 | 412, 830, 913, 949 | 2, 1,355, 5,391, 6,119 | 0.50 / 0.47 (412) | 0.977 → 0.975 |
+| 5 | 0 | 0.603 / 0.596 / **0.599** | 0.647 / 0.597 | 0.828 | 555 | 726, 803, 896, 945 | 42, 3,017, 5,826, 6,211 | 0.52 / 0.49 (726) | 0.985 → 0.973 |
+| 5 | 1 | 0.609 / 0.617 / **0.613** | 0.664 / 0.602 | 0.832 | 549 | 722, 815, 958, 951 | 42, 3,011, 5,902, 6,522 | 0.53 / 0.48 (722) | 0.980 → 0.973 |
+
+H3c's references: value 0.346–0.357, sleep 0.392–0.397, uncapped 0.854–0.864 on the same measure; first-sleep retention
+under plain sleep was 0.18–0.24.
+
+**A deviation from the pre-registration (implementation).**
+- The design said the first sleep falls back to 192 consolidation + 64 reading "when nothing is yet known".
+- The code fell back only when the pseudo set was *empty*. At the first sleep the weights had **2–42 spurious confident
+  answers**, so the pseudo path ran: 128 consolidation + 64 draws from those few examples.
+- That weakened the first sleep. It evicted 324–726 facts, against 659–777 under H3c's plain sleep, and the retention
+  measure is over that smaller set.
+- The fix (a minimum pseudo-set size) is part of H3e.
+
+**Against the predictions:**
+- **D1 (retention ≥ 0.8): REFUTED.** 0.46–0.53, up from 0.18–0.24. Forgetting is halved, not stopped.
+- **D2 (long tail ≥ 0.50): holds in all four.** 0.599–0.613, against 0.35 without sleep and 0.39 with plain sleep:
+  **+0.25.**
+- **D3 (weights alone ≥ 0.6): holds in all four.** 0.62–0.63, against 0.40.
+- **D4 (reading survives): holds.** −0.012 to −0.002.
+- **D5 (online ≥ value − 0.02): holds in all four.** −0.016 to +0.025.
+
+**What H3d establishes:**
+1. **Self-replay works against catastrophic interference,** partially. Replaying the weights' own confident answers
+   (no stored data) lifts the long tail from 0.39 to 0.60, and the weights alone from 0.40 to 0.63, at no cost to
+   frequent facts or to reading.
+2. **The store ends at about 550 rows against the uncapped 5,950 (11× smaller),** holding 0.60 per fact against the
+   full store's 0.86. The remaining gap is forgetting: about half of what was consolidated early is lost by the end.
+3. **A likely cause is a dose problem.** By the last sleep the pseudo set is about 6,000 answers, at 64 per batch, so
+   about 11 replays each per sleep, against about 43 for new facts.
+
+**Next (H3e):** the first-sleep fallback fixed (pseudo set < 100 → no pseudo path), and a larger pseudo share
+(96 consolidation + 96 pseudo + 64 reading).

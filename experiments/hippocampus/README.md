@@ -101,6 +101,12 @@ The plan is written, with the compression mechanisms in §2b.
 - The long tail barely improves (0.39 vs 0.35).
 - Sleep must also replay what the weights already know (H3d).
 
+**H3d (sleep with pseudo-rehearsal): done.**
+- Long tail **0.60** (from 0.39) with a store **11× smaller** than the full one (full: 0.86).
+- The weights alone hold 0.63.
+- No online or reading cost.
+- Forgetting is halved (retention 0.48), not stopped.
+
 `PLAN.md` §0 holds the learnings so far.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.
