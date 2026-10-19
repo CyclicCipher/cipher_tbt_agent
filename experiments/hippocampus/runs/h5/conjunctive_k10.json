@@ -1,0 +1,74 @@
+{
+ "k": 10,
+ "D": 2048,
+ "n_pair": 65536,
+ "memory_bytes": 50331648,
+ "sizes": [
+  250,
+  500,
+  1000,
+  2000,
+  4000,
+  8000,
+  11930
+ ],
+ "curve": [
+  {
+   "stored": 250,
+   "density": 0.0018,
+   "top1_fwd": 1.0,
+   "top1_rev": 1.0,
+   "at12_fwd": 1.0,
+   "at12_rev": 1.0
+  },
+  {
+   "stored": 500,
+   "density": 0.0036,
+   "top1_fwd": 1.0,
+   "top1_rev": 1.0,
+   "at12_fwd": 1.0,
+   "at12_rev": 1.0
+  },
+  {
+   "stored": 1000,
+   "density": 0.0071,
+   "top1_fwd": 1.0,
+   "top1_rev": 1.0,
+   "at12_fwd": 1.0,
+   "at12_rev": 1.0
+  },
+  {
+   "stored": 2000,
+   "density": 0.0137,
+   "top1_fwd": 1.0,
+   "top1_rev": 1.0,
+   "at12_fwd": 1.0,
+   "at12_rev": 1.0
+  },
+  {
+   "stored": 4000,
+   "density": 0.0255,
+   "top1_fwd": 1.0,
+   "top1_rev": 1.0,
+   "at12_fwd": 1.0,
+   "at12_rev": 1.0
+  },
+  {
+   "stored": 8000,
+   "density": 0.046,
+   "top1_fwd": 1.0,
+   "top1_rev": 1.0,
+   "at12_fwd": 1.0,
+   "at12_rev": 1.0
+  },
+  {
+   "stored": 11930,
+   "density": 0.0638,
+   "top1_fwd": 1.0,
+   "top1_rev": 1.0,
+   "at12_fwd": 1.0,
+   "at12_rev": 1.0
+  }
+ ],
+ "secs": 7.0
+}

@@ -126,6 +126,11 @@ The plan is written, with the compression mechanisms in §2b.
 - But a pairwise Hebbian matrix cannot store a conjunction (top-1 0.24).
 - Relational episodes need conjunctive units: the table's rows, or a dentate-gyrus-like layer.
 
+**H5c (conjunctive, dentate-gyrus-like units): done.**
+- **Top-1 1.000** in both directions up to 11,930 episodes, one-shot.
+- But 50 MB, against the table's 167 KB.
+- The table is the cheap form; the conjunctive layer is the neural one.
+
 `PLAN.md` §0 holds the learnings so far.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.

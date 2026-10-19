@@ -44,6 +44,42 @@ k = 10, 30 episodes: top-1 and @12 are 1.00 in both directions, layer density 0.
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/h5/conjunctive_k*.json`, log `runs/h5c_log.txt`)
 
-*(to be filled in after the runs)*
+| k | 250 | 1,000 | 4,000 | 8,000 | **11,930** | layer density at 11,930 |
+|---|---|---|---|---|---|---|
+| 10 | top-1 1.000 / 1.000 | 1.000 / 1.000 | 1.000 / 1.000 | 1.000 / 1.000 | **1.000 / 1.000** | 0.064 |
+| 20 | 1.000 / 1.000 | 1.000 / 1.000 | 1.000 / 1.000 | 1.000 / 1.000 | **1.000 / 1.000** | 0.327 |
+
+Forward / reverse; @12 is 1.000 everywhere.
+
+**Checking the ceiling** (a near-perfect score is first a bug report):
+- The correct-answer sets come only from facts stored so far, and the cue's own entity is excluded from decoding.
+- A spurious output bit needs the votes of *all* k² cue units. At layer density ≤ 0.33, with 100–400 votes, that
+  probability is negligible.
+- What remains is exactly the conjunction: only an episode containing both cue tokens, in the right slots, wrote those
+  units.
+- The hash overflows int64 arithmetic for large bit indices and wraps around. That gives a different but fixed hash,
+  so it changes nothing.
+
+**Against the predictions:**
+- **K1 (k = 10, top-1 ≥ 0.9 at every size): holds,** at 1.000 throughout. H5b: 0.24 at 11,930.
+- **K2 (k = 20, ≥ 0.9 to 4,000, ≥ 0.7 at 11,930): holds,** at 1.000 throughout. The crosstalk I expected did not
+  appear: density reached only 0.33.
+- **K3 (direction-free): holds,** with identical forward and reverse.
+
+**What H5c establishes:**
+1. **Conjunctive units are what relational episodes need,** and with them a neural store matches the table: top-1
+   1.000 in both directions at 11,930 episodes, written in one shot, with no gradient.
+2. **The price is memory.** The random layer costs **50 MB** (3 × 65,536 × 2,048 bits), about 34 kbit per episode at
+   11,930, against the table's 112 bits per episode (14 bytes, 167 KB in all) and the pairwise network's 512 KB.
+   - A *random* conjunctive expansion must be large to keep collisions rare.
+   - An *allocated* one (a unit per episode: the table's rows, or a dense associative memory's hidden units) is about
+     300× cheaper.
+   - The brain's dentate gyrus has about 5–10× more cells than its input layer, which looks like this trade made with
+     biological parts.
+3. **Neural substrate (H5–H5c), summed up:**
+   - a **pairwise** CA3 has the capacity but cannot hold conjunctions;
+   - adding **slot binding** fixes roles;
+   - adding **conjunctive units** fixes conjunctions.
+   - The table is the cheapest implementation of the result, and the conjunctive layer is the neural one.
