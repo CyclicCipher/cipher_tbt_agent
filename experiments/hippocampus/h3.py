@@ -75,7 +75,9 @@ def combined(net, store, sets, gen):
     return out
 
 
-def run_sleep(arm, seed):
+def run_sleep(arm, seed, steps=SLEEP_STEPS, cons=HALF, rehearse=HALF, evict_rule="p"):
+    """H3 defaults (2,000 steps, 128 + 128, evict at p >= CONS_P). H3b: longer sleep, other mixes, and the
+    self-checked rule (evict only if the weights' top answer is the stored answer in both directions)."""
     t0 = time.time()
     torch.manual_seed(seed)
     gen = torch.Generator(device=DEV).manual_seed(seed)
@@ -113,23 +115,31 @@ def run_sleep(arm, seed):
     opt = opt_for(net, SLEEP_LR, fused=True)
     train_net = torch.compile(net)
     net.train()
-    for t in range(1, SLEEP_STEPS + 1):
-        i = torch.randint(0, len(cX), (HALF,), device=DEV, generator=gen)
-        j = torch.randint(0, len(X), (HALF,), device=DEV, generator=gen)
-        step(train_net, opt, torch.cat([cX[i], X[j]]), torch.cat([cY[i], Y[j]]), SLEEP_LR, t, total=SLEEP_STEPS)
+    for t in range(1, steps + 1):
+        i = torch.randint(0, len(cX), (cons,), device=DEV, generator=gen)
+        j = torch.randint(0, len(X), (rehearse,), device=DEV, generator=gen)
+        step(train_net, opt, torch.cat([cX[i], X[j]]), torch.cat([cY[i], Y[j]]), SLEEP_LR, t, total=steps)
 
     after = dict(empty=eval_empty(net, sets), memory=eval_mem(net, store, sets, gen),
                  combined=combined(net, store, sets, gen), heldout=eval_mem(net, store50, sets50, gen))
-    pf = predict(net, empty_ctx(rows[:, :2]))[torch.arange(len(rows)), rows[:, 2].to(DEV)]
-    pr = predict(net, empty_ctx(torch.stack([rows[:, 2], rows[:, 1] + N_REL], 1)))[torch.arange(len(rows)),
-                                                                                   rows[:, 0].to(DEV)]
-    cons = ((pf >= CONS_P) & (pr >= CONS_P)).nonzero().flatten().tolist()
+    qf = predict(net, empty_ctx(rows[:, :2]))
+    qr = predict(net, empty_ctx(torch.stack([rows[:, 2], rows[:, 1] + N_REL], 1)))
+    ar = torch.arange(len(rows))
+    pf, pr = qf[ar, rows[:, 2].to(DEV)], qr[ar, rows[:, 0].to(DEV)]
+    top_f, top_r = qf.argmax(-1).cpu() == rows[:, 2], qr.argmax(-1).cpu() == rows[:, 0]
+    p_rule = (pf >= CONS_P) & (pr >= CONS_P)
+    self_rule = (top_f & top_r).to(DEV)
+    chosen = self_rule if evict_rule == "self" else p_rule
+    cons_ = chosen.nonzero().flatten().tolist()
     n_before = len(store)
-    store.remove(cons)
-    evicted = dict(rows_before=n_before, consolidated=len(cons), rows_after=len(store),
+    store.remove(cons_)
+    evicted = dict(rule=evict_rule, rows_before=n_before, consolidated=len(cons_), rows_after=len(store),
                    fwd_consolidated=int((pf >= CONS_P).sum()), rev_consolidated=int((pr >= CONS_P).sum()),
+                   p_rule_both=int(p_rule.sum()), self_rule_both=int(self_rule.sum()),
+                   top_fwd=int(top_f.sum()), top_rev=int(top_r.sum()),
                    combined_after_eviction=combined(net, store, sets, gen))
-    return dict(arm=arm, seed=seed, sleep_steps=SLEEP_STEPS, sleep_lr=SLEEP_LR, half=HALF, conf=CONF, cons_p=CONS_P,
+    return dict(arm=arm, seed=seed, sleep_steps=steps, sleep_lr=SLEEP_LR, cons_batch=cons, rehearse_batch=rehearse,
+                conf=CONF, cons_p=CONS_P,
                 theta_full=THETA_FULL, consolidation_examples=len(cX), inference=inference, before=before,
                 after=after, eviction=evicted, secs=round(time.time() - t0, 1))
 
