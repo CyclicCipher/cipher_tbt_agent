@@ -75,6 +75,42 @@ def combined(net, store, sets, gen):
     return out
 
 
+def consolidation_examples(net, store, gen, inferences=True):
+    """Empty-memory questions for every stored episode: forward [a, r] -> b, and (inferences) the reverse [b, r°] ->
+    the reader's own answer through its normal read path, kept if p >= CONF. Returns (cX, cY, (conf, ans, keep))."""
+    rows = store.rows.cpu()
+    cX, cY, out = [empty_ctx(rows[:, :2])], [rows[:, 2].to(DEV)], None
+    if inferences:
+        Prev = torch.stack([rows[:, 2], rows[:, 1] + N_REL], 1)
+        conf, ans = predict(net, contexts(store, Prev, gen)[0]).max(-1)
+        keep = conf >= CONF
+        cX.append(empty_ctx(Prev[keep.cpu()]))
+        cY.append(ans[keep].to(DEV))
+        out = (conf, ans, keep)
+    return torch.cat(cX), torch.cat(cY), out
+
+
+def sleep_train(net, cX, cY, X, Y, gen, steps, cons, rehearse):
+    """Sleep: `steps` updates, each `cons` consolidation examples + `rehearse` examples of the reading task."""
+    opt = opt_for(net, SLEEP_LR, fused=True)
+    train_net = torch.compile(net)
+    net.train()
+    for t in range(1, steps + 1):
+        i = torch.randint(0, len(cX), (cons,), device=DEV, generator=gen)
+        j = torch.randint(0, len(X), (rehearse,), device=DEV, generator=gen)
+        step(train_net, opt, torch.cat([cX[i], X[j]]), torch.cat([cY[i], Y[j]]), SLEEP_LR, t, total=steps)
+
+
+def self_check(net, rows):
+    """For each stored episode (a, r, b): is the weights-only top answer the stored one, forward and reverse? Also the
+    probabilities the weights give to the stored answers."""
+    qf = predict(net, empty_ctx(rows[:, :2]))
+    qr = predict(net, empty_ctx(torch.stack([rows[:, 2], rows[:, 1] + N_REL], 1)))
+    ar = torch.arange(len(rows))
+    pf, pr = qf[ar, rows[:, 2].to(DEV)], qr[ar, rows[:, 0].to(DEV)]
+    return qf.argmax(-1).cpu() == rows[:, 2], qr.argmax(-1).cpu() == rows[:, 0], pf, pr
+
+
 def run_sleep(arm, seed, steps=SLEEP_STEPS, cons=HALF, rehearse=HALF, evict_rule="p"):
     """H3 defaults (2,000 steps, 128 + 128, evict at p >= CONS_P). H3b: longer sleep, other mixes, and the
     self-checked rule (evict only if the weights' top answer is the stored answer in both directions)."""
@@ -92,14 +128,10 @@ def run_sleep(arm, seed, steps=SLEEP_STEPS, cons=HALF, rehearse=HALF, evict_rule
                   combined=combined(net, store, sets, gen), heldout=eval_mem(net, store50, sets50, gen))
 
     rows = store.rows.cpu()                                       # (n, 3): a, relation token, b
-    cX = [empty_ctx(rows[:, :2])]
-    cY = [rows[:, 2].to(DEV)]
+    cX, cY, gen_out = consolidation_examples(net, store, gen, inferences=(arm == "I"))
     inference = None
     if arm == "I":
-        Prev = torch.stack([rows[:, 2], rows[:, 1] + N_REL], 1)   # [b, r°], answered through the normal read
-        p = predict(net, contexts(store, Prev, gen)[0])
-        conf, ans = p.max(-1)
-        keep = conf >= CONF
+        conf, ans, keep = gen_out
         rev = {}
         for a, r, b in F0.facts:
             rev.setdefault((r, b), set()).add(a)
@@ -107,26 +139,12 @@ def run_sleep(arm, seed, steps=SLEEP_STEPS, cons=HALF, rehearse=HALF, evict_rule
         inference = dict(generated=len(rows), kept=int(keep.sum()),
                          correct_all=round(sum(truth) / len(truth), 4),
                          correct_kept=round(sum(t for t, k in zip(truth, keep.tolist()) if k) / max(1, int(keep.sum())), 4))
-        cX.append(empty_ctx(Prev[keep.cpu()]))
-        cY.append(ans[keep].to(DEV))
-    cX, cY = torch.cat(cX), torch.cat(cY)
     X, Y = training_set(Store, "sparse", gen)                     # rehearsal of the reading skill
-
-    opt = opt_for(net, SLEEP_LR, fused=True)
-    train_net = torch.compile(net)
-    net.train()
-    for t in range(1, steps + 1):
-        i = torch.randint(0, len(cX), (cons,), device=DEV, generator=gen)
-        j = torch.randint(0, len(X), (rehearse,), device=DEV, generator=gen)
-        step(train_net, opt, torch.cat([cX[i], X[j]]), torch.cat([cY[i], Y[j]]), SLEEP_LR, t, total=steps)
+    sleep_train(net, cX, cY, X, Y, gen, steps, cons, rehearse)
 
     after = dict(empty=eval_empty(net, sets), memory=eval_mem(net, store, sets, gen),
                  combined=combined(net, store, sets, gen), heldout=eval_mem(net, store50, sets50, gen))
-    qf = predict(net, empty_ctx(rows[:, :2]))
-    qr = predict(net, empty_ctx(torch.stack([rows[:, 2], rows[:, 1] + N_REL], 1)))
-    ar = torch.arange(len(rows))
-    pf, pr = qf[ar, rows[:, 2].to(DEV)], qr[ar, rows[:, 0].to(DEV)]
-    top_f, top_r = qf.argmax(-1).cpu() == rows[:, 2], qr.argmax(-1).cpu() == rows[:, 0]
+    top_f, top_r, pf, pr = self_check(net, rows)
     p_rule = (pf >= CONS_P) & (pr >= CONS_P)
     self_rule = (top_f & top_r).to(DEV)
     chosen = self_rule if evict_rule == "self" else p_rule
