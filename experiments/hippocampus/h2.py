@@ -99,11 +99,11 @@ def evict(store, policy, cap, pop, rng):
     return n
 
 
-def run_stream(policy, seed, stream_seed=STREAM_SEED, expand=False):
+def run_stream(policy, seed, stream_seed=STREAM_SEED, expand=False, reader=None):
     """H2: stream_seed 0, no expansion. H2b adds stream seeds 1, 2 and the learned query expansion."""
     t0 = time.time()
     net = Net(VOCAB, ctx=CTX, **MODEL).to(DEV)
-    net.load_state_dict(torch.load(OUT / f"reader_s{seed}.pt", map_location=DEV))
+    net.load_state_dict(torch.load(reader or OUT / f"reader_s{seed}.pt", map_location=DEV))
     net.eval()
     gen = torch.Generator(device=DEV).manual_seed(stream_seed)
     rng = random.Random(stream_seed)

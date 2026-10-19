@@ -32,6 +32,7 @@ class Store:
         self.where = {}                                        # episode tokens -> row ids (for diagnostics)
         self.step = 0
         self.expansion = None                                  # H2b: (vocab,) learned partner token per token, or -1
+        self.read_order = "ranked"                             # H1c: "ranked" (best last) or "shuffled"
 
     def __len__(self):
         return self.rows.shape[0]

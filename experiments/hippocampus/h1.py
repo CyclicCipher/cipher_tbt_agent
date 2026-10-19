@@ -27,6 +27,8 @@ from data import make_facts                       # noqa: E402  the synthetic fa
 from model import Net                             # noqa: E402  the tiny transformer (reused)
 from store import Store, DEV                      # noqa: E402
 
+StoreClass = Store
+
 N_ENT, N_REL = 1000, 6
 BASE = N_ENT + 2 * N_REL                          # entities + relations + converse tokens
 MEM, SEP, PAD = BASE, BASE + 1, BASE + 2
@@ -78,6 +80,9 @@ def contexts(store, prompts, gen, oracle=None):
     if none of them was retrieved, one is put in place of the worst-ranked episode."""
     prompts = prompts.to(DEV)
     ids = store.retrieve(prompts, R, THETA, gen)
+    if store.read_order == "shuffled":                       # H1c: rank position carries no information
+        perm = torch.argsort(torch.rand(ids.shape, device=DEV, generator=gen), dim=1)
+        ids = torch.gather(ids, 1, perm)
     if oracle is not None:
         for i, eps in enumerate(oracle):
             rows = [j for e in eps for j in store.where.get(e, [])]
@@ -100,8 +105,29 @@ def score(logits, sets):
     return round(hits, 4), round(mass, 4)
 
 
+def classify_reverse(store, s, ids, logits):
+    """H1c: what kind of answer did the reader give to each reverse question (b, r°)?"""
+    pred = logits.float()[:, :N_ENT].argmax(-1).tolist()
+    rows = store.rows.tolist() if len(store) else []
+    c = dict(correct=0, rel_ok_entity_wrong=0, entity_ok_rel_wrong=0, other_in_context=0, not_in_context=0)
+    for i, ((b, ct), correct, _) in enumerate(s):
+        r_tok, p = ct - N_REL, pred[i]
+        read = [rows[j] for j in ids[i].tolist() if j >= 0]
+        if p in correct:
+            c["correct"] += 1
+        elif any(t[0] == p and t[1] == r_tok for t in read):
+            c["rel_ok_entity_wrong"] += 1
+        elif any(t[0] == p and t[2] == b for t in read):
+            c["entity_ok_rel_wrong"] += 1
+        elif any(p in t for t in read):
+            c["other_in_context"] += 1
+        else:
+            c["not_in_context"] += 1
+    return {k: round(v / len(s), 4) for k, v in c.items()}
+
+
 @torch.no_grad()
-def eval_mem(net, store, sets, gen, oracle=False):
+def eval_mem(net, store, sets, gen, oracle=False, classify=False):
     net.eval()
     out = {}
     for name, s in sets.items():
@@ -113,6 +139,8 @@ def eval_mem(net, store, sets, gen, oracle=False):
         good = [{j for e in f for j in store.where.get(e, [])} for _, _, f in s]
         recall = sum(any(int(j) in good[i] for j in ids[i].tolist()) for i in range(len(s))) / len(s)
         out[name] = dict(hits=hits, mass=mass, recall=round(recall, 4))
+        if classify and name.startswith("rev"):
+            out[name]["classes"] = classify_reverse(store, s, ids, logits)
     net.train()
     return out
 
@@ -183,12 +211,23 @@ SLOTS = [0] + [1, 2, 3, 4] * R + [5, 6]          # H1b: [MEM], (a, r, b, [SEP]) 
 
 
 def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500, fast=False, cosine=False, slots=False,
-               familiarity=False, save=None):
+               familiarity=False, save=None, expand=False, read_order="ranked"):
     """H1 defaults; H1b: fast (torch.compile + fused AdamW), cosine (decay to 10%), slots (slot embedding),
     familiarity (recognition before the surprise gate)."""
     t0 = time.time()
     torch.manual_seed(seed)
     gen = torch.Generator(device=DEV).manual_seed(seed)
+    if expand:
+        from expand import expansion_table
+        table = expansion_table()
+
+    def Store(*a, **k):                                        # every store in this run reads the same way (H1c)
+        st_ = StoreClass(*a, **k)
+        st_.read_order = read_order
+        if expand:
+            st_.expansion = table
+        return st_
+
     X, Y = [], []
     for w in TRAIN_WORLDS:                                     # the reader's training worlds: written whole, ungated
         F = make_facts(seed=w)
@@ -217,13 +256,14 @@ def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500, fast
     store = Store(VOCAB, index)
     st1, st2 = {}, {}
     w1 = gated_write(net, store, facts, gen, familiarity=familiarity, stats=st1)
-    final = eval_mem(net, store, sets, gen)                   # the store after one presentation
+    final = eval_mem(net, store, sets, gen, classify=True)    # the store after one presentation
     final_oracle = eval_mem(net, store, sets, gen, oracle=True)
     w2 = gated_write(net, store, facts, gen, familiarity=familiarity, stats=st2)   # presented again
     kinds = F0.kinds
     res = dict(arm={"sparse": "B", "dense": "C"}[index], index=index, seed=seed, steps=steps, lr=lr, batch=batch,
                R=R, theta=THETA, tau=TAU, model=MODEL, train_examples=len(X), log=log,
-               options=dict(fast=fast, cosine=cosine, slots=slots, familiarity=familiarity),
+               options=dict(fast=fast, cosine=cosine, slots=slots, familiarity=familiarity, expand=expand,
+                            read_order=read_order),
                final=final, final_oracle=final_oracle, leak_control=None,
                gate=dict(facts=len(facts), written_first=len(w1), written_again=len(w2),
                          again_by_kind={k: sum(kinds[f[1]] == k for f in w2) for k in sorted(set(kinds))},
