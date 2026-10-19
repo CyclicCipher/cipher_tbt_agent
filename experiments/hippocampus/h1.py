@@ -80,9 +80,14 @@ def contexts(store, prompts, gen, oracle=None):
     if none of them was retrieved, one is put in place of the worst-ranked episode."""
     prompts = prompts.to(DEV)
     ids = store.retrieve(prompts, R, THETA, gen)
-    if store.read_order == "shuffled":                       # H1c: rank position carries no information
+    if store.read_order in ("shuffled", "mixed"):            # H1c: rank position carries no information
         perm = torch.argsort(torch.rand(ids.shape, device=DEV, generator=gen), dim=1)
-        ids = torch.gather(ids, 1, perm)
+        shuffled = torch.gather(ids, 1, perm)
+        if store.read_order == "mixed":                      # H1d: a random half of the questions shuffled
+            half = torch.rand(ids.shape[0], device=DEV, generator=gen) < 0.5
+            ids = torch.where(half[:, None], shuffled, ids)
+        else:
+            ids = shuffled
     if oracle is not None:
         for i, eps in enumerate(oracle):
             rows = [j for e in eps for j in store.where.get(e, [])]
@@ -242,7 +247,7 @@ SLOTS = [0] + [1, 2, 3, 4] * R + [5, 6]          # H1b: [MEM], (a, r, b, [SEP]) 
 
 
 def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500, fast=False, cosine=False, slots=False,
-               familiarity=False, save=None, expand=False, read_order="ranked"):
+               familiarity=False, save=None, expand=False, read_order="ranked", init_from=None):
     """H1 defaults; H1b: fast (torch.compile + fused AdamW), cosine (decay to 10%), slots (slot embedding),
     familiarity (recognition before the surprise gate)."""
     t0 = time.time()
@@ -255,6 +260,8 @@ def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500, fast
     full = Store(VOCAB, index)                                 # for the training curve only: every fact written
     full.write(episodes(F0))
     net = Net(VOCAB, ctx=CTX, seg_ids=SLOTS if slots else None, **MODEL).to(DEV)
+    if init_from:                                              # H1d: warm start from a trained reader
+        net.load_state_dict(torch.load(init_from, map_location=DEV))
     opt = opt_for(net, lr, fused=fast)
     train_net = torch.compile(net) if fast else net            # evaluation uses the uncompiled module (same weights)
     log = []
@@ -276,7 +283,7 @@ def run_memory(index, seed, steps=3500, lr=1e-3, batch=256, eval_every=500, fast
     res = dict(arm={"sparse": "B", "dense": "C"}[index], index=index, seed=seed, steps=steps, lr=lr, batch=batch,
                R=R, theta=THETA, tau=TAU, model=MODEL, train_examples=len(X), log=log,
                options=dict(fast=fast, cosine=cosine, slots=slots, familiarity=familiarity, expand=expand,
-                            read_order=read_order),
+                            read_order=read_order, init_from=str(init_from) if init_from else None),
                final=final, final_oracle=final_oracle, leak_control=None,
                gate=dict(facts=len(facts), written_first=len(w1), written_again=len(w2),
                          again_by_kind={k: sum(kinds[f[1]] == k for f in w2) for k in sorted(set(kinds))},

@@ -38,6 +38,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H5.md`, `h5.py` | H5: a Willshaw CA3 network (clipped Hebbian, autoassociative) against the table, by code sparsity |
 | `EXPERIMENT_H5B.md` | H5b: the Willshaw network with slot-bound codes (`h5.py --slots`) |
 | `EXPERIMENT_H5C.md`, `h5c.py` | H5c: conjunctive (dentate-gyrus-like) pair units feeding third-slot maps |
+| `EXPERIMENT_H1D.md`, `run_h1d.py` | H1d: content matching without a rank cue (warm start; mixed read order) |
 | `runs/` | results, one JSON per run |
 
 ## Standing rules
