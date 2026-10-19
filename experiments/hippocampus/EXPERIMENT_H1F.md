@@ -58,6 +58,39 @@ The B2 recipe with the expansion, from scratch, seeds 4 and 5, but **4,000 steps
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/h1f/`, log `runs/h1f_log.txt`)
 
-*(to be filled in after the runs)*
+Training runs took 100–107 s, within the 2-minute rule.
+
+| reader | REV one-way clean: ranked / **shuffled** | fwd: ranked / shuffled | shuffled-order reverse errors | reverse curve (training order, every 500 steps) |
+|---|---|---|---|---|
+| **P_sh s4** | **0.977 / 0.971** | 0.140 / 0.094 | 2.4% right relation, wrong entity; 0.5% right entity, wrong relation | 0.12 0.17 0.46 **0.91** 0.95 0.97 0.97 0.97 |
+| P_sh s5 | 0.147 / 0.155 | 0.070 / 0.078 | 71% right relation, wrong entity; 12% not in context | 0.06 0.08 0.10 0.12 0.14 0.14 0.15 0.16 |
+| P_rk s4 | **0.974** / 0.096 | 0.950 / 0.093 | 90% right relation, wrong entity | 0.87 … 0.97 |
+| P_rk s5 | **0.967** / 0.126 | 0.965 / 0.127 | 87% right relation, wrong entity | 0.88 … 0.95 |
+
+**Against the predictions:**
+- **P1 (content matching ≥ 0.6 in both seeds): met in seed 4, not seed 5.** Not met as pre-registered.
+  - **Seed 4 learned content matching:** 0.971 reverse with the read order shuffled, and 0.977 ranked. It is
+    *order-independent*, the first such reader in this line, with a sharp transition at about steps 1,500–2,000
+    (0.46 → 0.91).
+  - Seed 5 stayed at 0.16, like every earlier shuffled reader.
+- **P2 (PoPE keeps the copy route ≥ 0.9): holds,** 0.967–0.974 ranked.
+- **P3 (reported):** a PoPE reader trained on ranked order is as rank-dependent as E1 and RoPE (0.10–0.13 shuffled).
+
+**Unexplained, recorded:** P_sh s4 learned *reverse* content matching but not *forward* (0.09–0.14 forward, in either
+order). The two look symmetric (match one entity and the relation, copy the other entity), and the training mix is
+50/50. Only the reverse curve was logged per step, so it is unknown whether forward was about to follow. The next run
+should log both directions and save predictions.
+
+**What H1f establishes:**
+- Across 10 shuffled-order readers in H1c–H1f (absolute positions ×6, counting warm-start and mixed; RoPE ×2; PoPE ×2),
+  **the only one that ever learned content matching is a PoPE reader:** 0.97, order-independent. Every other reader
+  stayed at or below 0.23.
+- That supports the user's suggestion and PoPE's argument: disentangling content (magnitude) from position (phase) is
+  what lets a head match on *what* and offset by *where*.
+- It is **one seed of two**, with a late, seed-dependent transition like H1b's plateau escape, and with forward not
+  learned. Not yet reliable.
+
+**Next:** more seeds, and longer training where the 2-minute rule allows (or fewer steps per second spent elsewhere);
+log forward per step; save predictions.

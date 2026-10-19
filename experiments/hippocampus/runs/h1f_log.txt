@@ -1,0 +1,14 @@
+ran reader_P_sh_s4.json in 107.3s
+ran eval_P_sh_s4.json in 2.5s
+ran reader_P_sh_s5.json in 100.6s
+ran eval_P_sh_s5.json in 2.4s
+ran reader_P_rk_s4.json in 99.6s
+ran eval_P_rk_s4.json in 2.4s
+ran reader_P_rk_s5.json in 102.2s
+ran eval_P_rk_s5.json in 4.6s
+
+reader | world 0 REV one-way clean: ranked / shuffled | fwd: ranked / shuffled | shuffled reverse classes | reverse curve (training order) | secs
+  P_sh s4 | 0.977 / 0.971 | 0.140 / 0.094 | {'correct': 0.9707, 'rel_ok_entity_wrong': 0.0244, 'entity_ok_rel_wrong': 0.0049, 'other_in_context': 0.0, 'not_in_context': 0.0} | 0.12 0.17 0.46 0.91 0.95 0.97 0.97 0.97 | 107.3
+  P_sh s5 | 0.147 / 0.155 | 0.070 / 0.078 | {'correct': 0.1548, 'rel_ok_entity_wrong': 0.7074, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0147, 'not_in_context': 0.1231} | 0.06 0.08 0.10 0.12 0.14 0.14 0.15 0.16 | 100.6
+  P_rk s4 | 0.974 / 0.096 | 0.950 / 0.093 | {'correct': 0.0962, 'rel_ok_entity_wrong': 0.9014, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0024, 'not_in_context': 0.0} | 0.87 0.85 0.86 0.95 0.97 0.97 0.97 0.97 | 99.6
+  P_rk s5 | 0.967 / 0.126 | 0.965 / 0.127 | {'correct': 0.1263, 'rel_ok_entity_wrong': 0.8688, 'entity_ok_rel_wrong': 0.0033, 'other_in_context': 0.0016, 'not_in_context': 0.0} | 0.88 0.86 0.86 0.87 0.93 0.96 0.96 0.95 | 102.2

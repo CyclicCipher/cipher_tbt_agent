@@ -142,7 +142,13 @@ The plan is written, with the compression mechanisms in §2b.
 **H1e (RoPE): done, negative.**
 - Relative positions alone do not unlock content matching (0.19–0.22 shuffled).
 - The copy route is kept (0.96–0.97).
-- **H1f (PoPE, the user's suggestion)** is pre-registered.
+- **H1f (PoPE, the user's suggestion)** is done.
+
+**H1f (PoPE): done.**
+- **One of two seeds learned content matching: 0.97 reverse with a shuffled read order, order-independent**, the
+  first in the line.
+- The other seed did not, and forward was not learned in the successful run.
+- More seeds and longer runs are next.
 
 `PLAN.md` §0 holds the learnings so far.
 

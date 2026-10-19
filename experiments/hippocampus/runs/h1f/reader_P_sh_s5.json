@@ -1,0 +1,272 @@
+{
+ "arm": "P_sh",
+ "index": "sparse",
+ "seed": 5,
+ "steps": 4000,
+ "lr": 0.001,
+ "batch": 256,
+ "R": 12,
+ "theta": 20.0,
+ "tau": 2.0,
+ "model": {
+  "d": 128,
+  "n_layer": 4,
+  "n_head": 4,
+  "m": 512
+ },
+ "train_examples": 119816,
+ "log": [
+  {
+   "step": 500,
+   "loss": 6.0665,
+   "fwd_oneway": {
+    "hits": 0.02,
+    "mass": 0.0033,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0611,
+    "mass": 0.0046,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.053,
+    "mass": 0.0044,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 1000,
+   "loss": 5.484,
+   "fwd_oneway": {
+    "hits": 0.0288,
+    "mass": 0.0072,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.0848,
+    "mass": 0.0152,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.0831,
+    "mass": 0.0168,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 1500,
+   "loss": 4.7461,
+   "fwd_oneway": {
+    "hits": 0.0214,
+    "mass": 0.0081,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.1027,
+    "mass": 0.027,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.1044,
+    "mass": 0.0244,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 2000,
+   "loss": 4.4048,
+   "fwd_oneway": {
+    "hits": 0.0348,
+    "mass": 0.0136,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.1222,
+    "mass": 0.0378,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.1092,
+    "mass": 0.0393,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 2500,
+   "loss": 3.9878,
+   "fwd_oneway": {
+    "hits": 0.0703,
+    "mass": 0.0244,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.1369,
+    "mass": 0.0485,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.1305,
+    "mass": 0.0519,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 3000,
+   "loss": 3.8911,
+   "fwd_oneway": {
+    "hits": 0.0725,
+    "mass": 0.0267,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.141,
+    "mass": 0.0591,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.1511,
+    "mass": 0.0655,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 3500,
+   "loss": 3.8817,
+   "fwd_oneway": {
+    "hits": 0.0799,
+    "mass": 0.0322,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.1483,
+    "mass": 0.0626,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.1559,
+    "mass": 0.0746,
+    "recall": 1.0
+   }
+  },
+  {
+   "step": 4000,
+   "loss": 3.6537,
+   "fwd_oneway": {
+    "hits": 0.088,
+    "mass": 0.0337,
+    "recall": 1.0
+   },
+   "rev_oneway_clean": {
+    "hits": 0.1573,
+    "mass": 0.0721,
+    "recall": 1.0
+   },
+   "rev_paired": {
+    "hits": 0.163,
+    "mass": 0.0778,
+    "recall": 1.0
+   }
+  }
+ ],
+ "options": {
+  "fast": true,
+  "cosine": true,
+  "slots": false,
+  "familiarity": true,
+  "expand": true,
+  "read_order": "shuffled",
+  "init_from": null,
+  "rope": false,
+  "pope": true
+ },
+ "final": {
+  "fwd_oneway": {
+   "hits": 0.0873,
+   "mass": 0.0342,
+   "recall": 0.9993
+  },
+  "rev_oneway_clean": {
+   "hits": 0.1548,
+   "mass": 0.068,
+   "recall": 1.0,
+   "classes": {
+    "correct": 0.1548,
+    "rel_ok_entity_wrong": 0.696,
+    "entity_ok_rel_wrong": 0.0,
+    "other_in_context": 0.013,
+    "not_in_context": 0.1361
+   }
+  },
+  "rev_paired": {
+   "hits": 0.14,
+   "mass": 0.0724,
+   "recall": 1.0,
+   "classes": {
+    "correct": 0.14,
+    "rel_ok_entity_wrong": 0.7199,
+    "entity_ok_rel_wrong": 0.0,
+    "other_in_context": 0.0174,
+    "not_in_context": 0.1226
+   }
+  }
+ },
+ "final_oracle": {
+  "fwd_oneway": {
+   "hits": 0.0791,
+   "mass": 0.0326,
+   "recall": 0.9993
+  },
+  "rev_oneway_clean": {
+   "hits": 0.1491,
+   "mass": 0.0681,
+   "recall": 1.0
+  },
+  "rev_paired": {
+   "hits": 0.1543,
+   "mass": 0.0731,
+   "recall": 1.0
+  }
+ },
+ "leak_control": {
+  "fwd_oneway": {
+   "hits": 0.0015,
+   "mass": 0.0015,
+   "recall": 0.0
+  },
+  "rev_oneway_clean": {
+   "hits": 0.0,
+   "mass": 0.0008,
+   "recall": 0.0
+  },
+  "rev_paired": {
+   "hits": 0.0032,
+   "mass": 0.0021,
+   "recall": 0.0008
+  }
+ },
+ "gate": {
+  "facts": 2999,
+  "written_first": 2998,
+  "written_again": 1,
+  "again_by_kind": {
+   "many-to-one": 1,
+   "one-to-many": 0,
+   "one-to-one": 0
+  },
+  "first_stats": {
+   "surprise_only": 2998,
+   "familiar": 0
+  },
+  "again_stats": {
+   "surprise_only": 2958,
+   "familiar": 2998
+  },
+  "rows": 2999
+ },
+ "store": {
+  "row_bytes": 14,
+  "key_cache_bytes": 256
+ },
+ "secs": 100.6
+}

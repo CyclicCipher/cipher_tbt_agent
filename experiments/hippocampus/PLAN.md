@@ -9,7 +9,7 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 
 ---
 
-## 0. Status and learnings (updated 2026-10-18, after H1 … H3d)
+## 0. Status and learnings (updated 2026-10-18, after H1 … H5c and H1d–H1f)
 
 **Results so far:**
 
@@ -17,6 +17,7 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 |---|---|
 | **H1** (`EXPERIMENT_H1.md`) | One write per fact gives reverse access at 38–53%. Weights alone give ≤ 0.9% even after 64 exposures, with the converse tokens taught on the same world (chance 0.12%). Forward: 1 write against 8–64 exposures. Retrieval recall is 1.00, so the reader is the limit. The surprise gate re-wrote 19–21% of facts on a second presentation (one-to-many facts). |
 | **H1b** (`EXPERIMENT_H1B.md`) | The reader with `torch.compile`, 4,500 steps and cosine decay (**B2**) gives **83–93% reverse and 95–96% forward from one write**. The familiarity gate gives **0 duplicates**. The slot embedding (B3) hurt (stuck at 0.50). |
+| **H1f** (`EXPERIMENT_H1F.md`) | **PoPE** (the user's suggestion; the repo's implementation): **one of two seeds learned content matching, 0.971 reverse with a shuffled read order (0.977 ranked)**, order-independent and the first such reader in the line (10 shuffled-order readers otherwise ≤ 0.23). The transition is seed-dependent (seed 5: 0.16), and forward was not learned (0.09–0.14), unexplained. PoPE keeps the copy route (0.97). |
 | **H1e** (`EXPERIMENT_H1E.md`) | RoPE does not unlock content matching (0.19–0.22 shuffled, the same as absolute positions); it keeps the copy route (0.96–0.97 ranked). One run took 129 s, over the 2-minute rule. |
 | **H1d** (`EXPERIMENT_H1D.md`) | Content matching without a rank cue is **not learned** by this reader. A warm start plus shuffled training gives 0.23 shuffled and *erases* the ranked skill (0.97 → 0.23). A mixed order gives 0.18 shuffled and 0.61 ranked. Errors are always "right relation, wrong entity". Hypothesis: learned absolute positions make "copy two positions before the matched object" hard; H1e tests rotary positions. |
 | **H5c** (`EXPERIMENT_H5C.md`) | **Conjunctive (dentate-gyrus-like) units** (hashed pair units → third-slot Hebbian maps): **top-1 1.000** in both directions at every size up to 11,930, one-shot. The price is memory: 50 MB (about 34 kbit per episode) against the table's 14 bytes per episode. A random conjunctive expansion must be large; an allocated one (a row per episode) is about 300× cheaper. |
@@ -106,6 +107,10 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 22. **Neural substrate, summed up** (H5–H5c): a pairwise CA3 has the capacity but no conjunctions; slot binding fixes
     roles; conjunctive units fix conjunctions (top-1 1.000). The table is the cheapest implementation (about 300×
     smaller than a random conjunctive layer); the conjunctive layer is the neural one.
+
+23. **Content matching needs content and position disentangled** (H1d–H1f). Absolute positions and RoPE never learned
+    it (≤ 0.23). PoPE did, in one seed of two (0.97, order-independent), as PoPE's own argument predicts. Not yet
+    reliable: seed-dependent, and forward not learned in that run.
 
 **Reader configuration carried forward (updated):** **E1.** That is B2 plus the learned expansion in every store,
 ranked read order, readers `runs/h1c/reader_E1_s{4..7}.pt`.

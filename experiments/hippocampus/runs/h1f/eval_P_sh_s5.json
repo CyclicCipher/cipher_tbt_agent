@@ -1,0 +1,65 @@
+{
+ "ranked": {
+  "fwd_oneway": {
+   "hits": 0.0703,
+   "mass": 0.0298,
+   "recall": 1.0
+  },
+  "rev_oneway_clean": {
+   "hits": 0.1467,
+   "mass": 0.0643,
+   "recall": 1.0,
+   "classes": {
+    "correct": 0.1467,
+    "rel_ok_entity_wrong": 0.7025,
+    "entity_ok_rel_wrong": 0.0,
+    "other_in_context": 0.0171,
+    "not_in_context": 0.1337
+   }
+  },
+  "rev_paired": {
+   "hits": 0.1582,
+   "mass": 0.0754,
+   "recall": 1.0,
+   "classes": {
+    "correct": 0.1582,
+    "rel_ok_entity_wrong": 0.7057,
+    "entity_ok_rel_wrong": 0.0008,
+    "other_in_context": 0.019,
+    "not_in_context": 0.1163
+   }
+  }
+ },
+ "shuffled": {
+  "fwd_oneway": {
+   "hits": 0.0777,
+   "mass": 0.0311,
+   "recall": 1.0
+  },
+  "rev_oneway_clean": {
+   "hits": 0.1548,
+   "mass": 0.0689,
+   "recall": 1.0,
+   "classes": {
+    "correct": 0.1548,
+    "rel_ok_entity_wrong": 0.7074,
+    "entity_ok_rel_wrong": 0.0,
+    "other_in_context": 0.0147,
+    "not_in_context": 0.1231
+   }
+  },
+  "rev_paired": {
+   "hits": 0.159,
+   "mass": 0.0748,
+   "recall": 1.0,
+   "classes": {
+    "correct": 0.159,
+    "rel_ok_entity_wrong": 0.7009,
+    "entity_ok_rel_wrong": 0.0008,
+    "other_in_context": 0.0134,
+    "not_in_context": 0.1258
+   }
+  }
+ },
+ "secs": 2.4
+}
