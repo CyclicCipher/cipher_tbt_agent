@@ -69,6 +69,54 @@ On the second reading the retrieved passage covers the first pass's copy of the 
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/h6/pair*_s*.json`, log `runs/h6b_log.txt`)
 
-*(to be filled in after the runs)*
+All runs took 93–98 s.
+
+| arm | seed | **heldout** | caesar | **mhg** | **second reading: first → second (ratio)** | memory shown: heldout / caesar / mhg | final training loss |
+|---|---|---|---|---|---|---|---|
+| pair | 0 | 2.191 | 2.116 | 4.931 | 2.199 → 1.481 (0.673) | 99.7% / 99.7% / 99.7% | 1.897 |
+| pair | 1 | 2.215 | 2.150 | 5.074 | 2.234 → 1.159 (0.519) | 99.7% / 99.7% / 99.7% | 1.941 |
+| pair_g3 | 0 | 2.174 | 2.093 | 5.154 | 2.181 → **0.121 (0.056)** | 2.8% / 3.5% / 63.7% | 1.632 |
+| pair_g3 | 1 | 2.202 | 2.114 | 5.003 | 2.215 → **0.163 (0.074)** | 2.8% / 3.5% / 63.7% | 1.789 |
+| pair_g5 | 0 | 2.168 | 2.076 | 5.136 | 2.176 → **0.148 (0.068)** | 0.6% / 0.1% / 1.8% | 1.618 |
+| pair_g5 | 1 | 2.194 | 2.112 | 5.132 | 2.211 → **0.105 (0.048)** | 0.6% / 0.1% / 1.8% | 1.805 |
+
+**Means over seeds, with H6's arms:**
+
+| arm | heldout | caesar | mhg | second-reading ratio |
+|---|---|---|---|---|
+| none | 2.132 | 2.050 | 5.418 | 1.000 |
+| recent | 2.125 | 2.058 | 5.173 | 0.995 |
+| retrieve (H6) | 2.188 | 2.114 | 4.992 | 0.814 |
+| pair | 2.203 | 2.133 | 5.003 | 0.596 |
+| **pair_g3** | 2.188 | 2.104 | 5.078 | **0.065** |
+| **pair_g5** | 2.181 | 2.094 | 5.134 | **0.058** |
+
+**Against the predictions:**
+- **G1 (the gate removes the Latin cost, ≤ none + 0.01): REFUTED.** pair_g3 is +0.056 and pair_g5 +0.049, though
+  pair_g5 shows memory on only 0.6% of held-out windows.
+- **G2 (one-reading learning kept): holds, far beyond the prediction.** The gated ratios are **0.065 and 0.058**,
+  against the ungated pair arm's 0.596. A second reading costs 0.11–0.16 bits/char instead of about 2.2.
+- **G3 (the shift gain): holds.** pair_g3 keeps 82% of the ungated pair arm's Middle High German gain over none (0.340
+  of 0.415); pair_g5 keeps less (0.284, 68%).
+- **Reported:** pair scoring without a gate is similar to H6's retrieve on prose (+0.015 heldout), but much better on the
+  second reading (0.596 vs 0.814), because the pair match aligns the continuation with the window.
+
+**What H6b establishes, and what it corrects in H6:**
+1. **With a confidence gate, the store learns a passage in one reading almost perfectly:** about 16× cheaper on the
+   second pass. The reader learns that memory shown means memory to copy.
+2. **The cost on prose is in the *weights*, not in what memory shows.**
+   - pair_g5's input equals the no-memory model's on 99.4% of held-out windows, yet it is 0.05 bits/char worse.
+   - The difference comes from training: 25% of training windows are re-reads, where copying is trivial, so about a
+     quarter of the training signal does not teach ordinary Latin.
+   - **H6's reading** ("a passage is shown even when irrelevant, so the reader sometimes copies wrongly") **was wrong**,
+     or at most a small part; corrected in `EXPERIMENT_H6.md`.
+3. **The same weights effect explains most of the Middle High German gain.**
+   - pair_g5 shows memory on only 1.8% of Middle High German windows, yet gains 0.28 bits/char.
+   - Copy-rich training appears to make the model better at copying within its own 128-character context (induction),
+     which the repetitive verse rewards. The longer-context control (recent, −0.25) agrees that short-range repetition
+     is what Middle High German offers.
+   - The retrieved memory itself adds 0.06 (g3 against g5) to 0.13 (pair against g5) on top.
+4. **Next (H6c, a hypothesis to test):** make the copy training **additive**: re-read windows *in addition to* a full
+   batch of ordinary text. If the cost is lost training signal, it should disappear, and the store's benefits remain.

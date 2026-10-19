@@ -177,6 +177,12 @@ The plan is written, with the compression mechanisms in §2b.
 - **The cost:** +0.06 bits/char on non-repeating Latin, because a passage is shown even when irrelevant.
 - Next: a retrieval-confidence gate.
 
+**H6b (the confidence gate): done.**
+- **A second reading becomes almost free** (16× cheaper; ratio 0.06).
+- But the Latin cost (+0.05) stays even with memory shown on < 3% of windows: **it is in the weights** (25% of training
+  is trivial copying), not in irrelevant memory. That corrects H6.
+- Next: additive copy training (H6c).
+
 `PLAN.md` §0 holds the learnings so far.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.

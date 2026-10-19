@@ -1,0 +1,28 @@
+ran pair_s0.json in 93.8s
+ran pair_s1.json in 93.4s
+ran pair_g3_s0.json in 96.5s
+ran pair_g3_s1.json in 98.0s
+ran pair_g5_s0.json in 98.1s
+ran pair_g5_s1.json in 97.5s
+
+arm seed | bits/char: heldout  caesar  mhg | second reading: first -> second (ratio) | final train loss | secs
+  none     0 | 2.128  2.051  5.401 | 2.135 -> 2.135 (1.000) | 2.127 | 91.9
+  none     1 | 2.135  2.050  5.434 | 2.149 -> 2.150 (1.000) | 2.141 | 92.7
+  recent   0 | 2.114  2.053  5.073 | 2.125 -> 2.115 (0.996) | 2.111 | 94.6
+  recent   1 | 2.135  2.062  5.272 | 2.153 -> 2.140 (0.994) | 2.151 | 94.8
+  retrieve 0 | 2.167  2.097  4.894 | 2.176 -> 1.883 (0.865) | 1.953 | 95.8
+  retrieve 1 | 2.210  2.131  5.090 | 2.223 -> 1.697 (0.763) | 1.971 | 96.7
+  pair     0 | 2.191  2.116  4.931 | 2.199 -> 1.481 (0.673) | 1.897 | 93.8
+  pair     1 | 2.215  2.150  5.074 | 2.234 -> 1.159 (0.519) | 1.941 | 93.4
+  pair_g3  0 | 2.174  2.093  5.154 | 2.181 -> 0.121 (0.056) | 1.632 | 96.5
+  pair_g3  1 | 2.202  2.114  5.003 | 2.215 -> 0.163 (0.074) | 1.789 | 98.0
+  pair_g5  0 | 2.168  2.076  5.136 | 2.176 -> 0.148 (0.068) | 1.618 | 98.1
+  pair_g5  1 | 2.194  2.112  5.132 | 2.211 -> 0.105 (0.048) | 1.805 | 97.5
+
+means over seeds (bits/char):
+  none     heldout 2.132  caesar 2.050  mhg 5.418  second-reading ratio 1.000
+  recent   heldout 2.125  caesar 2.058  mhg 5.173  second-reading ratio 0.995
+  retrieve heldout 2.188  caesar 2.114  mhg 4.992  second-reading ratio 0.814
+  pair     heldout 2.203  caesar 2.133  mhg 5.003  second-reading ratio 0.596
+  pair_g3  heldout 2.188  caesar 2.104  mhg 5.078  second-reading ratio 0.065
+  pair_g5  heldout 2.181  caesar 2.094  mhg 5.134  second-reading ratio 0.058

@@ -17,6 +17,7 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 |---|---|
 | **H1** (`EXPERIMENT_H1.md`) | One write per fact gives reverse access at 38–53%. Weights alone give ≤ 0.9% even after 64 exposures, with the converse tokens taught on the same world (chance 0.12%). Forward: 1 write against 8–64 exposures. Retrieval recall is 1.00, so the reader is the limit. The surprise gate re-wrote 19–21% of facts on a second presentation (one-to-many facts). |
 | **H1b** (`EXPERIMENT_H1B.md`) | The reader with `torch.compile`, 4,500 steps and cosine decay (**B2**) gives **83–93% reverse and 95–96% forward from one write**. The familiarity gate gives **0 duplicates**. The slot embedding (B3) hurt (stuck at 0.50). |
+| **H6b** (`EXPERIMENT_H6B.md`) | A **retrieval-confidence gate** (normalised pair share ≥ 0.3 or 0.5): a **second reading becomes almost free (ratio 0.058–0.065, about 16× cheaper)**. But the Latin cost stays (+0.05) though memory is shown on < 3% of Latin windows: **the cost is in the weights** (25% of training is trivial copying), not in irrelevant memory. That corrects H6's reading. Most of the Middle High German gain is also a weights effect (better in-context copying); the memory adds 0.06–0.13. |
 | **H6** (`EXPERIMENT_H6.md`) | **Real text** (character LM trained on Cicero and Livy). The store gives **one-shot learning of a passage**: a second reading is 0.29–0.53 bits/char cheaper (ratio 0.81 mean); none and recent gain nothing. It helps under shift (**Middle High German −0.43 bits/char**, about 8%) but **costs +0.06 on non-repeating Latin**: a passage is shown even when irrelevant. Next: a retrieval-confidence gate. |
 | **H1h** (`EXPERIMENT_H1H.md`) | Non-causal attention does **not** enable forward content matching (0.06) and slows reverse (0 of 4 vs causal 1 of 4). Causal masking was not the obstacle. Forward content matching remains unlearned across about 20 readers (absolute, RoPE, PoPE; causal or not); its errors include 30–40% answers not in context. All runs within the 2-minute rule. |
 | **H1g** (`EXPERIMENT_H1G.md`) | PoPE reverse content matching is **reliable with more updates**: 4 of 4 seeds at batch 128 × 8,000 (0.96–0.98, shuffled order), against 2 of 4 at batch 256 × 4,000, on the same data. **Forward is never learned** (10 PoPE readers, ≤ 0.16). Hypothesis: causal masking. ⚠ All four 8,000-step runs took 125–156 s, over the 2-minute rule. |
@@ -126,8 +127,9 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 
 25. **On real text the store pays where text repeats and costs where it does not** (H6). Gains: one-shot learning of a
     re-read passage (−0.29 to −0.53 bits/char) and Middle High German (−0.43). Cost: +0.06 bits/char on in-distribution
-    prose, from showing a retrieved passage whether or not it is relevant. The memory should be shown only on confident
-    retrieval: the H3 combined switch, carried to text.
+    prose. H6 blamed showing a passage whether or not it is relevant; **H6b corrected that: the cost is in the weights**
+    (the copy-rich re-read share of training), and a confidence gate leaves it in place, while making one-reading
+    learning nearly perfect (ratio 0.06). Next: make the copy training additive, not a replacement (H6c).
 
 **Decisions (the user):**
 - **2026-10-18: the store stays a table; the neural substrate (H5–H5c) is not used.** In the user's words, "it's an

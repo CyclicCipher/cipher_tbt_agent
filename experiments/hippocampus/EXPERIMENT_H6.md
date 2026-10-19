@@ -126,6 +126,9 @@ All runs took 92–97 s, within the 2-minute rule.
    - A retrieved passage is shown for every window, relevant or not, so the reader sometimes copies from an irrelevant
      match. This is the "false retrievals inject noise" risk of `PLAN.md` §5.
    - The capacity spent learning to copy is not available for ordinary prediction.
+   - **⚠ Corrected by H6b:** the cost is mostly in the *weights*, not in irrelevant passages. A gated model that shows
+     memory on only 0.6% of held-out windows is still +0.05 bits/char worse. The 25% re-read training windows (trivial
+     copying) take training signal away from ordinary Latin. See `EXPERIMENT_H6B.md`.
 4. **The obvious next step is a retrieval-confidence gate,** as in H3's combined switch: show the memory only when
    the best match is strong, and padding otherwise. That should keep the gains on repeating text and remove most of the
    cost on prose.

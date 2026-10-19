@@ -1,0 +1,68 @@
+{
+ "policy": "pair_g5",
+ "seed": 1,
+ "steps": 3000,
+ "batch": 48,
+ "lr": 0.001,
+ "P": 128,
+ "W": 64,
+ "R": 4,
+ "chunk": 32,
+ "hist": 8192,
+ "cue": 64,
+ "reread": 0.25,
+ "model": {
+  "d": 128,
+  "n_layer": 4,
+  "n_head": 4,
+  "m": 512
+ },
+ "pope": true,
+ "log": [
+  {
+   "step": 500,
+   "loss_bits": 2.8984
+  },
+  {
+   "step": 1000,
+   "loss_bits": 2.3356
+  },
+  {
+   "step": 1500,
+   "loss_bits": 1.7112
+  },
+  {
+   "step": 2000,
+   "loss_bits": 1.7604
+  },
+  {
+   "step": 2500,
+   "loss_bits": 1.8548
+  },
+  {
+   "step": 3000,
+   "loss_bits": 1.8053
+  }
+ ],
+ "train_secs": 96.1,
+ "streams": {
+  "heldout": {
+   "bpc": 2.1936,
+   "memory_filled": 0.006
+  },
+  "caesar": {
+   "bpc": 2.1119,
+   "memory_filled": 0.001
+  },
+  "mhg": {
+   "bpc": 5.1317,
+   "memory_filled": 0.018
+  }
+ },
+ "second_reading": {
+  "first_bpc": 2.2111,
+  "second_bpc": 0.1055,
+  "ratio": 0.0477
+ },
+ "secs": 97.5
+}
