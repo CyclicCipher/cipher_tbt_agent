@@ -94,6 +94,12 @@ The plan is written, with the compression mechanisms in §2b.
 - Reading survives.
 - Complementary learning systems, working end to end.
 
+**H3c (sleep inside the stream): done, negative.**
+- **Catastrophic interference:** facts consolidated at the first sleep and then evicted are overwritten by later
+  sleeps (retention about 0.2).
+- The long tail barely improves (0.39 vs 0.35).
+- Sleep must also replay what the weights already know (H3d).
+
 `PLAN.md` §0 holds the learnings so far.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.

@@ -9,7 +9,7 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 
 ---
 
-## 0. Status and learnings (updated 2026-10-18, after H1, H1b, H2, H2b, H1c, H3 and H3b)
+## 0. Status and learnings (updated 2026-10-18, after H1, H1b, H2, H2b, H1c, H3, H3b and H3c)
 
 **Results so far:**
 
@@ -17,6 +17,7 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 |---|---|
 | **H1** (`EXPERIMENT_H1.md`) | One write per fact gives reverse access at 38–53%. Weights alone give ≤ 0.9% even after 64 exposures, with the converse tokens taught on the same world (chance 0.12%). Forward: 1 write against 8–64 exposures. Retrieval recall is 1.00, so the reader is the limit. The surprise gate re-wrote 19–21% of facts on a second presentation (one-to-many facts). |
 | **H1b** (`EXPERIMENT_H1B.md`) | The reader with `torch.compile`, 4,500 steps and cosine decay (**B2**) gives **83–93% reverse and 95–96% forward from one write**. The familiarity gate gives **0 duplicates**. The slot embedding (B3) hurt (stuck at 0.50). |
+| **H3c** (`EXPERIMENT_H3C.md`) | Sleep inside a stream (5,957 facts, a 1,500-row store, 4 sleeps): **catastrophic interference.** Facts consolidated and evicted at the first sleep are overwritten by later sleeps (retention 0.18–0.24). The long tail improves only +0.04 (0.39 vs 0.35; uncapped 0.86). Reading survives. |
 | **H3b** (`EXPERIMENT_H3B.md`) | With 5,000 sleep steps, the weights alone hold **forward 0.998 and reverse 0.966** (reverse entirely from self-generated inferences). **Self-checked eviction** (the weights' top answer equals the stored answer, both directions) frees **64%** of the store at ≤ 0.012 cost. Reading survives (±0.008). 1:1 and 3:1 mixes tie. |
 | **H3** (`EXPERIMENT_H3.md`) | Sleep (empty-memory replay plus rehearsal of reading) consolidates the store into the weights. **Forward-only replay brings the reversal curse back in the weights** (fwd 0.985, rev **0.000**). **Replaying the reader's own reverse inferences** (98% correct, no labels) gives the weights reverse 0.59–0.65 (fwd 0.61). Reading survives sleep (±0.01, held-out world too). Eviction at p ≥ 0.1 was too lax: 41% of rows evicted, the combined system −0.13. |
 | **H1c** (`EXPERIMENT_H1C.md`) | Readers trained **with** the expansion (E1): **4 of 4 seeds at 0.968–0.979 reverse**, with no plateau (0.86–0.89 at step 500). A shuffled read order (E2) gives 0.20: reliability comes from retrieval ranking by full match, with the reader copying from the top. Crowding is fixed end to end (old facts keep 0.83–0.89× of reverse accuracy, against 0.31–0.40×). Without crowding, value eviction ties the full store popularity-weighted (0.80–0.81) at a quarter of the size, but loses the long tail per fact (0.64 vs 0.78). |
@@ -73,6 +74,10 @@ Every experiment is pre-registered in its own `EXPERIMENT_*.md` before it runs.
 16. **Eviction must be self-checked** (H3). Evict an episode only if the weights' *top* answer equals the stored answer
     in both directions. The store holds the answer, so no label is needed. A probability threshold (p ≥ 0.1) evicted
     facts the weights get wrong (−0.13).
+
+17. **Consolidation without interleaving overwrites** (H3c). Self-checked eviction is loss-free at the moment of
+    eviction, but it removes the replay source. Later sleeps then erase what was consolidated (retention about 0.2).
+    Sleep must replay what the weights already know (pseudo-rehearsal / generative replay): H3d.
 
 **Reader configuration carried forward (updated):** **E1.** That is B2 plus the learned expansion in every store,
 ranked read order, readers `runs/h1c/reader_E1_s{4..7}.pt`.

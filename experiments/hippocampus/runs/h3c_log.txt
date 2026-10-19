@@ -1,0 +1,26 @@
+ran value_s4_ss0.json in 8.0s
+ran sleep_s4_ss0.json in 87.6s
+ran uncapped_s4_ss0.json in 6.0s
+ran value_s4_ss1.json in 5.7s
+ran sleep_s4_ss1.json in 87.5s
+ran uncapped_s4_ss1.json in 5.8s
+ran value_s5_ss0.json in 5.8s
+ran sleep_s5_ss0.json in 87.5s
+ran uncapped_s5_ss0.json in 6.3s
+ran value_s5_ss1.json in 5.8s
+ran sleep_s5_ss1.json in 83.7s
+ran uncapped_s5_ss1.json in 6.1s
+
+arm reader ss | FINAL all facts, combined fwd rev mean | weights only fwd rev | online fwd rev mean | rows | sleeps evicted | first-sleep retention | held-out rev before->after | secs
+  value    4 0 | 0.335 0.358 0.346 | 0.003 0.001 | 0.775 0.842 0.808 | 1500 | [] | None | 0.979->0.981 | 8.0
+  sleep    4 0 | 0.396 0.397 0.397 | 0.435 0.374 | 0.767 0.832 0.800 | 480 | [777, 1030, 1031, 1020] | {'facts': 777, 'fwd': 0.2407, 'rev': 0.184} | 0.979->0.978 | 87.6
+  uncapped 4 0 | 0.859 0.869 0.864 | 0.003 0.001 | 0.840 0.904 0.872 | 5950 | [] | None | 0.979->0.977 | 6.0
+  value    4 1 | 0.334 0.362 0.348 | 0.003 0.001 | 0.798 0.829 0.813 | 1500 | [] | None | 0.977->0.980 | 5.7
+  sleep    4 1 | 0.379 0.405 0.392 | 0.430 0.376 | 0.756 0.798 0.777 | 485 | [754, 1040, 1035, 1015] | {'facts': 754, 'fwd': 0.2268, 'rev': 0.1844} | 0.977->0.970 | 87.5
+  uncapped 4 1 | 0.856 0.865 0.861 | 0.003 0.001 | 0.852 0.898 0.875 | 5957 | [] | None | 0.977->0.976 | 5.8
+  value    5 0 | 0.345 0.369 0.357 | 0.002 0.001 | 0.776 0.829 0.803 | 1500 | [] | None | 0.985->0.976 | 5.8
+  sleep    5 0 | 0.393 0.397 0.395 | 0.432 0.373 | 0.765 0.748 0.757 | 478 | [659, 1053, 1030, 1022] | {'facts': 659, 'fwd': 0.2231, 'rev': 0.2049} | 0.985->0.981 | 87.5
+  uncapped 5 0 | 0.863 0.859 0.861 | 0.002 0.001 | 0.850 0.898 0.874 | 5950 | [] | None | 0.985->0.983 | 6.3
+  value    5 1 | 0.334 0.361 0.348 | 0.002 0.001 | 0.806 0.830 0.818 | 1500 | [] | None | 0.980->0.983 | 5.8
+  sleep    5 1 | 0.381 0.403 0.392 | 0.430 0.384 | 0.790 0.799 0.795 | 458 | [704, 1035, 1071, 1042] | {'facts': 704, 'fwd': 0.2045, 'rev': 0.1903} | 0.980->0.977 | 83.7
+  uncapped 5 1 | 0.853 0.856 0.854 | 0.002 0.001 | 0.857 0.892 0.875 | 5957 | [] | None | 0.980->0.983 | 6.1

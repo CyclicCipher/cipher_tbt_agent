@@ -60,6 +60,46 @@ rather than by being forgotten?
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/h3c/`, log `runs/h3c_log.txt`)
 
-*(to be filled in after the runs)*
+Sleep runs took 84–88 s, the others 6–8 s.
+
+| arm | reader | stream seed | **final, all facts, combined: fwd / rev / mean** | weights alone fwd / rev | online mean | rows at end | evicted per sleep | first-sleep retention (fwd / rev) | held-out rev before → after |
+|---|---|---|---|---|---|---|---|---|---|
+| value | 4 | 0 | 0.335 / 0.358 / **0.346** | 0.003 / 0.001 | 0.808 | 1,500 | – | – | 0.979 → 0.981 |
+| **sleep** | 4 | 0 | 0.396 / 0.397 / **0.397** | 0.435 / 0.374 | 0.800 | 480 | 777, 1,030, 1,031, 1,020 | **0.24 / 0.18** (777 facts) | 0.979 → 0.978 |
+| uncapped | 4 | 0 | 0.859 / 0.869 / **0.864** | 0.003 / 0.001 | 0.872 | 5,950 | – | – | 0.979 → 0.977 |
+| value | 4 | 1 | 0.334 / 0.362 / 0.348 | 0.003 / 0.001 | 0.813 | 1,500 | – | – | 0.977 → 0.980 |
+| **sleep** | 4 | 1 | 0.379 / 0.405 / **0.392** | 0.430 / 0.376 | 0.777 | 485 | 754, 1,040, 1,035, 1,015 | **0.23 / 0.18** (754) | 0.977 → 0.970 |
+| uncapped | 4 | 1 | 0.856 / 0.865 / 0.861 | 0.003 / 0.001 | 0.875 | 5,957 | – | – | 0.977 → 0.976 |
+| value | 5 | 0 | 0.345 / 0.369 / 0.357 | 0.002 / 0.001 | 0.803 | 1,500 | – | – | 0.985 → 0.976 |
+| **sleep** | 5 | 0 | 0.393 / 0.397 / **0.395** | 0.432 / 0.373 | 0.757 | 478 | 659, 1,053, 1,030, 1,022 | **0.22 / 0.20** (659) | 0.985 → 0.981 |
+| uncapped | 5 | 0 | 0.863 / 0.859 / 0.861 | 0.002 / 0.001 | 0.874 | 5,950 | – | – | 0.985 → 0.983 |
+| value | 5 | 1 | 0.334 / 0.361 / 0.348 | 0.002 / 0.001 | 0.818 | 1,500 | – | – | 0.980 → 0.983 |
+| **sleep** | 5 | 1 | 0.381 / 0.403 / **0.392** | 0.430 / 0.384 | 0.795 | 458 | 704, 1,035, 1,071, 1,042 | **0.20 / 0.19** (704) | 0.980 → 0.977 |
+| uncapped | 5 | 1 | 0.853 / 0.856 / 0.854 | 0.002 / 0.001 | 0.875 | 5,957 | – | – | 0.980 → 0.983 |
+
+**Against the predictions:**
+- **C1 (sleep ≥ value + 0.15 on all facts): REFUTED.** The gain is only +0.04 to +0.05 (0.39–0.40 against 0.35).
+- **C2 (sleep ≥ uncapped − 0.10): REFUTED.** 0.39 against 0.86.
+- **C3 (online, sleep ≥ value − 0.02): fails in 3 of 4 pairs** (−0.008, −0.036, −0.046, −0.023).
+- **C4 (reading survives four sleeps): holds.** −0.007 to −0.001.
+- **C5 (first-sleep facts retained ≥ 0.8): REFUTED.** Retention is **0.18–0.24**.
+
+**What happened: catastrophic interference in the weights.**
+- Each sleep consolidates the store's current episodes, and self-checked eviction then removes the ones the weights
+  answer. Those facts are **never replayed again**.
+- The next sleeps train the weights on newer facts, and overwrite them: the first sleep's evicted facts fall from 1.00
+  (the eviction self-check) to about 0.2 in the weights by the end.
+- The weights hold about 40% of all facts at the end; the 480-row store holds a little more.
+- Online accuracy dips, because a forgotten fact that has left the store is answered by weights that no longer know it.
+- This is the failure complementary-learning-systems theory exists to explain: the slow learner must be trained on
+  **interleaved** old and new material, or new learning overwrites old. Rehearsal here covered only the *reading skill*,
+  which is why reading survived and the facts did not.
+
+**The lesson:** self-checked eviction is loss-free *at the moment of eviction* (H3b), but it removes the facts'
+replay source, so later learning erases them. **Sleep must also replay what the weights already know.**
+
+**Next (H3d):** pseudo-rehearsal (Robins 1995; generative replay). Before each sleep, record the weights' own
+confident empty-memory answers over the question space, and replay them during sleep alongside the new consolidation
+examples and the reading rehearsal. The weights rehearse themselves, so no evicted fact needs to be kept.
