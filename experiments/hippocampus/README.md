@@ -163,6 +163,11 @@ The plan is written, with the compression mechanisms in §2b.
 - ⚠ The 8,000-step runs broke the 2-minute rule (125–156 s).
 - Next: non-causal attention (H1h).
 
+**H1h (non-causal attention): done, negative.**
+- Forward content matching is still not learned (0.06), and reverse is slowed.
+- Causal masking was not the obstacle.
+- Forward content matching remains open; the ranked read path covers single-fact questions.
+
 `PLAN.md` §0 holds the learnings so far.
 
 H1 reuses `../intelligent_constraints/` `data.py` and `model.py`.

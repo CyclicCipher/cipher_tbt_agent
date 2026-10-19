@@ -1,0 +1,26 @@
+ran reader_PC_s6.json in 70.4s
+ran eval_PC_s6.json in 2.5s
+ran reader_PC_s7.json in 68.0s
+ran eval_PC_s7.json in 2.5s
+ran reader_PC_s8.json in 70.1s
+ran eval_PC_s8.json in 2.7s
+ran reader_PC_s9.json in 71.1s
+ran eval_PC_s9.json in 2.7s
+ran reader_PN_s6.json in 79.6s
+ran eval_PN_s6.json in 2.9s
+ran reader_PN_s7.json in 78.6s
+ran eval_PN_s7.json in 2.9s
+ran reader_PN_s8.json in 83.2s
+ran eval_PN_s8.json in 3.4s
+ran reader_PN_s9.json in 93.8s
+ran eval_PN_s9.json in 3.1s
+
+reader | shuffled: REV / FWD | ranked: REV / FWD | shuffled fwd classes | curves rev | fwd | secs
+  PC s6 | 0.178 / 0.064 | 0.102 / 0.054 | {'correct': 0.0643, 'rel_ok_entity_wrong': 0.6146, 'entity_ok_rel_wrong': 0.0015, 'other_in_context': 0.0052, 'not_in_context': 0.3143} | 0.10 0.11 0.17 0.18 | 0.05 0.07 0.08 0.06 | 70.4
+  PC s7 | 0.463 / 0.070 | 0.492 / 0.090 | {'correct': 0.0703, 'rel_ok_entity_wrong': 0.5925, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0037, 'not_in_context': 0.3336} | 0.10 0.16 0.28 0.46 | 0.03 0.06 0.07 0.06 | 68.0
+  PC s8 | 0.973 / 0.061 | 0.973 / 0.058 | {'correct': 0.0607, 'rel_ok_entity_wrong': 0.5325, 'entity_ok_rel_wrong': 0.0007, 'other_in_context': 0.0081, 'not_in_context': 0.3979} | 0.14 0.27 0.95 0.97 | 0.03 0.05 0.05 0.06 | 70.1
+  PC s9 | 0.322 / 0.064 | 0.325 / 0.067 | {'correct': 0.0643, 'rel_ok_entity_wrong': 0.5902, 'entity_ok_rel_wrong': 0.0007, 'other_in_context': 0.0148, 'not_in_context': 0.3299} | 0.06 0.14 0.20 0.31 | 0.02 0.05 0.06 0.06 | 71.1
+  PN s6 | 0.210 / 0.060 | 0.122 / 0.047 | {'correct': 0.0599, 'rel_ok_entity_wrong': 0.5607, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0089, 'not_in_context': 0.3706} | 0.11 0.15 0.18 0.19 | 0.04 0.05 0.07 0.07 | 79.6
+  PN s7 | 0.088 / 0.057 | 0.090 / 0.108 | {'correct': 0.057, 'rel_ok_entity_wrong': 0.4815, 'entity_ok_rel_wrong': 0.0007, 'other_in_context': 0.0917, 'not_in_context': 0.3691} | 0.07 0.09 0.10 0.11 | 0.02 0.03 0.05 0.05 | 78.6
+  PN s8 | 0.158 / 0.061 | 0.143 / 0.062 | {'correct': 0.0607, 'rel_ok_entity_wrong': 0.5244, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0133, 'not_in_context': 0.4016} | 0.08 0.12 0.15 0.17 | 0.02 0.04 0.07 0.06 | 83.2
+  PN s9 | 0.131 / 0.059 | 0.090 / 0.066 | {'correct': 0.0592, 'rel_ok_entity_wrong': 0.6036, 'entity_ok_rel_wrong': 0.0, 'other_in_context': 0.0037, 'not_in_context': 0.3336} | 0.07 0.12 0.11 0.12 | 0.04 0.07 0.06 0.07 | 93.8

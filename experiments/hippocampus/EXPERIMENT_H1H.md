@@ -53,6 +53,49 @@ A breakthrough means ≥ 0.8 with the shuffled order.
 
 ---
 
-## Results
+## Results (2026-10-18; `runs/h1h/`, log `runs/h1h_log.txt`)
 
-*(to be filled in after the runs)*
+Every run took 68–94 s, within the 2-minute rule; the measured budget worked.
+
+| reader | **shuffled: REV / FWD** | ranked: REV / FWD | forward errors (shuffled) | reverse curve | forward curve |
+|---|---|---|---|---|---|
+| PC s6 | 0.178 / 0.064 | 0.102 / 0.054 | 61% right relation, wrong entity; 31% not in context | 0.10 → 0.18 | 0.05 → 0.06 |
+| PC s7 | 0.463 / 0.070 | 0.492 / 0.090 | 59%; 33% | 0.10 0.16 0.28 0.46 (rising) | 0.03 → 0.06 |
+| PC s8 | **0.973** / 0.061 | 0.973 / 0.058 | 53%; 40% | 0.14 0.27 **0.95** 0.97 | 0.03 → 0.06 |
+| PC s9 | 0.322 / 0.064 | 0.325 / 0.067 | 59%; 33% | 0.06 → 0.31 (rising) | 0.02 → 0.06 |
+| PN s6 | 0.210 / 0.060 | 0.122 / 0.047 | 56%; 37% | 0.11 → 0.19 | 0.04 → 0.07 |
+| PN s7 | 0.088 / 0.057 | 0.090 / 0.108 | 48%; 37% | 0.07 → 0.11 | 0.02 → 0.05 |
+| PN s8 | 0.158 / 0.061 | 0.143 / 0.062 | 52%; 40% | 0.08 → 0.17 | 0.02 → 0.06 |
+| PN s9 | 0.131 / 0.059 | 0.090 / 0.066 | 60%; 33% | 0.07 → 0.12 | 0.04 → 0.07 |
+
+**Against the predictions:**
+- **N1 (non-causal enables forward in ≥ 2 of 4): REFUTED.** Forward is 0.06 in every PN seed.
+- **N2 (PN's reverse breakthroughs ≥ PC's): REFUTED.** PN 0 of 4 (≤ 0.21); PC 1 of 4.
+- **N3 (PC forward ≤ 0.3): holds.** 0.06–0.07.
+
+**What H1h establishes:**
+1. **Causal masking is not what blocks forward content matching.** Removing it did not help forward at all.
+2. **Non-causal attention slows reverse learning** within this budget. A plausible cause, untested: every position now
+   also sees the *next* episode's tokens, so "the token two positions away" is ambiguous in both directions.
+3. **The causal PoPE arm matches the update-count picture from H1g:**
+
+   | budget (batch × steps) | reverse breakthroughs |
+   |---|---|
+   | 128 × 5,000 | 1 of 4 (two more still rising) |
+   | 256 × 4,000 | 2 of 4 |
+   | 128 × 8,000 | 4 of 4 |
+
+**State of the content-matching question (H1d–H1h, about 20 shuffled-order readers):**
+- Reverse content matching is learnable with PoPE, given about 8,000 updates.
+- Forward content matching has never been learned by any reader: absolute positions, RoPE, PoPE, causal or not, more
+  updates or not.
+- Its errors always include 30–40% answers *not in the read set at all*, so the reader does not locate the right
+  episode.
+- The remaining explanations are untested:
+  - it needs many more updates than the 2-minute rule allows;
+  - matching on a *copied* feature (the subject, carried to the object's position) is structurally harder than matching
+    on a token's own identity.
+
+**Practical position:** the ranked read path (E1: retrieval ranks the full match first, the reader copies) answers
+forward and reverse at about 0.96–0.97 for single-fact questions. Content matching only matters once retrieval cannot
+rank: several relevant episodes, or chains.
