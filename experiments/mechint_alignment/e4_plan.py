@@ -1,0 +1,77 @@
+"""E4: acting by planning in the learned world model, with no policy learning. (EXPERIMENT_E4.md)
+
+    python e4_plan.py --model runs/e2/K6/J2_plus_sleep_ema_saved.pt --config runs/e2/J2_focus_questions/config.json \
+        --episodes 16 --out runs/e4/K6.jsonl
+"""
+import argparse
+import json
+import os
+import time
+
+import numpy as np
+import torch
+
+from episodes import run_episodes, scripted_actor, summarize
+from planner import Planner, RefutationLearner, RewardModel, run_episode, run_episode_learning
+from village import Village
+from worldmodel import WorldModel
+
+SEEDS = [10**9 + i for i in range(256)]
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--model", required=True)
+    p.add_argument("--config", required=True)
+    p.add_argument("--episodes", type=int, default=16)
+    p.add_argument("--depth", type=int, default=40)
+    p.add_argument("--out", required=True)
+    p.add_argument("--data", default="runs/data")
+    p.add_argument("--time-limit", type=float, default=280.0)
+    p.add_argument("--learn", action="store_true", help="E4b: learn from refutations while acting")
+    a = p.parse_args()
+    os.makedirs(os.path.dirname(a.out), exist_ok=True)
+    dev = torch.device("cuda")
+    cfg = json.load(open(a.config))
+    model = WorldModel(cfg["d"], cfg["layers"], cfg["heads"], pos=cfg["pos"], persist=cfg["persist"],
+                       radius=cfg.get("radius", 1)).to(dev)
+    model.load_state_dict(torch.load(a.model, map_location=dev))
+    model.eval()
+    z = np.load(os.path.join(a.data, "train.npz"))
+    rm = RewardModel()
+    err = rm.fit(z["gob"], z["gnx"], z["rew"])
+    print(f"reward model: max |residual| on {len(z['rew']):,} logged transitions = {err:.4f}", flush=True)
+    planner = Planner(model, rm, dev, depth=a.depth)
+    learner = RefutationLearner(model, {k: z[k] for k in ("obs", "gob", "act", "nxt", "gnx")}, dev,
+                                focus=cfg.get("focus", 2)) if a.learn else None
+    rng = np.random.default_rng(0)
+    seeds = SEEDS[:a.episodes]
+    ref = summarize(run_episodes(seeds, scripted_actor)[0])
+    log = open(a.out, "w")
+    eps, t0 = [], time.time()
+    for s in seeds:
+        if time.time() - t0 > a.time_limit:
+            break
+        t1 = time.time()
+        ret, st, plans = run_episode_learning(Village(s), planner, learner, rng) if learner else             run_episode(Village(s), planner, rng)
+        eps.append(dict(ret=ret, **st))
+        log.write(json.dumps(dict(ret=ret, plans=plans, seconds=time.time() - t1, **st)) + "\n")
+        log.flush()
+        if learner:
+            new_ref = learner.refutations - getattr(learner, "_last", 0)
+            learner._last = learner.refutations
+            log.write(json.dumps(dict(seed=int(s), refutations_this_episode=new_ref, updates_total=learner.updates)) + "\n")
+        extra = f"  refutations this episode {new_ref} (total explained {learner.explained}/{learner.refutations})" if learner else ""
+        print(f"seed {s}: return {ret:6.2f}  delivered {st['delivered']}  theft {st['theft']}  plans {plans}  "
+              f"{time.time() - t1:.1f}s{extra}", flush=True)
+    s_ = summarize(eps)
+    ref_same = summarize(run_episodes(seeds[:len(eps)], scripted_actor)[0])
+    out = dict(planner=s_, scripted_same_seeds=ref_same, episodes=len(eps), forwards=planner.forwards,
+               seconds=time.time() - t0)
+    log.write(json.dumps(dict(summary=out)) + "\n")
+    print(f"PLANNER: return {s_['ret']:.2f}, delivered {s_['delivered']:.2f}, theft rate {s_['theft_rate']}  |  "
+          f"scripted on the same seeds: {ref_same['ret']:.2f}  ({len(eps)} episodes, {time.time() - t0:.0f}s)")
+
+
+if __name__ == "__main__":
+    main()

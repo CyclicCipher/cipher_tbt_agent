@@ -111,6 +111,8 @@ def main():
         for kd, r_, sv in zip(pick, rrows, st):                       # retire when explained
             if sv < 0.5 * s0[int(r_)] and r_ in reh[kd]:
                 reh[kd].remove(r_)
+        if u + 1 == a.updates:                                       # keep the final model (the slow copy if any)
+            torch.save((slow if slow is not None else model).state_dict(), a.out.replace(".jsonl", ".pt"))
         if (u + 1) % a.probe_every == 0:                              # the test that can lose: unrehearsed probes
             for kd in kinds:
                 cur = float(surprise_and_kind(model, train, probe[kd], dev, focus)[0].mean())

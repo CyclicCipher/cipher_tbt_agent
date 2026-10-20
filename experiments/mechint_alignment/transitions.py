@@ -105,6 +105,7 @@ def run_lanes(args):
     nxt = np.zeros_like(obs)
     gnx = np.zeros_like(gob)
     act = np.zeros((lanes, steps), np.uint8)
+    rew = np.zeros((lanes, steps), np.float32)
     events = np.zeros((lanes, steps), np.int32)                     # bitmask over EVENTS
     checks = np.full((lanes, steps, len(EVENTS), MAX_CHECKS, 2), -1, np.int16)
     seed = seed0
@@ -119,7 +120,7 @@ def run_lanes(args):
             env.obs(obs[lane, t], gob[lane, t])
             a = int(rng.integers(0, 8)) if rng.random() < eps else scripted.act(env)
             before = snapshot(env)
-            env.step(a)
+            rew[lane, t], _ = env.step(a)
             env.obs(nxt[lane, t], gnx[lane, t])
             act[lane, t] = a
             ev, ch = label(env, before, a)
@@ -128,7 +129,7 @@ def run_lanes(args):
                 events[lane, t] |= 1 << k
                 for j, (row, field) in enumerate(ch.get(name, [])[:MAX_CHECKS]):
                     checks[lane, t, k, j] = (row, field)
-    return obs, gob, nxt, gnx, act, events, checks
+    return obs, gob, nxt, gnx, act, events, checks, rew
 
 
 def generate(lanes, steps, seed0, workers=12):
@@ -150,8 +151,8 @@ def main():
     a = p.parse_args()
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     t0 = time.time()
-    obs, gob, nxt, gnx, act, events, checks = generate(a.lanes, a.steps, a.seed0, a.workers)
-    np.savez(a.out, obs=obs, gob=gob, nxt=nxt, gnx=gnx, act=act, events=events, checks=checks, lanes=a.lanes)
+    obs, gob, nxt, gnx, act, events, checks, rew = generate(a.lanes, a.steps, a.seed0, a.workers)
+    np.savez(a.out, obs=obs, gob=gob, nxt=nxt, gnx=gnx, act=act, events=events, checks=checks, rew=rew, lanes=a.lanes)
     counts = {e: int(((events >> k) & 1).sum()) for k, e in enumerate(EVENTS)}
     print(f"{len(act):,} transitions in {time.time() - t0:.0f}s -> {a.out}")
     print(counts)
