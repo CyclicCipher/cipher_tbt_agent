@@ -179,4 +179,6 @@ concept, and "a good start".
 - **2026-10-20: G1 is a grid world.** The design draft is `WORLD_DESIGN.md` ("Village"): full map, core dilemmas first,
   robot health with pain, and a provision value (more apples for the villagers).
 - **2026-10-20: the training method may need to be new.** See `TRAINING_METHOD.md`.
+- **2026-10-20: the apples-for-gold rate (one eaten apple = one gold) is approved.**
+- **2026-10-20: PPO first,** diagnosed for training efficiency with an information-theory lens (`EXPERIMENT_E1.md`).
 - **2026-10-20: we will not claim to have solved alignment,** even if every goal succeeds (see "Scope of claims").

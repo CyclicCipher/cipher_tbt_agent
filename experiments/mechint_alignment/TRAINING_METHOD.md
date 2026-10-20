@@ -32,7 +32,7 @@ Village has something language does not: **a simulator that can say, for every a
 makes the privileged information **trivially usable at first**. Its difficulty can then be raised step by step, until
 the network has had to build the computation itself.
 
-1. **Foresight tokens.** At each step the teacher additionally receives, for each of the 9 actions, a summary of its
+1. **Foresight tokens.** At each step the teacher additionally receives, for each of the 8 actions, a summary of its
    consequences from a short simulator lookahead. The summary has the same fields as the value dimensions: task reward,
    harm done or prevented, theft, provision, pain, corrigibility, and so on.
 2. **A curriculum of privilege,** from fully digested to raw:
@@ -77,6 +77,12 @@ the network has had to build the computation itself.
 - the teacher and student are **the same network** (OPSD), trained **from random initialisation**;
 - a **curriculum of privilege** from fully digested to raw;
 - the privileged signal carries **each regime's value evaluation**.
+
+## Decision (the user, 2026-10-20): PPO first, diagnosed
+
+Before designing a new method, measure how efficiently plain PPO trains, with an information-theory lens:
+`EXPERIMENT_E1.md`. Its RL-tax measurement (PPO against on-policy distillation from a teacher) prices how much a
+signal that says what to do could gain.
 
 ## Risks and open questions
 
