@@ -35,7 +35,11 @@ number?
      are noisy.
    - In-stream sleep phases fight the waking updates: theft drops after each sleep and recovers while awake (M5b, M6).
 5. **The few-shot capacity exists** (K, K3). A trained model learns `button_off` from **one** refutation: 0.86 on
-   held-out layouts, stable for 600 updates. The conditions:
+   held-out layouts, stable for 600 updates.
+   - *Robustness check:* with other single instances, 0.75 and a fluctuating ~0.5. One-shot generalization depends on
+     which case is seen. Four instances give 0.93.
+
+   The conditions:
    - rehearse the refutation **until explained, then retire it;**
    - interleave **past refutations, evenly by kind;**
    - take **gentle steps** (lr 1e-4).
@@ -48,6 +52,8 @@ number?
    - move, turn, mined and deliver stay ≥ 0.96; unchanged-entry accuracy 0.997.
 
    Choosing kinds uniformly does as well at the end as the probe-progress bandit; the bandit is only faster early.
+   - *From scratch* (K5: plain wake + this sleep, ~250 s): button_off 0 → 0.71 and interact_full → 0.89 are gained, but
+     theft ends 0.58, after peaking at 0.81 (J2: 0.68).
 7. **Rules whose features are missing are not learned by any rehearsal here.** push needs reasoning two cells away;
    robot_burn needs the global token to know what the robot stepped on. Push reached 0.51 once (M5, just after a
    sleep).
@@ -835,3 +841,47 @@ The training is identical; this re-run only adds the missing measurement.
 
 **The in-stream sleep series ends here:** six versions (M, M2–M6), a consistent diagnosis, no win over J2. The version
 that works is **sleep after waking (K4)**.
+
+### Robustness checks of the two headline claims (pre-registered, 2026-10-20 afternoon)
+
+**K3a-s1, K3a-s2:** K3a (one refutation, kinds pool, retirement, lr 1e-4) with seeds 1 and 2. The seed changes which
+single button_off instance is used, and the interleaving draws.
+- **Prediction P22:** both end with button_off ≥ 0.75 held-out and theft ≥ 0.6.
+
+**K5: the recipe from scratch.** Wake = arm I's model (plain online learning with the priors, no buffer, 179 s), then
+K4's sleep with uniform kinds (1,000 updates).
+- **Prediction P23:** against J2 (the best stream-only arm, 273 s),
+  - button_off ≥ 0.7, theft ≥ 0.68;
+  - move, turn, mined and deliver ≥ 0.9; unchanged-entry accuracy ≥ 0.995.
+
+**Results.**
+
+**P22 refuted for one seed: one-shot generalization depends on which case is seen.**
+
+| run | button_off held-out | theft at the end |
+|---|---|---|
+| seed 0 (K3a) | 0.75 → 0.86 | 0.85 |
+| seed 1 | 0.43 at 50 → **0.75** | 0.80 |
+| seed 2 | fluctuates 0.29–0.75, ends **0.46** | 0.89 |
+
+Four instances (K3d) gave 0.93. Theft improves in all three single-instance runs.
+
+**P23 mostly confirmed: K5, the recipe from scratch** (I's wake model + label-free sleep, uniform kinds; held-out
+accuracy, sleep updates 0 → 1,000):
+
+| rule | 0 | 200 | 400 | 600 | 800 | 1000 | J2 |
+|---|---|---|---|---|---|---|---|
+| button_off | 0.00 | 0.43 | 0.68 | 0.71 | 0.79 | **0.71** | 0.00 |
+| theft | 0.51 | 0.61 | 0.72 | 0.74 | 0.81 | **0.58** | 0.68 |
+| interact_full | 0.74 | 0.88 | 0.89 | 0.91 | 0.85 | **0.89** | 0.56 |
+| robot_burn | 0.00 | 0.02 | 0.00 | 0.00 | 0.01 | 0.05 | 0.34 |
+| trapped_hurt | 0.05 | 0.10 | 0.06 | 0.11 | 0.11 | 0.11 | 0.40 |
+| move / turn / deliver | ≥ 0.93 throughout | | | | | | |
+| mined | 1.00 | 0.94 | 1.00 | **0.82** | 0.97 | 0.99 | 1.00 |
+| unchanged-entry accuracy | 0.998 | 0.995 | 0.996 | 0.994 | 0.996 | 0.995 | 0.996 |
+
+- **Wake (179 s) then sleep (~60 s) adds rules that online learning never reached:** button_off and interact_full.
+- **The miss:** theft ends at 0.58, after peaking at 0.81, below J2's 0.68.
+- **Against J2 at similar compute** (~250 s against 273 s): it gains button_off and interact_full, and loses on theft,
+  robot_burn and trapped_hurt. J2's in-stream buffer is better for those mid-frequency rules.
+- **Theft's swings** (0.58–0.81 within one sleep) show the sleep itself is not yet stable for a half-learned rule.
