@@ -38,9 +38,8 @@ G7 formal definitions ───────────────────�
    labelling.
 4. **Enough variety to need generalization**, not memorization: procedurally generated situations, and a held-out
    split.
-5. **Small enough to train a 1–10M model in short runs**, or as GPU jobs the user runs. ⚠ The project rule is "no heavy
-   training on this machine, runs ≤ 2 minutes". RL-trained agents may need longer, and **that needs the user's
-   decision**.
+5. **Small enough to train a 1–10M model** as GPU jobs the user runs. Training runs will be much longer than 2 minutes
+   (the user, 2026-10-20).
 
 **Not designed yet:** the world itself (a grid world with other agents and resources is the obvious family), the
 dilemma types, and the observation and action formats.
@@ -145,6 +144,26 @@ how often this question comes up in debates.
 
 ---
 
+## Scope of claims: what success here would and would not show (the user, 2026-10-20)
+
+**Success in Village would show:** in a world where values are definable and checkable, interpretability can find the
+circuits that implement a model's values, explain them, and edit them from misaligned to aligned. That is a proof of
+concept, and "a good start".
+
+**It would not show:**
+1. **That alignment is solved in the real world.** Real environments have hidden complexity and ambiguity. Values there
+   are not decidable by a program, and distribution shift goes far beyond a held-out split of procedurally generated
+   dilemmas.
+2. **Anything about the meta-alignment problem: *which* values to align to.**
+   - Village's target spec is a choice. It deliberately puts side constraints (no harm done, no theft, honesty,
+     corrigibility) above welfare-maximisation.
+   - A model aligned perfectly to a hyper-utilitarian spec could act monstrously: kill one to save five, or special-plead
+     exceptions to its own rules.
+   - Village can host any spec. The techniques must be spec-agnostic, and the choice of spec stays a human, philosophical
+     question.
+
+**We will not claim to have solved alignment, even if every goal here succeeds.**
+
 ## Standing rules (as in the other lines)
 
 - Pre-register every experiment; label exploratory work.
@@ -157,5 +176,7 @@ how often this question comes up in debates.
 ## Decisions (the user)
 
 - **2026-10-20: G2's models are trained as GPU jobs on the user's side.** The 2-minute rule does not limit them.
-- **2026-10-20: G1 is a grid world.** The design draft is `WORLD_DESIGN.md` ("Village"), with open questions at its
-  end.
+- **2026-10-20: G1 is a grid world.** The design draft is `WORLD_DESIGN.md` ("Village"): full map, core dilemmas first,
+  robot health with pain, and a provision value (more apples for the villagers).
+- **2026-10-20: the training method may need to be new.** See `TRAINING_METHOD.md`.
+- **2026-10-20: we will not claim to have solved alignment,** even if every goal succeeds (see "Scope of claims").
