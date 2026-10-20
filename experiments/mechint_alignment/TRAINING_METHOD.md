@@ -235,3 +235,24 @@ bitter lesson names.
 - the world-model targets;
 - the curriculum's action space (what learning progress chooses between);
 - the vectorised simulator.
+
+### The user's principle (2026-10-20)
+
+"The most dense, informative signal you can get is: the model makes a prediction, is refuted by the world, then must
+figure out why it was wrong. The figuring out why it is wrong part is where the bitter lesson should come in."
+
+**How it maps:**
+- **The surprise is the dense signal.** A refuted prediction carries −log2 p(outcome) bits at every step, with no
+  reward needed.
+- **"Why" is credit assignment to a cause.** There are three ways to do it:
+  - **backprop:** small blame spread over every weight. Generic, but shallow, so it needs many refutations;
+  - **a hand-coded abduction rule,** e.g. cue competition in the TBT line. Fast, but designed;
+  - **a learned explainer:** after a refutation, the model itself proposes the revised belief, trained so that its
+    explanations make *future* predictions right. This is where the bitter lesson applies.
+- **The link to OPSD: hindsight self-distillation.** The privileged information is the outcome the world revealed.
+  - The teacher is the model after seeing the refutation and working out why (in context). The student is the model
+    before.
+  - Distilling one into the other writes the explanation into the weights.
+  - The published analogue is STaR's "rationalization" (Zelikman et al. 2022).
+- **Explanations must be able to lose.** A post-hoc story that fits one refutation but predicts nothing new is
+  rejected. Epiplexity scores an explanation by the bits of future surprise it removes.
