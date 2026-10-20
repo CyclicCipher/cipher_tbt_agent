@@ -256,3 +256,54 @@ figure out why it was wrong. The figuring out why it is wrong part is where the 
   - The published analogue is STaR's "rationalization" (Zelikman et al. 2022).
 - **Explanations must be able to lose.** A post-hoc story that fits one refutation but predicts nothing new is
   rejected. Epiplexity scores an explanation by the bits of future surprise it removes.
+
+### Brainstorm 3 (2026-10-20): bootstrapping and rationalizing; the animal existence proof
+
+**The user's argument:** if you needed a teacher to learn anything, nobody could have become the first teacher. So
+almost every animal must be able to work out, without words, why it failed and what to do instead.
+
+**The user's view on the hippocampus:** tempting, but its methodology differs a lot from training a normal model, and
+it does not yet work as intended. On the other hand, a normal model is unaffordable anyway.
+
+**Reading the existence proof carefully: two layers.**
+1. **The content.** The individual animal learns what causes what without a teacher.
+2. **The machinery.** The learning machinery itself was paid for by evolution, which is meta-learning across
+   lifetimes. Example: rats link illness to a *taste* and a shock to a *light or sound*, not the reverse (Garcia &
+   Koelling 1966). Which causes are plausible comes built in.
+
+So the proof says: a fixed, fairly simple, general "why" machinery plus the world as the tester is enough to bootstrap
+the content. Our built-in part plays evolution's role, so it should be kept minimal and general.
+
+**The non-verbal "why", from animal learning:**
+- **Surprise is located in time and in features:** eligibility traces, attention.
+- **Candidate causes compete.** The cause credited is the one that was not already predicting the outcome
+  (Rescorla–Wagner, Kamin's blocking).
+- **There are two kinds of answer:** "my rule was wrong" or "this is a different situation". The second is latent-cause
+  inference (Gershman, Blei & Niv 2010), held in check by a prior.
+- **Explanations are tested by acting:** interventions, and vicarious trial and error at choice points.
+- **Credit reaches back over long gaps through replay:** reverse replay after reward (Foster & Wilson 2006).
+- **Is the hippocampus needed?** Animals with hippocampal lesions still learn simple contingencies. They lose one-shot,
+  relational, contextual and long-gap ("trace") learning. So the core loop does not need it.
+
+**Rationalizing.**
+- **Animals are mostly protected:** an explanation is not a separate story; it *is* a changed expectation, which the
+  next encounter tests automatically.
+- **Rationalization appears when explanation is decoupled from prediction:** language, as in Gazzaniga's "interpreter"
+  in split-brain patients.
+- **The design rule:** an explanation is never a separate artefact. It is the change in prediction, scored on cases it
+  has not yet seen.
+- **The non-verbal form of rationalizing** is overusing "this is a different situation" to explain errors away. The
+  prior on new latent causes is the guard.
+- **The ML analogue:** MEND (Mitchell et al. 2022). A learned editor turns a correction's gradient into a weight edit,
+  trained so that the edit generalizes to related cases and leaves unrelated ones unchanged. That is a learned,
+  non-verbal "why" that can lose.
+
+**The bootstrapping loop, proposed:**
+1. Predict everything (state and events), not just reward.
+2. On a refutation, candidate causes compete.
+3. The winner is committed as a changed prediction.
+4. Acting tests it, and it is kept or dropped.
+5. The features in which causes are expressed sharpen, because refutations separate the cases.
+
+**Built in:** the error signal, competition, and testing by acting. **Learned:** the features and, later, the edit
+rule itself.
