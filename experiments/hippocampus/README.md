@@ -45,6 +45,7 @@ The full design and the reasons are in `PLAN.md`.
 | `EXPERIMENT_H1H.md`, `run_h1h.py` | H1h: non-causal attention for forward content matching |
 | `EXPERIMENT_H6.md`, `text6.py`, `h6.py`, `run_h6.py` | H6: the store on real text (Latin, Caesar, Middle High German); the second reading |
 | `EXPERIMENT_H6B.md` | H6b: a retrieval-confidence gate (pair scoring, normalised share; gates 0.3 and 0.5) |
+| `RESUME_H6.md` | where the line was left: the H6c question and answer, and the options for making the store help on in-distribution text |
 | `runs/` | results, one JSON per run |
 
 ## Decisions (the user)
@@ -57,7 +58,13 @@ The full design and the reasons are in `PLAN.md`.
 See `PLAN.md` §7. They are the same as in Dust 2 and intelligent constraints: ≤ 2-min runs, pre-registration, never
 re-run, 16-bit, diverse tasks, no competitor-faithful arms, commits to `exp/mdl-vs-ntp`.
 
-## Where it stands (2026-10-18)
+## Where it stands (paused 2026-10-20)
+
+**Paused for the mechanistic-interpretability line (`../mechint_alignment/`). To resume, start at `RESUME_H6.md`:** the
+last exchange (will H6c make the store help on Latin? why not? what is the training teaching?), and the open choice
+between "store everything the model has read" and "test on a full book".
+
+## History
 
 The plan is written, with the compression mechanisms in §2b.
 
