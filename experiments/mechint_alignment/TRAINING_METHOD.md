@@ -373,8 +373,14 @@ Online SGD needed ~10³ updates and ~10⁴ instances per rule.
        all.
      - **With E2's protections, the loop is stable:** plan with a slow copy, interleave kind-balanced past refutations,
        ≤ 5 updates per refutation (chance events must not be force-fitted). It delivers ~4.4 gold per episode, a return
-       of 2.75 against the scripted policy's 13.2.
-     - **It does not yet improve with experience.**
+       of 2.75 against the scripted policy's 13.2. But without sleep it does not improve with experience.
+     - **Acting by day, sleeping by night (E4d), it improves with experience.** After each episode, a 100-update sleep
+       on the agent's own refutations (kind-balanced, retire when explained, interleaved).
+       - **Replication on 30 new layouts, 17 paired episodes:** return 6.03 against 1.39 without sleep (+4.6 ± 1.2,
+         better on 13/17).
+       - **The trend:** gold per episode rises 4.4 → 11.2 (first 5 → last 5), refutations fall 25.8 → 4.6, and the
+         last two episodes reach the scripted policy's return (13.7, 12.7).
+       - **No policy learning at all.**
      - **Caveat:** the world model's data came partly from a competent scripted policy (dynamics only).
    - **Next:**
      - make the weak rules learnable (burns, push);

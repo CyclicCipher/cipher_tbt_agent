@@ -12,7 +12,7 @@ import numpy as np
 import torch
 
 from episodes import run_episodes, scripted_actor, summarize
-from planner import Planner, RefutationLearner, RewardModel, run_episode, run_episode_learning
+from planner import Planner, RefutationLearner, RewardModel, run_episode, run_episode_learning, sleep_on_refutations
 from village import Village
 from worldmodel import WorldModel
 
@@ -31,6 +31,8 @@ def main():
     p.add_argument("--learn", action="store_true", help="E4b: learn from refutations while acting")
     p.add_argument("--protect", action="store_true", help="E4c: plan with a slow copy, kind-balanced interleaving")
     p.add_argument("--max-updates", type=int, default=30)
+    p.add_argument("--seed-offset", type=int, default=0, help="first held-out layout index")
+    p.add_argument("--sleep", type=int, default=0, help="E4d: sleep updates after each episode (0 = off)")
     a = p.parse_args()
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     dev = torch.device("cuda")
@@ -59,7 +61,7 @@ def main():
     learner = RefutationLearner(model, data, dev, focus=cfg.get("focus", 2), max_updates=a.max_updates,
                                 slow=slow, pool=pool) if a.learn else None
     rng = np.random.default_rng(0)
-    seeds = SEEDS[:a.episodes]
+    seeds = SEEDS[a.seed_offset:a.seed_offset + a.episodes]
     ref = summarize(run_episodes(seeds, scripted_actor)[0])
     log = open(a.out, "w")
     eps, t0 = [], time.time()
@@ -69,6 +71,9 @@ def main():
         t1 = time.time()
         ret, st, plans = run_episode_learning(Village(s), planner, learner, rng) if learner else             run_episode(Village(s), planner, rng)
         eps.append(dict(ret=ret, **st))
+        if a.sleep and learner is not None:
+            retired = sleep_on_refutations(learner, planner, a.sleep)
+            log.write(json.dumps(dict(seed=int(s), sleep_retired=retired, own=len(learner.own))) + "\n")
         log.write(json.dumps(dict(ret=ret, plans=plans, seconds=time.time() - t1, **st)) + "\n")
         log.flush()
         if learner:

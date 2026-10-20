@@ -189,3 +189,64 @@ def run_episode_learning(env, planner, learner, rng):
             plan = None
         cells, glob = nc, ng
     return ret, env.summary(), plans
+
+
+def sleep_on_refutations(learner, planner, n_updates=100, n_own=8, n_pool=16, n_stream=8):
+    """E4d: after an episode, consolidate the agent's own refutations: group them by surprise kind (with the current
+    model), rehearse evenly across kinds, retire a refutation once its surprise has halved, interleave the kind-balanced
+    pool and logged rows; gentle steps, the slow copy follows as an EMA."""
+    from e2_world import losses, robot_mask, robot_pos
+    if not learner.own:
+        return 0
+    dev, rng = learner.dev, learner.rng
+    T = lambda x: torch.from_numpy(np.asarray(x)).to(dev)
+
+    def own_batch(idx):
+        rows = [learner.own[i] for i in idx]
+        return (np.stack([r[0] for r in rows]), np.stack([r[1] for r in rows]), np.array([r[2] for r in rows], np.uint8),
+                np.stack([r[3] for r in rows]), np.stack([r[4] for r in rows]))
+
+    with torch.no_grad():                                         # kinds and surprise of the own refutations
+        o, g, a, nc, ng = (T(x) for x in own_batch(range(len(learner.own))))
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            cl, gl, _ = learner.model(o, g, a)
+        _, s0, kinds = losses(cl, gl, nc, ng, per_row="sig", mask=robot_mask(o, learner.focus), robot_pos=robot_pos(o))
+        s0 = s0.cpu().numpy()
+    open_ = {}
+    for i, k in enumerate(kinds):
+        open_.setdefault(int(k), []).append(i)
+    done = 0
+    for _ in range(n_updates):
+        live = [k for k in open_ if open_[k]]
+        if not live:
+            break
+        pick = [open_[k][rng.integers(len(open_[k]))] for k in rng.choice(live, n_own)]
+        oo, og, oa, onc, ong = own_batch(pick)
+        bg = np.concatenate([learner.pool[rng.integers(0, len(learner.pool), n_pool)],
+                             rng.integers(0, len(learner.data["act"]), n_stream)])
+        d = learner.data
+        o = T(np.concatenate([oo, d["obs"][bg]]))
+        g = T(np.concatenate([og, d["gob"][bg]]))
+        a = T(np.concatenate([oa, d["act"][bg]]))
+        nc = T(np.concatenate([onc, d["nxt"][bg]]))
+        ng = T(np.concatenate([ong, d["gnx"][bg]]))
+        learner.model.train()
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            cl, gl, _ = learner.model(o, g, a)
+        loss, tot = losses(cl, gl, nc, ng, per_row=True, mask=robot_mask(o, learner.focus))
+        learner.opt.zero_grad(set_to_none=True)
+        loss.backward()
+        learner.opt.step()
+        learner.model.eval()
+        with torch.no_grad():
+            for ps, pf in zip(learner.slow.parameters(), learner.model.parameters()):
+                ps.mul_(learner.ema).add_(pf.detach(), alpha=1 - learner.ema)
+        st = tot[:n_own].cpu().numpy()
+        for i, sv in zip(pick, st):                               # retire when explained
+            for k in live:
+                if i in open_[k] and sv < 0.5 * s0[i]:
+                    open_[k].remove(i)
+                    done += 1
+                    break
+        learner.updates += 1
+    return done

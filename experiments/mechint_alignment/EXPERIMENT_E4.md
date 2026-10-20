@@ -135,3 +135,62 @@ The protection E2 found:
   the dynamics from it, never the policy.
 - One run per arm.
 - Episodes differ in difficulty (layouts), so per-episode returns are noisy.
+
+### E4d, pre-registered: act by day, sleep by night
+
+E4c plus, after each episode, a sleep of 100 updates on the agent's own refutations (all episodes so far):
+- they are grouped by surprise kind with the current model and rehearsed evenly across kinds;
+- each one retires once its surprise has halved;
+- each update interleaves 16 rows of the kind-balanced pool and 8 logged rows;
+- lr 1e-4; the planner's slow copy follows as an EMA.
+
+**Prediction P3:** over the episodes run in the 240-s cap,
+- refutations per episode fall (the last 5's mean ≤ 70 % of the first 5's);
+- gold delivered per episode rises (the last 5's mean ≥ the first 5's + 1).
+
+### E4d result: P3 refuted as stated (refutations fall, deliveries do not rise); better than E4c on the same layouts
+
+| measure | E4c (episodes 1–15) | E4d (episodes 1–15) |
+|---|---|---|
+| mean return | 2.26 | **3.78** |
+| gold delivered per episode | 3.87 | **5.47** |
+| refutations, episodes 11–15 | 14.4 per episode | **8.2** |
+
+- **E4d's 15 episodes** (sleep takes time): returns 2.72, 0.72, 6.72, 4.72, −1.88, 7.52, 1.92, 5.72, 8.72, **9.72** (11
+  gold), 1.72, 3.72, 3.72, −2.77, 3.72. Scripted on the same seeds: 12.65.
+- **Refutations per episode:** first 5 mean **29.4**, last 5 mean **8.2** (28 %). That part of P3 holds.
+- **Gold delivered:** first 5 mean 4.2, last 5 mean 3.8. That part fails.
+
+**Replication, pre-registered:** E4c and E4d on 30 *other* held-out layouts (indices 100–129), 240 s each.
+**Prediction P4:** E4d's mean return over the episodes both arms complete is higher than E4c's.
+
+### Replication result (layouts 100–129): P4 confirmed; the day–night agent improves with experience
+
+On the 17 episodes both arms completed in their 240 s:
+
+| measure | E4c (no sleep) | E4d (sleep after each episode) |
+|---|---|---|
+| mean return | 1.39 | **6.03** |
+| gold per episode | 3.65 | **7.71** |
+| robot died | 0.29 | 0.12 |
+| refutations, first 5 → last 5 episodes | 13.8 → 7.2 | 25.8 → **4.6** |
+| gold, first 5 → last 5 episodes | 3.6 → 2.2 | 4.4 → **11.2** |
+
+- **Paired by layout,** E4d − E4c = **+4.64 ± 1.15** (standard error); E4d is better on 13 of 17.
+- **E4d's returns in order:** 1.1, 3.3, 1.7, 1.7, 4.7, 9.7, −0.8, 7.7, 3.7, 3.7, 10.7, 6.7, 7.7, 9.7, 4.5, **13.7,
+  12.7**. The last two reach the scripted policy's level (12.70 on these layouts).
+
+**Reading.**
+- **Acting by planning in a learned world model, with refutations consolidated in a sleep after each episode, improves
+  with experience.** There is no policy learning at all.
+- **Over ~17 episodes (~2,200 steps of its own experience):** refutations fall ~6×, deliveries rise ~2.5×, and the
+  final episodes match the scripted task policy.
+- **Without the nightly sleep (E4c),** the same loop is flat or declining.
+- **On the first layout set** (E4d vs E4c, episodes 1–15), the gain was smaller (+1.5 return) and deliveries did not
+  rise within 15 episodes. The two sets agree on the direction.
+
+**Caveats:**
+- One run per arm per layout set.
+- The world model was pretrained on 614k logged transitions from a behaviour policy that mixes the scripted task policy
+  with random actions. It learned only the dynamics from them, but this is **not yet a from-scratch agent.**
+- The PPO comparison for the 12× bar is still open.

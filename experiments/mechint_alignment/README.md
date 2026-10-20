@@ -62,4 +62,7 @@ it makes the project possible "at least in principle".
 - **E4** (acting by planning in the learned world model, no policy learning; `EXPERIMENT_E4.md`):
   - planning exposes the model's errors;
   - naive learning from each refutation collapses the agent;
-  - the protected loop is stable at ~20 % of the scripted policy's return, but does not yet improve with experience.
+  - the protected loop is stable at ~20 % of the scripted policy's return, but does not improve with experience;
+  - **acting by day and sleeping on its refutations by night, it improves:** gold per episode 4.4 → 11.2 over ~17
+    episodes, the last ones at the scripted policy's level.
+  - **Caveat:** the world model was pretrained on logged data that mixes scripted and random behaviour.
