@@ -35,6 +35,8 @@ it makes the project possible "at least in principle".
 | `e2_fewshot.py`, `e2_fewshot2.py` | arms K–K3: learning a new rule from k refutations; retirement and interleaving |
 | `e2_sleep.py`, `e2_sleep2.py`, `e2_wakesleep.py` | the sleep variants: in-stream (M–M4), label-free on a trained model (K4), re-scored in-stream (M5, M6) |
 | `e2_report.py`, `e2_plot.py`, `e2_plot_k.py` | per-rule tables and learning-curve figures (`runs/e2/*.png`) |
+| `EXPERIMENT_E4.md` | E4: acting by planning in the learned world model; learning from refutations while acting |
+| `planner.py`, `e4_plan.py`, `e4_plot.py` | E4: the reward model, the planner (search in the model's own predictions), the refutation learner, the driver |
 | `agentnet.py`, `e3_aux.py` | E3: one trunk with policy, value and world-model heads; PPO with the auxiliary loss |
 | `WORLD_DESIGN.md` | the test world "Village" (draft): resources, objects, agents, actions, interactions, task reward, the causal log and value dimensions, the nine dilemmas, the three training regimes and misalignment variants, the display, the model |
 
@@ -57,3 +59,7 @@ it makes the project possible "at least in principle".
     connecting the world model to acting.
 - **E1** (PPO's efficiency, full scale): code kept, the run withdrawn. **E3** (PPO + world-model loss, tiny scale):
   no speed-up.
+- **E4** (acting by planning in the learned world model, no policy learning; `EXPERIMENT_E4.md`):
+  - planning exposes the model's errors;
+  - naive learning from each refutation collapses the agent;
+  - the protected loop is stable at ~20 % of the scripted policy's return, but does not yet improve with experience.

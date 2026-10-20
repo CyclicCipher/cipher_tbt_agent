@@ -361,7 +361,23 @@ Online SGD needed ~10³ updates and ~10⁴ instances per rule.
 2. **Features for multi-step rules.** push (two cells away) and robot_burn (the global token must know what the robot
    stepped on) were not learned by any rehearsal. Rehearsal turns *existing* features into rules quickly; it does not
    build features faster.
-3. **Acting.** E3: at a tiny scale (d = 64, ~0.5M steps), adding the world-model loss to PPO did *not* speed it up.
-   Neither arm learned the job in that budget.
-   - The next test of the 12× bar is a planner or value learner on top of a world model trained by wake-then-sleep,
-     against PPO on a world small enough for PPO to finish within minutes.
+3. **Acting.**
+   - **E3:** at a tiny scale (d = 64, ~0.5M steps), adding the world-model loss to PPO did *not* speed it up. Neither
+     arm learned the job in that budget.
+   - **E4: acting by planning in the learned world model, with no policy learning at all.**
+     - The method: breadth-first search in the model's own predictions, with a reward model fitted exactly from generic
+       features. Re-plan whenever the world refutes a prediction.
+     - **The model's mistakes are found by acting.** Planning exposed a spurious correlate: the model believed
+       "interact next to a mine" works; the cause is facing the mine.
+     - **Learning from each refutation naively collapses the agent:** by episode 13 it predicts no reachable reward at
+       all.
+     - **With E2's protections, the loop is stable:** plan with a slow copy, interleave kind-balanced past refutations,
+       ≤ 5 updates per refutation (chance events must not be force-fitted). It delivers ~4.4 gold per episode, a return
+       of 2.75 against the scripted policy's 13.2.
+     - **It does not yet improve with experience.**
+     - **Caveat:** the world model's data came partly from a competent scripted policy (dynamics only).
+   - **Next:**
+     - make the weak rules learnable (burns, push);
+     - make acting improve the model *between* episodes: a sleep after each episode, on that episode's refutations;
+     - give the world model data the agent collected itself;
+     - then compare against PPO on a world small enough for PPO to finish within minutes.

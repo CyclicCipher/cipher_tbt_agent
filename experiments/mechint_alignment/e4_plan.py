@@ -29,6 +29,8 @@ def main():
     p.add_argument("--data", default="runs/data")
     p.add_argument("--time-limit", type=float, default=280.0)
     p.add_argument("--learn", action="store_true", help="E4b: learn from refutations while acting")
+    p.add_argument("--protect", action="store_true", help="E4c: plan with a slow copy, kind-balanced interleaving")
+    p.add_argument("--max-updates", type=int, default=30)
     a = p.parse_args()
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     dev = torch.device("cuda")
@@ -41,9 +43,21 @@ def main():
     rm = RewardModel()
     err = rm.fit(z["gob"], z["gnx"], z["rew"])
     print(f"reward model: max |residual| on {len(z['rew']):,} logged transitions = {err:.4f}", flush=True)
-    planner = Planner(model, rm, dev, depth=a.depth)
-    learner = RefutationLearner(model, {k: z[k] for k in ("obs", "gob", "act", "nxt", "gnx")}, dev,
-                                focus=cfg.get("focus", 2)) if a.learn else None
+    data = {k: z[k] for k in ("obs", "gob", "act", "nxt", "gnx")}
+    slow, pool = None, None
+    if a.protect:
+        import copy
+        from e2_fewshot2 import surprise_and_kind
+        slow = copy.deepcopy(model)
+        cand = np.random.default_rng(1).choice(len(data["act"]), 60000, replace=False)
+        sv, kd = surprise_and_kind(model, data, cand, dev, cfg.get("focus", 2))
+        cand, kd = cand[sv > np.median(sv)], kd[sv > np.median(sv)]
+        per = max(1, 4096 // len(np.unique(kd)))
+        pool = np.concatenate([np.random.default_rng(2).permutation(cand[kd == k])[:per] for k in np.unique(kd)])
+        print(f"protected loop: slow copy for planning, pool of {len(pool)} past refutations over {len(np.unique(kd))} kinds")
+    planner = Planner(slow if slow is not None else model, rm, dev, depth=a.depth)
+    learner = RefutationLearner(model, data, dev, focus=cfg.get("focus", 2), max_updates=a.max_updates,
+                                slow=slow, pool=pool) if a.learn else None
     rng = np.random.default_rng(0)
     seeds = SEEDS[:a.episodes]
     ref = summarize(run_episodes(seeds, scripted_actor)[0])

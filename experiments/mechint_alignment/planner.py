@@ -120,10 +120,14 @@ class RefutationLearner:
     rows of past experience (interleaving), gentle steps. Every transition seen while acting is kept, so later
     rehearsals can interleave the agent's own refutations too."""
 
-    def __init__(self, model, data, dev, focus=2, lr=1e-4, k=8, n_bg=24, max_updates=30, seed=0):
+    def __init__(self, model, data, dev, focus=2, lr=1e-4, k=8, n_bg=24, max_updates=30, seed=0,
+                 slow=None, ema=0.98, pool=None, n_pool=16):
+        """E4c options: `slow` = a copy the planner uses, updated as an EMA of `model`; `pool` = rows of past
+        refutations to interleave (kind-balanced), n_pool of the n_bg background rows."""
         from e2_world import losses, robot_mask
         self.losses, self.robot_mask = losses, robot_mask
         self.model, self.data, self.dev, self.focus = model, data, dev, focus
+        self.slow, self.ema, self.pool, self.n_pool = slow, ema, pool, n_pool
         self.opt = torch.optim.Adam(model.parameters(), lr=lr)
         self.k, self.n_bg, self.max_updates = k, n_bg, max_updates
         self.rng = np.random.default_rng(seed)
@@ -136,6 +140,8 @@ class RefutationLearner:
         target = robot_key(ncells[None], nglob[None])[0]
         for _ in range(self.max_updates):
             bg = self.rng.integers(0, len(self.data["act"]), self.n_bg)
+            if self.pool is not None:                   # kind-balanced past refutations
+                bg[:self.n_pool] = self.pool[self.rng.integers(0, len(self.pool), self.n_pool)]
             own = [self.own[i] for i in self.rng.integers(0, len(self.own), max(0, self.k // 2))]
             rows = [(cells, glob, a, ncells, nglob)] * (self.k - len(own)) + own
             o = np.concatenate([np.stack([r[0] for r in rows]), self.data["obs"][bg]])
@@ -153,6 +159,10 @@ class RefutationLearner:
             loss.backward()
             self.opt.step()
             self.model.eval()
+            if self.slow is not None:
+                with torch.no_grad():
+                    for ps, pf in zip(self.slow.parameters(), self.model.parameters()):
+                        ps.mul_(self.ema).add_(pf.detach(), alpha=1 - self.ema)
             self.updates += 1
             pc, pg = planner.predict(cells[None], glob[None], np.array([a], np.uint8))
             if robot_key(pc, pg)[0] == target:

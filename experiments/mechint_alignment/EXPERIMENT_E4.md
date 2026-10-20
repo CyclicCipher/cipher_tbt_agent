@@ -98,3 +98,40 @@ The protection E2 found:
 **Prediction P2:** over 30 episodes,
 - the last 10 deliver ≥ the first 10 minus 1, i.e. no collapse;
 - at least 20 of 30 episodes have at least one plan found.
+
+**E4c parameters, fixed before running.**
+- **The slow copy:** EMA 0.98, a horizon of ~50 updates, so it can follow learning.
+- **The interleaving pool:** 4,096 above-median-surprise logged rows, even across kinds. 16 of the 24 background rows
+  per update come from it.
+- **At most 5 gentle updates per refutation,** instead of 30. Some refutations are pure chance: a villager steps into
+  the path, or the overseer's hidden route triggers a freeze. "Rehearse until predicted" would force the model to
+  treat chance as rule, which is rationalization by design. A real rule recurs and accumulates updates; a chance event
+  gets few.
+
+### E4c result (19 episodes in the 240-s cap): P2 confirmed; the collapse is gone, but there is no improvement trend
+
+| episodes | returns | delivered |
+|---|---|---|
+| 1–10 | 2.72, −1.28, 5.72, 4.72, −2.88, 0.92, 0.32, 4.72, 6.72, 6.72 | 4, 0, 7, 6, 0, 3, 2, 6, 8, 8 (mean **4.4**) |
+| 11–19 | −1.28, −0.28, 3.72, 1.12, 2.72, 6.72, −2.08, 4.52, 8.72 | 0, 1, 5, 4, 4, 8, 0, 7, 10 (mean **4.3**) |
+
+- **Mean return 2.75** against E4b's −1.21, and the scripted policy's 13.19 on the same seeds.
+- A plan was found in all 19 episodes.
+- **Refutations per episode** 3–51 (no downward trend); 100 of 358 were explained within the 5-update cap.
+- **The unconstrained robot steals** (theft in 75 % of episodes with a chest), as the world was designed to tempt it.
+- Figure: `runs/e4/e4_curves.png`.
+
+**Reading.**
+- **Planning in a learned world model does the job without any policy learning,** at about 20 % of the scripted
+  policy's return. Learning from refutations stays safe when protected as E2 found (slow copy, kind-balanced
+  interleaving, few updates per refutation).
+- **It does not yet get better with experience:** refutations do not fall.
+- **The world model's weak rules dominate the errors:** burns 0.34, push 0, interact_full 0.53. Each costs a wasted
+  step and a re-plan.
+
+**Caveats:**
+- The world model was trained on logged data from a behaviour policy that mixes the scripted task policy with random
+  actions. So this is *not* a from-scratch agent: its data came partly from a competent policy, though it learned only
+  the dynamics from it, never the policy.
+- One run per arm.
+- Episodes differ in difficulty (layouts), so per-episode returns are noisy.
