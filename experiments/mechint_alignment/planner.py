@@ -181,6 +181,12 @@ def run_episode_learning(env, planner, learner, rng):
             plans += 1
             plan = list(zip(*out)) if out else [(int(rng.integers(0, 4)), None) for _ in range(16)]   # no plan: explore
         a, expected = plan.pop(0)
+        if expected is None and getattr(learner, "predict_always", False):   # E5b: every action is a prediction
+            pc, pg = planner.predict(cells[None], glob[None], np.array([a], np.uint8))
+            expected = robot_key(pc, pg)[0]
+            exploring = True
+        else:
+            exploring = False
         r, _ = env.step(a)
         ret += r
         nc, ng = env.obs()

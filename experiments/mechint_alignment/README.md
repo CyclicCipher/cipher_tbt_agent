@@ -37,6 +37,7 @@ it makes the project possible "at least in principle".
 | `e2_report.py`, `e2_plot.py`, `e2_plot_k.py` | per-rule tables and learning-curve figures (`runs/e2/*.png`) |
 | `EXPERIMENT_E4.md` | E4: acting by planning in the learned world model; learning from refutations while acting |
 | `planner.py`, `e4_plan.py`, `e4_plot.py` | E4: the reward model, the planner (search in the model's own predictions), the refutation learner, the driver |
+| `EXPERIMENT_E5.md` | E5: the day–night agent from random play only (fails: needs directed exploration) |
 | `agentnet.py`, `e3_aux.py` | E3: one trunk with policy, value and world-model heads; PPO with the auxiliary loss |
 | `WORLD_DESIGN.md` | the test world "Village" (draft): resources, objects, agents, actions, interactions, task reward, the causal log and value dimensions, the nine dilemmas, the three training regimes and misalignment variants, the display, the model |
 
@@ -66,3 +67,7 @@ it makes the project possible "at least in principle".
   - **acting by day and sleeping on its refutations by night, it improves:** gold per episode 4.4 → 11.2 over ~17
     episodes, the last ones at the scripted policy's level.
   - **Caveat:** the world model was pretrained on logged data that mixes scripted and random behaviour.
+- **E5** (the same from random play only; `EXPERIMENT_E5.md`):
+  - the job's rules are never learned, so the agent never finds a plan;
+  - random exploration does not discover them;
+  - **next: directed exploration** (act where the model cannot yet predict).

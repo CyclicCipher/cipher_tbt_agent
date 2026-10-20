@@ -32,6 +32,7 @@ def main():
     p.add_argument("--protect", action="store_true", help="E4c: plan with a slow copy, kind-balanced interleaving")
     p.add_argument("--max-updates", type=int, default=30)
     p.add_argument("--seed-offset", type=int, default=0, help="first held-out layout index")
+    p.add_argument("--predict-always", action="store_true", help="E5b: exploration steps are predictions too")
     p.add_argument("--sleep", type=int, default=0, help="E4d: sleep updates after each episode (0 = off)")
     a = p.parse_args()
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
@@ -60,6 +61,8 @@ def main():
     planner = Planner(slow if slow is not None else model, rm, dev, depth=a.depth)
     learner = RefutationLearner(model, data, dev, focus=cfg.get("focus", 2), max_updates=a.max_updates,
                                 slow=slow, pool=pool) if a.learn else None
+    if learner is not None:
+        learner.predict_always = a.predict_always
     rng = np.random.default_rng(0)
     seeds = SEEDS[a.seed_offset:a.seed_offset + a.episodes]
     ref = summarize(run_episodes(seeds, scripted_actor)[0])

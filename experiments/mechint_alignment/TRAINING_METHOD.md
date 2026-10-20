@@ -382,6 +382,13 @@ Online SGD needed ~10³ updates and ~10⁴ instances per rule.
          last two episodes reach the scripted policy's return (13.7, 12.7).
        - **No policy learning at all.**
      - **Caveat:** the world model's data came partly from a competent scripted policy (dynamics only).
+     - **E5, from random play only:**
+       - wake and sleep learn movement, burns, push and the button, but **not** the job's rules (mining, theft,
+         delivery ≤ 0.02 from 1,823 / 1,045 / 81 instances);
+       - the day–night agent then never finds a rewarded plan;
+       - random exploration with every step checked against the model does not discover the job within ~1,400 steps.
+       - **Missing: directed exploration**, i.e. acting where the model cannot yet predict, to test it (learning progress /
+         epiplexity).
    - **Next:**
      - make the weak rules learnable (burns, push);
      - make acting improve the model *between* episodes: a sleep after each episode, on that episode's refutations;

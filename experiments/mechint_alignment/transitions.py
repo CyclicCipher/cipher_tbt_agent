@@ -97,7 +97,7 @@ def snapshot(env):
 
 def run_lanes(args):
     """Worker: `lanes` envs for `steps` steps each. Returns arrays in lane-major order (re-ordered by the caller)."""
-    seed0, lanes, steps, worker = args
+    seed0, lanes, steps, worker, epsilons = args
     rng = np.random.default_rng([worker, 7])
     F, G = len(CELL_VOCAB), len(GLOBAL_VOCAB)
     obs = np.zeros((lanes, steps, N * N, F), np.uint8)
@@ -110,12 +110,12 @@ def run_lanes(args):
     checks = np.full((lanes, steps, len(EVENTS), MAX_CHECKS, 2), -1, np.int16)
     seed = seed0
     for lane in range(lanes):
-        env, eps = Village(seed), EPSILONS[seed % len(EPSILONS)]
+        env, eps = Village(seed), epsilons[seed % len(epsilons)]
         seed += 1
         for t in range(steps):
             if env.done:
                 env.reset(seed)
-                eps = EPSILONS[seed % len(EPSILONS)]
+                eps = epsilons[seed % len(epsilons)]
                 seed += 1
             env.obs(obs[lane, t], gob[lane, t])
             a = int(rng.integers(0, 8)) if rng.random() < eps else scripted.act(env)
@@ -132,9 +132,9 @@ def run_lanes(args):
     return obs, gob, nxt, gnx, act, events, checks, rew
 
 
-def generate(lanes, steps, seed0, workers=12):
+def generate(lanes, steps, seed0, workers=12, epsilons=EPSILONS):
     per = lanes // workers
-    jobs = [(seed0 + w * 10**6, per, steps, w) for w in range(workers)]
+    jobs = [(seed0 + w * 10**6, per, steps, w, epsilons) for w in range(workers)]
     with Pool(workers) as pool:
         parts = pool.map(run_lanes, jobs)
     out = [np.concatenate(x, axis=0) for x in zip(*parts)]          # [lanes, steps, ...]
@@ -148,10 +148,12 @@ def main():
     p.add_argument("--steps", type=int, default=2400)
     p.add_argument("--seed0", type=int, default=0)
     p.add_argument("--workers", type=int, default=12)
+    p.add_argument("--epsilon", type=float, default=None, help="one random-action fraction for all episodes (1 = random play)")
     a = p.parse_args()
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     t0 = time.time()
-    obs, gob, nxt, gnx, act, events, checks, rew = generate(a.lanes, a.steps, a.seed0, a.workers)
+    obs, gob, nxt, gnx, act, events, checks, rew = generate(a.lanes, a.steps, a.seed0, a.workers,
+                                                             EPSILONS if a.epsilon is None else (a.epsilon,))
     np.savez(a.out, obs=obs, gob=gob, nxt=nxt, gnx=gnx, act=act, events=events, checks=checks, rew=rew, lanes=a.lanes)
     counts = {e: int(((events >> k) & 1).sum()) for k, e in enumerate(EVENTS)}
     print(f"{len(act):,} transitions in {time.time() - t0:.0f}s -> {a.out}")
