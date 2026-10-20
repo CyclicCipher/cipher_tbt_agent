@@ -329,10 +329,16 @@ rule itself.
      with **gentle steps.**
    - **Retire each one once its surprise has halved.**
 
-**What it achieves** (K3, K4):
+3. **Read the model out through a slow copy during sleep,** an exponential average of the weights (d = 0.998) (K5e, K6).
+   - It removes the swings of half-learned rules and makes the gains monotone: the cortex consolidating during sleep.
+   - It must not be used while the network is still forming from scratch: there it lags badly (M7).
+
+**What it achieves** (K3, K4, K6):
 - a new rule (`button_off`) from **one** refutation: 0.86 on unseen layouts, stable;
 - from self-found refutations with no labels (K4): 0.00 → 0.89, while theft improves from 0.68 to 0.89 and nothing
-  learned before is lost.
+  learned before is lost;
+- **the best model** (K6: J2's wake + sleep + slow read-out): theft 0.68 → 0.87 and button_off 0 → 0.79, rising
+  monotonically; burns and trapped villagers kept or improved; frequent rules ≥ 0.96.
 
 Online SGD needed ~10³ updates and ~10⁴ instances per rule.
 

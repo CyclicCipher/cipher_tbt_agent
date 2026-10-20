@@ -34,6 +34,7 @@ def main():
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--probe-every", type=int, default=25)
     p.add_argument("--uniform", action="store_true")
+    p.add_argument("--ema", type=float, default=0.0, help="evaluate a slow EMA copy of the weights (0 = off)")
     p.add_argument("--out", required=True)
     p.add_argument("--data", default="runs/data")
     a = p.parse_args()
@@ -65,11 +66,15 @@ def main():
     s0 = dict(zip(open_rows.tolist(), s[hot].tolist()))
     prog = {kd: 0.0 for kd in kinds}
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
+    slow = None
+    if a.ema:
+        import copy
+        slow = copy.deepcopy(model)
     log = open(a.out, "w")
     print(f"{len(open_rows)} open refutations in {len(kinds)} kinds (>= 4 rows); pool {len(pool_rows)}", flush=True)
     for u in range(a.updates + 1):
         if u % 50 == 0:
-            r = evaluate(model, ev, by_event, dev)
+            r = evaluate(slow if slow is not None else model, ev, by_event, dev)
             top = sorted(prog, key=lambda kd: -prog[kd])[:6]
             row = dict(update=u, acc={e: r[e]["acc"] for e in RULES}, changed_acc=r["_overall"]["changed_acc"],
                        unchanged_acc=r["_overall"]["unchanged_acc"], bits=r["_overall"]["bits_per_transition"],
@@ -98,6 +103,10 @@ def main():
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
+        if slow is not None:
+            with torch.no_grad():
+                for ps, pf in zip(slow.parameters(), model.parameters()):
+                    ps.mul_(a.ema).add_(pf.detach(), alpha=1 - a.ema)
         st = tot[:len(rrows)].cpu().numpy()
         for kd, r_, sv in zip(pick, rrows, st):                       # retire when explained
             if sv < 0.5 * s0[int(r_)] and r_ in reh[kd]:

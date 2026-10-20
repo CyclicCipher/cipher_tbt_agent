@@ -35,6 +35,7 @@ def main():
     p.add_argument("--time-limit", type=float, default=285.0)
     p.add_argument("--focus", type=int, default=2)
     p.add_argument("--data", default="runs/data")
+    p.add_argument("--ema", type=float, default=0.0, help="evaluate a slow EMA copy of the weights (0 = off)")
     p.add_argument("--probe", action="store_true", help="M6: kinds chosen by generalization to their unrehearsed half")
     p.add_argument("--around-sleep", type=int, default=0, help="evaluate before and after every n-th sleep (0 = off)")
     a = p.parse_args()
@@ -49,6 +50,10 @@ def main():
     ev_counts = np.stack([((train["events"] >> k) & 1).reshape(-1, L).sum(1) for k in range(len(EVENTS))], 1).cumsum(0)
     model = WorldModel(128, 4, 4, pos="local", persist=5.0, radius=1).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
+    slow = None
+    if a.ema:                                         # the slow "cortex": an EMA of the weights, read out, never trained
+        import copy
+        slow = copy.deepcopy(model)
     json.dump(dict(vars(a), d=128, layers=4, heads=4, pos="local", persist=5.0, radius=1),
               open(os.path.join(a.out, "config.json"), "w"), indent=1)
     log = open(os.path.join(a.out, "log.jsonl"), "w")
@@ -67,10 +72,19 @@ def main():
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
+        if slow is not None:
+            with torch.no_grad():
+                for ps, pf in zip(slow.parameters(), model.parameters()):
+                    ps.mul_(a.ema).add_(pf.detach(), alpha=1 - a.ema)
         return tot.cpu().numpy()
 
     def record(s, tag):
-        r = evaluate(model, ev, by_event, dev)
+        r = evaluate(slow if slow is not None else model, ev, by_event, dev)
+        if slow is not None:
+            rf = evaluate(model, ev, by_event, dev)
+            r["_fast"] = {e: rf[e]["acc"] for e in ("theft", "interact_full", "push", "button_off", "robot_burn",
+                                                     "deliver", "mined")}
+            r["_fast"]["changed_acc"] = rf["_overall"]["changed_acc"]
         for k, e in enumerate(EVENTS):
             if e in r:
                 r[e]["seen"] = int(ev_counts[s - 1, k]) if s > 0 else 0

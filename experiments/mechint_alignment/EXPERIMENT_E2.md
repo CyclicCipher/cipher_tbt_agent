@@ -54,6 +54,12 @@ number?
    Choosing kinds uniformly does as well at the end as the probe-progress bandit; the bandit is only faster early.
    - *From scratch* (K5: plain wake + this sleep, ~250 s): button_off 0 → 0.71 and interact_full → 0.89 are gained, but
      theft ends 0.58, after peaking at 0.81 (J2: 0.68).
+6b. **A slow read-out completes the sleep** (K5e, K6). Read out an exponential average of the weights (d = 0.998).
+   - **During sleep on a mature model,** the swings vanish and the improvement is monotone.
+   - **The best model of the session** (K6: J2's wake + label-free sleep + slow read-out):
+     - theft 0.68 → 0.87, button_off 0 → 0.79, trapped_hurt 0.40 → 0.48;
+     - robot_burn kept at 0.34; every frequent rule ≥ 0.96.
+   - **During training from scratch, the slow copy lags badly** (M7) and is worse than the fast one.
 7. **Rules whose features are missing are not learned by any rehearsal here.** push needs reasoning two cells away;
    robot_burn needs the global token to know what the robot stepped on. Push reached 0.51 once (M5, just after a
    sleep).
@@ -885,3 +891,72 @@ accuracy, sleep updates 0 → 1,000):
 - **Against J2 at similar compute** (~250 s against 273 s): it gains button_off and interact_full, and loses on theft,
   robot_burn and trapped_hurt. J2's in-stream buffer is better for those mid-frequency rules.
 - **Theft's swings** (0.58–0.81 within one sleep) show the sleep itself is not yet stable for a half-learned rule.
+
+### Arm M7 and K5e, pre-registered: a slow "cortex" read out as an EMA of the weights
+
+**The idea.** In the stream, sleep raises the rare rules and the next waking stretch erodes them; even within one
+sleep, theft swings 0.58–0.81. Complementary-learning-systems theory says the cortex integrates slowly over both phases.
+- The simplest form is a slow copy of the network: weights_slow ← d · weights_slow + (1 − d) · weights_fast after
+  every update.
+- It is **read out, never trained.** The training is unchanged.
+- d = 0.998, a horizon of ~500 updates, spanning a wake stretch plus a sleep.
+
+| arm | configuration | what is read out |
+|---|---|---|
+| **M7** | M5's configuration (re-scored sleeps, uniform kinds), evaluated before and after every second sleep | the slow copy, plus the fast model for comparison |
+| **K5e** | K5 (I + label-free sleep) | the slow copy |
+
+**Prediction P24:**
+- M7's slow copy has pre/post-sleep jumps in changed-entry accuracy ≤ 0.03, against M5b's 0.12–0.18;
+- at the end, its theft ≥ 0.6 and interact_full ≥ 0.8;
+- K5e's theft no longer swings: max − min over the last 600 sleep updates ≤ 0.1 (K5: 0.23).
+
+**Results.**
+
+**M7: refuted.** The slow copy removes the oscillation but lags far behind a network still forming.
+
+| update | changed acc, pre → post | theft, pre → post |
+|---|---|---|
+| 1200 | 0.336 → 0.372 | 0.09 → 0.13 |
+| 2000 | 0.347 → 0.388 | 0.25 → 0.24 |
+| 2400 | 0.397 → 0.413 | 0.40 → 0.44 |
+
+- Jumps ≤ 0.04: that part holds.
+- At the end, slow against fast: theft 0.44 against 0.59, interact_full **0.04** against 0.83.
+- The fast numbers reproduce M5 exactly, so training is deterministic.
+
+**K5e: confirmed.** In a mature model's sleep, the slow copy is what was missing.
+- **theft climbs steadily** 0.51 → 0.64 → 0.78 → 0.78 → 0.82 → **0.83** (every 200 updates). Its range over the last
+  600 updates is 0.06, against 0.25 for the fast weights.
+- button_off 0 → **0.64** (rising), interact_full 0.82.
+- move, turn, mined and deliver ≥ 0.98; unchanged-entry accuracy 0.996.
+
+**The slow read-out harms while the network is forming (M7) and stabilizes once it has formed (K5e):** the cortex
+consolidates during sleep.
+
+### Arm K6, pre-registered: the best wake (J2) + sleep with the slow read-out
+
+**Configuration:** J2's model, then K4's label-free sleep (uniform kinds, 1,000 updates), read out through the slow copy
+(0.998).
+
+**Prediction P25:**
+- theft ≥ 0.8, button_off ≥ 0.6, interact_full ≥ 0.6;
+- robot_burn ≥ 0.3 and trapped_hurt ≥ 0.4 (J2's levels kept);
+- move, turn, mined and deliver ≥ 0.95;
+- theft's range over the last 600 updates ≤ 0.1.
+
+**K6 result: P25 confirmed except interact_full.** The best world model of the session.
+
+| rule | J2 | 200 | 400 | 600 | 800 | **1000** |
+|---|---|---|---|---|---|---|
+| theft | 0.68 | 0.76 | 0.82 | 0.85 | 0.85 | **0.87** |
+| button_off | 0.00 | 0.00 | 0.18 | 0.57 | 0.71 | **0.79** |
+| trapped_hurt | 0.40 | 0.42 | 0.45 | 0.45 | 0.47 | **0.48** |
+| robot_burn | 0.34 | 0.33 | 0.33 | 0.33 | 0.34 | 0.34 |
+| interact_full | 0.56 | 0.57 | 0.51 | 0.55 | 0.56 | 0.53 |
+| push | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| move / turn / mined / deliver / mine_work | ≥ 0.96 | ≥ 0.97 throughout | | | | |
+
+- Unchanged-entry accuracy 0.996–0.997. Theft's range over the last 600 updates is 0.05.
+- **Every rule ends at or above J2's level** except interact_full (−0.03) and push (still 0).
+- **The trend is monotone:** consolidation without forgetting.
