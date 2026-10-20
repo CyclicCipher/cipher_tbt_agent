@@ -18,8 +18,8 @@ EVAL_SEEDS = [10**9 + i for i in range(256)]
 PROBE_SEEDS = [2 * 10**9 + i for i in range(64)]
 
 
-def run_episodes(seeds, actor, collect=False):
-    envs = [Village(s) for s in seeds]
+def run_episodes(seeds, actor, collect=False, make=Village):
+    envs = [make(s) for s in seeds]
     n = len(envs)
     cells = np.zeros((n, N * N, len(CELL_VOCAB)), np.uint8)
     glob = np.zeros((n, len(GLOBAL_VOCAB)), np.uint8)
@@ -82,10 +82,10 @@ def summarize(eps):
 
 
 class Roller:
-    def __init__(self, n, length, seed0, dev):
+    def __init__(self, n, length, seed0, dev, make=Village):
         self.n, self.length, self.dev = n, length, dev
         self.next_seed = seed0
-        self.envs = [Village(self._seed()) for _ in range(n)]
+        self.envs = [make(self._seed()) for _ in range(n)]
         self.cells = np.zeros((n, N * N, len(CELL_VOCAB)), np.uint8)
         self.glob = np.zeros((n, len(GLOBAL_VOCAB)), np.uint8)
         for k, e in enumerate(self.envs):
@@ -110,6 +110,7 @@ class Roller:
         done = np.zeros((L, n), np.float32)
         act = torch.zeros((L, n), dtype=torch.long, device=dev)
         logp_all, val = None, torch.zeros((L, n), device=dev)
+        nxt_cells, nxt_glob = np.zeros_like(cells), np.zeros_like(glob)   # the obs right after each step (pre-reset)
         finished, t_env, t_net = [], 0.0, 0.0
         for t in range(L):
             cells[t], glob[t] = self.cells, self.glob
@@ -127,6 +128,7 @@ class Roller:
             t_net += t1 - t0
             for k, e in enumerate(self.envs):
                 r, d = e.step(int(a[k]))
+                e.obs(nxt_cells[t, k], nxt_glob[t, k])
                 rew[t, k], done[t, k] = r, d
                 self.ep_ret[k] += r
                 if d:
@@ -137,5 +139,5 @@ class Roller:
             t_env += time.time() - t1
         with amp(dev):
             _, v_last = net(torch.from_numpy(self.cells).to(dev), torch.from_numpy(self.glob).to(dev))
-        return dict(cells=cells, glob=glob, rew=rew, done=done, act=act, logp_all=logp_all, val=val,
+        return dict(cells=cells, glob=glob, nxt_cells=nxt_cells, nxt_glob=nxt_glob, rew=rew, done=done, act=act, logp_all=logp_all, val=val,
                     v_last=v_last, finished=finished, t_env=t_env, t_net=t_net)

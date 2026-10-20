@@ -1,0 +1,19 @@
+{
+ "out": "runs/e2/M5b_rescore_watch",
+ "lr": 0.0005,
+ "wake_decay": 1.0,
+ "sleep_every": 200,
+ "sleep_updates": 100,
+ "sleep_lr": 0.0001,
+ "score": 20000,
+ "time_limit": 285.0,
+ "focus": 2,
+ "data": "runs/data",
+ "around_sleep": 2,
+ "d": 128,
+ "layers": 4,
+ "heads": 4,
+ "pos": "local",
+ "persist": 5.0,
+ "radius": 1
+}

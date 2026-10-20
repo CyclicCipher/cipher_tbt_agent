@@ -27,22 +27,33 @@ it makes the project possible "at least in principle".
 | `info.py` | the information measures |
 | `ppo.py`, `analyze_e1.py`, `distill_e1.py` | E1's trainer, post-hoc analysis, and the distillation (M5) |
 | `test_village.py` | the simulator's mechanics tests |
+| `EXPERIMENT_E2.md` | E2: how many refutations a world model needs per rule, across 26 learning-rule variants (summary at the top) |
+| `EXPERIMENT_E3.md` | E3: PPO against PPO plus the world-model loss on a small world (no speed-up at tiny scale) |
+| `transitions.py` | labelled transition data for E2: which rule fired, which entries it determines |
+| `worldmodel.py` | the world model (position: absolute, relative or local; persistence prior) |
+| `e2_world.py` | E2's online trainer: the learning-rule variants, evaluation per rule, open-questions and rumination buffers |
+| `e2_fewshot.py`, `e2_fewshot2.py` | arms K–K3: learning a new rule from k refutations; retirement and interleaving |
+| `e2_sleep.py`, `e2_sleep2.py`, `e2_wakesleep.py` | the sleep variants: in-stream (M–M4), label-free on a trained model (K4), re-scored in-stream (M5, M6) |
+| `e2_report.py`, `e2_plot.py`, `e2_plot_k.py` | per-rule tables and learning-curve figures (`runs/e2/*.png`) |
+| `agentnet.py`, `e3_aux.py` | E3: one trunk with policy, value and world-model heads; PPO with the auxiliary loss |
 | `WORLD_DESIGN.md` | the test world "Village" (draft): resources, objects, agents, actions, interactions, task reward, the causal log and value dimensions, the nine dilemmas, the three training regimes and misalignment variants, the display, the model |
 
-## Where it stands (2026-10-20, night)
+## Where it stands (2026-10-20, end of the day)
 
-- The essay is read and noted; the goals are written, with a **scope of claims** (`GOALS.md`).
-- **The user decided:**
-  - GPU jobs on their side;
+- **Decided by the user:**
+  - GPU jobs on their side; runs ≤ 5 min;
   - a grid world with a full map;
   - the core dilemmas first;
   - robot health with pain;
-  - a provision value, at the approved rate of one apple = one gold;
-  - **PPO first, diagnosed for training efficiency.**
-- **Built: Village v0, and E1's PPO trainer, analysis and distillation.** All checked on the CPU (tests and pipeline
-  smoke runs).
-- **E1 is pre-registered and NOT run.** The user asked to pause before any GPU run, so the next step, the 60-second
-  benchmark, is theirs to start. Commands are in `EXPERIMENT_E1.md`.
-- **A risk found on the CPU:** random play delivers only one gold nugget per 4,348 steps, and steals before it mines.
-  - So E1 starts with a 2M-step pilot. The gate: ≥ 1 gold delivered per held-out episode, or else switch to
-    bump-to-interact as E1b.
+  - a provision value (1 apple = 1 gold).
+  - **Full-scale PPO withdrawn** ("an hour isn't acceptable"). The new training method must be ≥ 12× faster than PPO.
+- **The user's principle:** learn from refuted predictions, and work out why. Developed on Village's world model
+  (`TRAINING_METHOD.md`, last section; `EXPERIMENT_E2.md`, summary).
+  - **What works: "wake, then sleep".**
+    - Wake: online learning with three general priors (translation invariance, persistence, locality).
+    - Sleep: rehearse self-found refutations evenly by kind until explained, interleaved, with gentle steps.
+    - This learns a new rule from **one** refutation and adds rules without forgetting.
+  - **Open:** sleep *during* the stream (six variants failed: sleep and wake fight); features for multi-step rules;
+    connecting the world model to acting.
+- **E1** (PPO's efficiency, full scale): code kept, the run withdrawn. **E3** (PPO + world-model loss, tiny scale):
+  no speed-up.

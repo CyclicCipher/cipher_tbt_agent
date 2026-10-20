@@ -307,3 +307,55 @@ the content. Our built-in part plays evolution's role, so it should be kept mini
 
 **Built in:** the error signal, competition, and testing by acting. **Learned:** the features and, later, the edit
 rule itself.
+
+## The learning rule developed so far (2026-10-20, the user away ~6 h; evidence in EXPERIMENT_E2.md and E3)
+
+**What was built.**
+- A world model of Village. It predicts the next observation from the observation and the action; every surprising
+  entry is a refutation.
+- Learning curves per rule (16 rule types, checked on held-out layouts) under 26 learning-rule variants, each run
+  ≤ 5 min.
+
+**The rule that works so far: "wake, then sleep".**
+1. **Wake:** learn online from experience, with three general priors that each roughly halve the instances a rule needs:
+   - **translation-equivariant position:** a rule seen at one place holds everywhere;
+   - **persistence:** predict "nothing changes" unless something acts. This stops the ~200:1 confirmations drowning the
+     refutations;
+   - **locality:** attend to the neighbourhood first; physics is local.
+2. **Sleep:** score experience with the current model.
+   - Take what it still cannot explain (the top 10 % surprise), grouped by **kind**: which property changed, where
+     relative to the robot. No labels are needed.
+   - Rehearse those refutations **evenly across kinds**, interleaved with past refutations and ordinary experience,
+     with **gentle steps.**
+   - **Retire each one once its surprise has halved.**
+
+**What it achieves** (K3, K4):
+- a new rule (`button_off`) from **one** refutation: 0.86 on unseen layouts, stable;
+- from self-found refutations with no labels (K4): 0.00 → 0.89, while theft improves from 0.68 to 0.89 and nothing
+  learned before is lost.
+
+Online SGD needed ~10³ updates and ~10⁴ instances per rule.
+
+**How it maps onto the user's principle:**
+- **"Refuted by the world":** a prediction made with the persistence prior, so each change is a clear, attributable
+  surprise.
+- **"Figure out why" is concentrated rehearsal of the refutation until its prediction is right, then stop.**
+  - Rehearsing past that point is **rationalization, measured:** held-out accuracy 0.86 → 0.18 while the case itself
+    stays fitted.
+  - The "explanation that can lose" is checked on held-out layouts, and on a kind's unrehearsed half (K4, M6).
+- **"What to do instead": not built yet** (see below).
+
+**Open problems, in order:**
+1. **Sleep inside the stream.**
+   - Six in-stream variants (M–M6) failed the same way: each sleep improves the rare rules, the next waking stretch
+     erodes them, and sleep itself sometimes damages theft.
+   - A likely cure is the brain's: keep the main network learning *slowly* all the time, and let a fast store hold the
+     refutations (complementary learning systems).
+   - That is close to the paused hippocampus line, but only as a store of rows, not a new architecture.
+2. **Features for multi-step rules.** push (two cells away) and robot_burn (the global token must know what the robot
+   stepped on) were not learned by any rehearsal. Rehearsal turns *existing* features into rules quickly; it does not
+   build features faster.
+3. **Acting.** E3: at a tiny scale (d = 64, ~0.5M steps), adding the world-model loss to PPO did *not* speed it up.
+   Neither arm learned the job in that budget.
+   - The next test of the 12× bar is a planner or value learner on top of a world model trained by wake-then-sleep,
+     against PPO on a world small enough for PPO to finish within minutes.

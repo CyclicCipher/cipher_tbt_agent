@@ -1,0 +1,18 @@
+{
+ "out": "runs/e2/M2_prequential",
+ "d": 128,
+ "layers": 4,
+ "heads": 4,
+ "lr": 0.0005,
+ "focus": 2,
+ "sleep_every": 200,
+ "sleep_updates": 100,
+ "sleep_lr": 0.0001,
+ "time_limit": 285.0,
+ "prequential": true,
+ "stream_mix": 12,
+ "data": "runs/data",
+ "pos": "local",
+ "persist": 5.0,
+ "radius": 1
+}
