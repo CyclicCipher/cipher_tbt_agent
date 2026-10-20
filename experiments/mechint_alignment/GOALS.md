@@ -149,14 +149,13 @@ how often this question comes up in debates.
 
 - Pre-register every experiment; label exploratory work.
 - Never re-run an unchanged experiment.
-- Runs on this machine take ≤ 2 minutes. Longer training is a GPU job for the user (to be decided for G2).
+- Runs on this machine take ≤ 2 minutes. G2's model training is a GPU job on the user's side (decided 2026-10-20).
 - 16-bit wherever accurate.
 - Conclusions are drawn across diverse situations, not from one.
 - Commits go to `exp/mdl-vs-ntp`.
 
-## Decisions needed from the user before building
+## Decisions (the user)
 
-1. **The training budget for G2:** RL-trained agents in a world may need more than 2-minute runs. Short runs here, or
-   GPU jobs on the user's side?
-2. **The world family for G1:** a grid world with other agents and resources is my default proposal. To be designed
-   in a design document first.
+- **2026-10-20: G2's models are trained as GPU jobs on the user's side.** The 2-minute rule does not limit them.
+- **2026-10-20: G1 is a grid world.** The design draft is `WORLD_DESIGN.md` ("Village"), with open questions at its
+  end.

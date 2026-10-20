@@ -18,12 +18,12 @@ it makes the project possible "at least in principle".
 |---|---|
 | `SOURCE_ALREADY_CLEAN.md` | what the essay claims, its definitions, every procedure and number it reports, a skeptic's view, and which claims we can test here |
 | `GOALS.md` | the goals G1–G7 as a dependency graph (not an ordered list), each with requirements, success criteria and open design decisions |
+| `WORLD_DESIGN.md` | the test world "Village" (draft): resources, objects, agents, actions, interactions, task reward, the causal log and value dimensions, the nine dilemmas, the three training regimes and misalignment variants, the display, the model |
 
 ## Where it stands (2026-10-20)
 
 - The essay is read and noted, and the goals are written.
-- **Nothing designed or run yet.**
-- Two decisions for the user are open (`GOALS.md`, end):
-  - the training budget for the world's models;
-  - the world family.
-- **The next step is a design document for the test world (G1)** and the definitions it grounds (G7).
+- **The user decided:** GPU jobs on their side for training, and a grid world.
+- **`WORLD_DESIGN.md` (draft) is up for the user's review,** with three open questions at its end: observability, which
+  dilemmas first, and robot health.
+- Nothing built or run yet.
