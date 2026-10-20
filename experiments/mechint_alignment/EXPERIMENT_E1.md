@@ -3,6 +3,11 @@
 **Status:** pre-registered 2026-10-20. The code is built and checked on the CPU. **Not run on the GPU:** the user
 asked to pause before any GPU run, so even the 60-second throughput benchmark waits for their go.
 
+**Update (the user, 2026-10-20): the full-scale run is withdrawn.** "An hour isn't acceptable, let alone 6."
+- The code stays.
+- PPO is kept as the control only where it is cheap: small worlds, and the early return levels. See
+  `TRAINING_METHOD.md`, "Brainstorm 2".
+
 ## Question
 
 How efficient is plain PPO at training the Village robot on the task reward alone? This is G2's first model, the
