@@ -1,0 +1,11 @@
+{"step": 200, "sec": 42, "loss": 0.7813, "code_acc": 0.6188}
+{"step": 400, "sec": 82, "loss": 0.6581, "code_acc": 0.6901}
+{"step": 600, "sec": 121, "loss": 0.6565, "code_acc": 0.697}
+{"step": 800, "sec": 161, "loss": 0.5917, "code_acc": 0.7232}
+{"step": 1000, "sec": 200, "loss": 0.5612, "code_acc": 0.7367}
+{"step": 1200, "sec": 239, "loss": 0.5379, "code_acc": 0.7467}
+{"step": 1400, "sec": 277, "loss": 0.5267, "code_acc": 0.7536}
+{"step": 1600, "sec": 316, "loss": 0.4971, "code_acc": 0.7606}
+{"step": 1800, "sec": 355, "loss": 0.4491, "code_acc": 0.7846}
+{"step": 2000, "sec": 393, "loss": 0.4039, "code_acc": 0.806}
+{"step": 2138, "sec": 420, "loss": 0.389, "code_acc": 0.8118}

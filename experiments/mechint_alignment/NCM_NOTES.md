@@ -71,3 +71,29 @@ in K levels, and compare against H one-step world-model passes:
 - the plans chosen.
 
 Runs under 10 minutes.
+
+## Related: a closed "physical AI" model (Accelerated Understanding, 2026)
+
+The user asked about a closed neural-operator post. The source is `acceleratedunderstanding.com/longform` (read
+2026-10-21; the company was co-founded by Anima Anandkumar; launched August 2026; `au-physics-v1` on OpenRouter). It
+is a marketing overview; the architecture is not described.
+
+**What it claims:**
+- one multi-physics model predicting how a 4D (3D + time) physical state evolves, outperforming single-task models
+  at equal size;
+- **resolution invariance** at training and inference, used for coarse-to-fine design;
+- **one-shot full rollouts**, because step-by-step "errors compound";
+- training scored against **adherence to physical laws**, giving continuous scores and gradients for optimization;
+- engineers set constraints and goals, and the model hill-climbs toward them;
+- up to 1T parameters (elsewhere "35T"; not reconciled), and contexts of 1T points in training and 5T at inference.
+
+**Not disclosed:** architecture, benchmarks, error metrics, comparisons with CFD or FEA, long-rollout stability.
+
+**Our reading:**
+- **Resolution invariance and physics-residual scoring are useful.** The residual is a natural veto node in the
+  preference graph.
+- **Gradient hill-climbing against a learned surrogate is the maximizer's setting.** OBJECTIVE_LEARNINGS L1: an
+  optimizer finds the surrogate's errors (here: designs that only look good to the model). It needs trust regions
+  near the training data and exact verification (FEA, CFD); the page itself says results still need checking.
+- **"One-shot rollouts avoid compounding" depends on per-step error.** In E11 a near-perfect one-step model
+  compounded mildly (95.8% → 89.2% exact from 8 to 32 steps) and beat a one-shot model by far.

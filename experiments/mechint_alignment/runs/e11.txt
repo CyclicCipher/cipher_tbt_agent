@@ -1,0 +1,59 @@
+=== tokenizer --minutes 3
+{"step": 200, "sec": 28, "loss": 1.2655, "rec_ce": 0.8466, "cell_acc": 0.99667, "exact": 0.3853}
+{"step": 400, "sec": 60, "loss": 3.0179, "rec_ce": 1.0631, "cell_acc": 0.99281, "exact": 0.0127}
+{"step": 600, "sec": 94, "loss": 1.5892, "rec_ce": 1.0853, "cell_acc": 0.99543, "exact": 0.1094}
+{"step": 800, "sec": 129, "loss": 1.7537, "rec_ce": 1.1022, "cell_acc": 0.99532, "exact": 0.1445}
+{"step": 1000, "sec": 166, "loss": 1.7853, "rec_ce": 1.1044, "cell_acc": 0.99601, "exact": 0.2412}
+{"step": 1050, "sec": 180, "loss": 0.6139, "rec_ce": 0.0189, "cell_acc": 0.99641, "exact": 0.2993}
+=== generator --horizon 8 --minutes 7
+{"step": 200, "sec": 42, "loss": 0.7813, "code_acc": 0.6188}
+{"step": 400, "sec": 82, "loss": 0.6581, "code_acc": 0.6901}
+{"step": 600, "sec": 121, "loss": 0.6565, "code_acc": 0.697}
+{"step": 800, "sec": 161, "loss": 0.5917, "code_acc": 0.7232}
+{"step": 1000, "sec": 200, "loss": 0.5612, "code_acc": 0.7367}
+{"step": 1200, "sec": 239, "loss": 0.5379, "code_acc": 0.7467}
+{"step": 1400, "sec": 277, "loss": 0.5267, "code_acc": 0.7536}
+{"step": 1600, "sec": 316, "loss": 0.4971, "code_acc": 0.7606}
+{"step": 1800, "sec": 355, "loss": 0.4491, "code_acc": 0.7846}
+{"step": 2000, "sec": 393, "loss": 0.4039, "code_acc": 0.806}
+{"step": 2138, "sec": 420, "loss": 0.389, "code_acc": 0.8118}
+=== generator --horizon 32 --minutes 7
+{"step": 200, "sec": 44, "loss": 0.7851, "code_acc": 0.6193}
+{"step": 400, "sec": 85, "loss": 0.7124, "code_acc": 0.6612}
+{"step": 600, "sec": 126, "loss": 0.6785, "code_acc": 0.6818}
+{"step": 800, "sec": 167, "loss": 0.61, "code_acc": 0.7125}
+{"step": 1000, "sec": 208, "loss": 0.5782, "code_acc": 0.7254}
+{"step": 1200, "sec": 249, "loss": 0.5703, "code_acc": 0.735}
+{"step": 1400, "sec": 290, "loss": 0.5734, "code_acc": 0.7337}
+{"step": 1600, "sec": 331, "loss": 0.5296, "code_acc": 0.7543}
+{"step": 1800, "sec": 372, "loss": 0.4977, "code_acc": 0.7713}
+{"step": 2000, "sec": 414, "loss": 0.4861, "code_acc": 0.7737}
+{"step": 2029, "sec": 420, "loss": 0.4551, "code_acc": 0.7804}
+=== stepmodel --minutes 7
+{"step": 200, "sec": 20, "loss": 0.00623}
+{"step": 400, "sec": 39, "loss": 0.00555}
+{"step": 600, "sec": 58, "loss": 0.00527}
+{"step": 800, "sec": 77, "loss": 0.00438}
+{"step": 1000, "sec": 95, "loss": 0.00604}
+{"step": 1200, "sec": 114, "loss": 0.00356}
+{"step": 1400, "sec": 132, "loss": 0.00017}
+{"step": 1600, "sec": 150, "loss": 9e-05}
+{"step": 1800, "sec": 171, "loss": 4e-05}
+{"step": 2000, "sec": 192, "loss": 2e-05}
+{"step": 2200, "sec": 212, "loss": 9e-05}
+{"step": 2400, "sec": 231, "loss": 0.00037}
+{"step": 2600, "sec": 250, "loss": 0.00044}
+{"step": 2800, "sec": 269, "loss": 3e-05}
+{"step": 3000, "sec": 287, "loss": 1e-05}
+{"step": 3200, "sec": 306, "loss": 0.00154}
+{"step": 3400, "sec": 325, "loss": 2e-05}
+{"step": 3600, "sec": 343, "loss": 0.00091}
+{"step": 3800, "sec": 362, "loss": 1e-05}
+{"step": 4000, "sec": 380, "loss": 2e-05}
+{"step": 4200, "sec": 398, "loss": 0.00064}
+{"step": 4400, "sec": 417, "loss": 8e-05}
+{"step": 4435, "sec": 420, "loss": 7e-05}
+=== eval --horizon 8
+{"horizon": 8, "n": 2048, "ncm_params": 1837792, "tokenizer_params": 2478912, "step_params": 2679581, "ncm_passes": 10, "step_passes": 8, "recon_exact": 0.30078125, "copy": {"cell_acc": 0.9882214665412903, "exact": 0.03515625, "changed_acc": 0.0, "agent_acc": 0.07568359375}, "ncm": {"cell_acc": 0.9762535691261292, "exact": 0.0009765625, "changed_acc": 0.1404399275779724, "agent_acc": 0.03564453125}, "step": {"cell_acc": 0.9997358918190002, "exact": 0.9580078125, "changed_acc": 0.9777918457984924, "agent_acc": 0.95947265625}, "sec_ncm_b16": 0.09389339998597279, "sec_step_b16": 0.057301799999549985, "sec_ncm_b144": 0.7889584000222385, "sec_step_b144": 0.44106889999238774}
+=== eval --horizon 32
+{"horizon": 32, "n": 2048, "ncm_params": 1837792, "tokenizer_params": 2478912, "step_params": 2679581, "ncm_passes": 10, "step_passes": 32, "recon_exact": 0.296875, "copy": {"cell_acc": 0.9746766090393066, "exact": 0.00146484375, "changed_acc": 0.0, "agent_acc": 0.0419921875}, "ncm": {"cell_acc": 0.9243811368942261, "exact": 0.0, "changed_acc": 0.07850467413663864, "agent_acc": 0.0341796875}, "step": {"cell_acc": 0.99857497215271, "exact": 0.8916015625, "changed_acc": 0.9439252018928528, "agent_acc": 0.90966796875}, "sec_ncm_b16": 0.10693239999818616, "sec_step_b16": 0.24279309998382814, "sec_ncm_b144": 0.8552029000129551, "sec_step_b144": 1.7691923000093084}

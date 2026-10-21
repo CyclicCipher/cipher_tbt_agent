@@ -65,3 +65,43 @@ authors' code is left as it is.
     python e11_ncm.py stepmodel --minutes 7
     python e11_ncm.py eval --horizon 8
     python e11_ncm.py eval --horizon 32
+
+## Results (2026-10-21; `runs/e11.txt`, `runs/e11/*.jsonl`)
+
+**Training.**
+- **Tokenizer** (3 min, 1,050 steps): per-cell reconstruction 99.6–99.7% throughout, but whole-state exact reconstruction
+  is noisy and not converging (38.5% at step 200, 24% at step 1,000, 30% at the end).
+- **Generator:** code accuracy still climbing at the 7-minute limit (H = 8: 62% → 81%; H = 32: 62% → 78%).
+- **Step model:** loss 6e-3 → 7e-5 (near perfect).
+
+| | copy ("nothing changes") | **step model** (H passes) | **NCM** (10 passes) |
+|---|---|---|---|
+| **H = 8:** exact state | 3.5% | **95.8%** | 0.1% |
+| changed-cell accuracy | 0% | **97.8%** | 14.0% |
+| per-cell accuracy | 98.8% | **99.97%** | 97.6% (below copy) |
+| time for 144 futures | | **0.44 s** | 0.79 s |
+| **H = 32:** exact state | 0.1% | **89.2%** | 0.0% |
+| changed-cell accuracy | 0% | **94.4%** | 7.9% |
+| per-cell accuracy | 97.5% | **99.86%** | 92.4% (below copy) |
+| time for 144 futures | | 1.77 s | **0.86 s** |
+
+| # | verdict |
+|---|---|
+| N1 | **Half:** 99.6% per cell (≥ 99.5% confirmed), but whole-state exact reconstruction only 30% (≥ 80% refuted) |
+| N2 | **Confirmed:** at H = 32 NCM takes 0.48× the step model's time; at H = 8 it is 1.8× *slower*. The crossover lies between 8 and 32 steps (10 levels, each recomputing the prefix) |
+| N3 | **Confirmed, by far:** the step model is exact on 95.8% / 89.2% of futures, NCM on 0.1% / 0% |
+| N4 | **Refuted:** NCM gets 14% of the changed cells at H = 8 (predicted ≥ 50%), and its per-cell accuracy is *below* the copy baseline: it corrupts more unchanged cells than it predicts changes |
+
+**Reading.**
+- **The tokenizer is the bottleneck.** It reconstructs only 30% of held-out states exactly, so even a perfect
+  generator could be exact on at most ~30%. The paper's tokenizers reach 98.8–100%, with far longer training.
+- **At this budget, NCM has not learned the dynamics.** The speed advantage is real only for long horizons, as
+  predicted.
+- **The one-step model is a hard baseline here.** Its locality and persistence priors fit a local, deterministic world,
+  and it is near perfect after 7 minutes.
+- **Compounding error was mild:** 95.8% exact at 8 steps, 89.2% at 32. "One-shot rollout avoids compounding errors"
+  matters only when per-step error is large: approximate one-step models of continuous or chaotic physics, not this
+  world.
+- **Not tested:** NCM with a converged tokenizer. A fair test of its accuracy needs the tokenizer trained to ≥ 99%
+  exact first (chained ≤ 10-minute segments), then the generator. Also not tested: NCM's constraint-satisfaction
+  advantage, which a deterministic forward simulation does not exercise.
