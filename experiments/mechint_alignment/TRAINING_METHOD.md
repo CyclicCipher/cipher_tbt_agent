@@ -430,3 +430,95 @@ Online SGD needed ~10³ updates and ~10⁴ instances per rule.
   produce, added to the value's target.
   - Noise kinds never show progress; mastered kinds stop showing it.
   - At initialization the policy is near-uniform, so babbling comes for free.
+
+## Brainstorm 4 (2026-10-20 evening): principled foundations for R3 and the noisy TV
+
+The user: "while the RRR technique is interesting so far, I just don't feel like it's principled. There's gotta be some
+kind of mathematically derived approach... Likewise for the noisy TV problem. What quantities can we calculate/measure
+during training that would make a more principled solution?"
+
+### One framework: learning = sequential Bayesian inference = minimizing the prequential code length (MDL)
+
+- **The ideal learner** keeps a posterior over its weights, p(θ | data), and predicts with the posterior predictive.
+- **Its cumulative log-loss on data it had not yet trained on is a code length** (Rissanen; Barron, Rissanen & Yu 1998).
+  For a model with k effective parameters, the excess over the true process's entropy grows like (k/2)·log n. That
+  excess is exactly the information the learner gains about θ (Clarke & Barron 1990).
+- **The rate at which the excess is paid is the learning progress.** Its area is the epiplexity estimate (Finzi et al.
+  2026).
+
+Every R3 heuristic is an approximation to one quantity in this picture:
+
+| R3 heuristic | what it approximates | the measurable quantity |
+|---|---|---|
+| "figure out why": blame the cause | **Kalman credit assignment.** The online natural gradient *is* an extended Kalman filter on the weights (Ollivier 2018). Gain K = Σ Jᵀ (J Σ Jᵀ + R)⁻¹: the error moves the parameters that are both responsible (sensitivity J) and uncertain (posterior covariance Σ). Rescorla–Wagner competition and blocking fall out of it (Dayan & Kakade 2001; Kruschke 2008) | the posterior covariance Σ, or its inverse, the Fisher information F (diagonal or K-FAC), accumulated over experience |
+| "rehearse until explained" | a Bayesian update absorbs a datum's information **once**, fully, with the right step size. SGD's steps are too small, hence rehearsal | the Bayesian surprise of a datum: KL(posterior after ‖ before) ≈ ½ Δθᵀ F Δθ |
+| "retire, or you rationalize" | **rationalization = counting one datum many times**, as if it were many independent observations. The posterior overcommits to one case. *Measured:* the rehearsed case stays at 1.00 while held-out accuracy falls 0.86 → 0.18 | each datum's **effective count**. Prioritized replay is unbiased only with importance weights w_i = 1/(N·P(i)) (Schaul et al. 2016), which keep the count at one |
+| prioritize refutations | **variance-minimizing importance sampling:** sample each datum with probability ∝ its per-sample gradient norm, weight by the inverse. The fastest unbiased descent (Katharopoulos & Fleuret 2018) | per-sample gradient norms (cheap last-layer bound: ‖p − y‖·‖h‖) |
+| interleave old refutations; gentle steps | **Bayesian continual learning:** the old posterior is the new prior. Directions the old data pinned down (high precision) barely move (EWC: Kirkpatrick et al. 2017; online Laplace) | the Fisher / precision per parameter or direction |
+| the slow EMA copy | the **posterior mean.** Constant-rate SGD samples an approximate posterior; averaging its iterates estimates the mean (Mandt, Hoffman & Blei 2017) | none new; the averaging horizon should match the posterior's time scale |
+| "kinds" for learning progress | a crude way to average a noisy, per-datum information-gain estimate. **With an explicit uncertainty estimate, kinds are unnecessary** | as below |
+
+### The noisy TV: separate the two kinds of uncertainty
+
+**The decomposition.** Total predictive entropy splits exactly into two parts:
+
+  H[y | x] = E_θ H[y | x, θ] + I(y ; θ | x)
+
+- **E_θ H[y | x, θ] is aleatoric:** the noise every plausible model agrees on.
+- **I(y ; θ | x) is epistemic:** the expected information an outcome carries about the weights.
+
+**Raw prediction error** (surprise, the E6c control) measures the total, so a villager's random step pays forever.
+
+**Expected information gain**, the epistemic term, is the principled curiosity criterion:
+- Lindley 1956; MacKay 1992; BALD (Houlsby et al. 2011); VIME (Houthooft et al. 2016); Bayesian surprise (Itti & Baldi);
+  the epistemic term of expected free energy.
+- It is **zero for pure noise** once the noise's distribution is known.
+- **The subtlety E6a showed:** a random process is not unlearnable; its *distribution* is. E6a's highest learning progress
+  came from villager moves at the edge of the robot's window. But the total information a noise source can give is
+  bounded by its distribution's description, (k/2)·log n bits, so its rate falls like k/(2n). **Boredom with noise is
+  guaranteed and has a known rate**; raw error never decays.
+
+**How to estimate it.**
+- An **ensemble of heads with randomized prior functions** (Osband et al. 2018): disagreement = I(y ; θ | x), the BALD
+  estimate. Cheap with a shared trunk.
+- **Why randomized priors are needed:** the persistence prior makes every head predict "nothing changes" for actions
+  never tried, so the disagreement would be zero exactly where exploration is needed. A fixed random prior per head
+  guarantees disagreement where there is no data, and data removes it.
+- **Alternatives:** linearized Laplace, Jᵀ Σ J from the Fisher; or the realized information gain after the fact (our
+  learning progress, Schmidhuber's compression progress).
+  - Realized gain can only reward the past. Expected gain can choose an action **before** taking it, which is what
+    exploration needs.
+
+### The quantities to measure during training
+
+| quantity | formula | what it decides |
+|---|---|---|
+| surprise | −log p(y \| x) | the total, aleatoric + epistemic |
+| epistemic part | I(y ; θ \| x) = H[mean of heads] − mean H[head] | curiosity, immune to the noisy TV |
+| aleatoric part | mean H[head] | what to stop trying to learn |
+| Fisher / precision | E[∇log p ∇log pᵀ] (diagonal or K-FAC) | credit assignment and protection of old knowledge (natural-gradient / Kalman step) |
+| Bayesian surprise of an update | ½ Δθᵀ F Δθ | how much a datum actually taught |
+| per-sample gradient norm | ‖∇ℓ_i‖ | replay priority; with importance weights, unbiased |
+| effective count of a datum | Σ of its importance weights | the rationalization guard: it must stay ≈ 1 |
+| prequential code length and its area above the floor (epiplexity) | Σ_t −log p_t(y_t) on data not yet trained on | learning efficiency in bits; total structure learned |
+| gradient noise scale | tr Σ_g / ‖G‖² | batch size and step size (E1) |
+| held-out loss per kind | | the generalization check, "explanations that can lose" |
+
+### The principled replacement for R3 (not built)
+
+Bayesian online learning, information-gain-driven:
+1. Keep an approximate posterior over the weights: diagonal or K-FAC Fisher (Laplace), or an ensemble of heads with
+   randomized priors.
+2. Learn each datum with an approximate Bayesian update (online natural gradient / extended Kalman filter, with
+   process noise so old certainty can decay).
+3. Replay by gradient-norm importance sampling **with** importance weights, so each datum counts once.
+4. Act on value plus **expected information gain** about the weights (expected free energy), estimated by head
+   disagreement.
+5. Decide with the posterior mean.
+
+**Experiments to test it (each ≤ 5 min), in order:**
+1. **The noisy TV:** E6 with BALD-disagreement curiosity against learning progress and raw surprise. Measure time near
+   villagers, and whether the job's rules are discovered.
+2. **Rationalization:** arm K's one-shot setup with importance-weighted prioritized replay against plain rehearsal.
+   Measure held-out accuracy and the rehearsed case.
+3. **Credit assignment:** K-FAC / Kalman updates against Adam, on K (one-shot) and the E2 stream.
