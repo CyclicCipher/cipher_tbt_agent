@@ -1,0 +1,13 @@
+worlds: train 2048, test 64, held-out 64 (length 512)
+resumed from runs/e8/L_A/model.pt: 903s of training, 88 batches
+batch 90  914s  train prequential bits/step 9.03  prior sigma None
+batch 100  969s  train prequential bits/step 10.17  prior sigma None
+batch 110  1025s  train prequential bits/step 9.90  prior sigma None
+batch 120  1078s  train prequential bits/step 8.04  prior sigma None
+batch 130  1131s  train prequential bits/step 8.58  prior sigma None
+batch 140  1184s  train prequential bits/step 8.92  prior sigma None
+batch 150  1238s  train prequential bits/step 8.77  prior sigma None
+[end] test    adapt=True   bits early 18.05 late 4.56 mean 8.64  move 0.22->0.99  turn 0.46->1.00
+[end] test    adapt=False  bits early 19.23 late 28.28 mean 30.55  move 0.00->0.00  turn 0.33->0.45
+[end] heldout adapt=True   bits early 20.33 late 4.34 mean 8.65  move 0.23->0.99  turn 0.38->1.00
+[end] heldout adapt=False  bits early 21.38 late 28.20 mean 30.42  move 0.00->0.00  turn 0.24->0.37

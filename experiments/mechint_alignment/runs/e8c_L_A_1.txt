@@ -1,0 +1,10 @@
+worlds: train 2048, test 64, held-out 64 (length 512)
+resumed from runs/e8/L_A/model.pt: 420s of training, 0 batches
+batch 10  475s  train prequential bits/step 14.04  prior sigma None
+batch 20  530s  train prequential bits/step 13.45  prior sigma None
+batch 30  586s  train prequential bits/step 12.81  prior sigma None
+batch 40  642s  train prequential bits/step 11.01  prior sigma None
+batch 50  697s  train prequential bits/step 10.23  prior sigma None
+batch 60  752s  train prequential bits/step 9.14  prior sigma None
+batch 70  807s  train prequential bits/step 10.21  prior sigma None
+batch 80  860s  train prequential bits/step 9.15  prior sigma None

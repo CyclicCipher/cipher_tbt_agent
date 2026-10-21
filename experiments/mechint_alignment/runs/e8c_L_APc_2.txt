@@ -1,0 +1,12 @@
+worlds: train 2048, test 64, held-out 64 (length 512)
+resumed from runs/e8/L_APc/model.pt: 481s of training, 69 batches
+C:\Users\julia\GitHub\predictive-coding-agent\experiments\mechint_alignment\e8_hier.py:242: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\torch\csrc\autograd\generated\python_variable_methods.cpp:837.)
+  sig = float(torch.cat([v.flatten() for v in model.log_sigma.values()]).exp().mean()) if (a.prior_avg or a.em_sigma) else None
+batch 70  490s  train prequential bits/step 14.52  prior sigma 0.26268449425697327
+batch 80  564s  train prequential bits/step 13.57  prior sigma 0.26165568828582764
+batch 90  638s  train prequential bits/step 12.84  prior sigma 0.2609153687953949
+batch 100  710s  train prequential bits/step 13.98  prior sigma 0.2602844536304474
+batch 110  787s  train prequential bits/step 12.77  prior sigma 0.259695440530777
+batch 120  864s  train prequential bits/step 10.48  prior sigma 0.25907987356185913
+batch 130  943s  train prequential bits/step 11.57  prior sigma 0.25843527913093567

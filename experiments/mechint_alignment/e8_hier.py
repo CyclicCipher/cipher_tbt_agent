@@ -39,17 +39,30 @@ def world_index(z, length=128):
 
 class Runner:
     def __init__(self, model, data, dev, focus=2, chunk=8, lam0=10.0, clamp=0.1, prior_avg=False, samples=4,
-                 sample_chunks=4):
+                 sample_chunks=4, em_sigma=False, em_rate=0.2):
         self.m, self.z, self.dev, self.focus, self.chunk = model, data, dev, focus, chunk
         self.lam0, self.clamp = lam0, clamp
         self.prior_avg, self.samples, self.sample_chunks = prior_avg, samples, sample_chunks
+        self.em_sigma, self.em_rate = em_sigma, em_rate
         self.Fbar = {k: torch.full_like(v, 1e-3) for k, v in model.mu.items()}
 
     def tensors(self, rows):
         return [torch.from_numpy(self.z[x][rows]).to(self.dev) for x in ("obs", "gob", "act", "nxt", "gnx")]
 
     def prior_prec(self, k):
-        return torch.exp(-2 * self.m.log_sigma[k]) if self.prior_avg else self.lam0
+        return torch.exp(-2 * self.m.log_sigma[k]) if (self.prior_avg or self.em_sigma) else self.lam0
+
+    @torch.no_grad()
+    def em_update(self, fast, n_total):
+        """Empirical Bayes in closed form (the EM M-step of a Gaussian hierarchical prior): the prior variance is the
+        between-world variance of the adapted parameters plus their mean remaining posterior variance,
+            sigma^2 <- (1 - rate) sigma^2 + rate * [ mean_w (phi_w - mu)^2 + 1 / (1/sigma^2 + n_total Fbar) ]."""
+        for k, v in fast.items():
+            sig2 = torch.exp(2 * self.m.log_sigma[k])
+            post = 1.0 / (1.0 / sig2 + n_total * self.Fbar[k])
+            est = ((v.detach() - self.m.mu[k]) ** 2).mean(0) + post
+            new = ((1 - self.em_rate) * sig2 + self.em_rate * est).clamp(1e-6, 1.0)
+            self.m.log_sigma[k].copy_(0.5 * torch.log(new))
 
     def run(self, worlds, adapt, train=False, scorer=None, opt=None, outer_every=16):
         """One pass over a batch of worlds. Returns the mean prequential bits per step."""
@@ -119,6 +132,8 @@ class Runner:
                 opt.step()
                 opt.zero_grad(set_to_none=True)
                 pending = False
+        if train and self.em_sigma and adapt:
+            self.em_update(fast, n_chunks * C)
         return bits / n_chunks
 
     def evaluate(self, worlds_all, adapt, batch=32):
@@ -148,6 +163,11 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--adapt", action="store_true")
     p.add_argument("--prior-avg", action="store_true")
+    p.add_argument("--em-sigma", action="store_true", help="the prior variance by closed-form empirical Bayes (EM)")
+    p.add_argument("--em-rate", type=float, default=0.2)
+    p.add_argument("--sigma-init", type=float, default=0.3)
+    p.add_argument("--resume", default=None, help="a checkpoint to continue training from")
+    p.add_argument("--prev-seconds", type=float, default=0.0, help="training seconds already in a checkpoint that does not record them")
     p.add_argument("--samples", type=int, default=4)
     p.add_argument("--sample-chunks", type=int, default=4)
     p.add_argument("--lam0", type=float, default=10.0)
@@ -170,12 +190,27 @@ def main():
     wte, whe = world_index(test, a.length)[:a.eval_worlds], world_index(held, a.length)[:a.eval_worlds]
     print(f"worlds: train {len(wtr)}, test {len(wte)}, held-out {len(whe)} (length {a.length})", flush=True)
     model = FamilyModel().to(dev)
-    params = model.shared_parameters() + list(model.mu.parameters()) + (list(model.log_sigma.parameters()) if a.prior_avg else [])
+    learn_sigma = a.prior_avg and not a.em_sigma                     # by gradient (E8b) unless set by EM
+    params = model.shared_parameters() + list(model.mu.parameters()) + (list(model.log_sigma.parameters()) if learn_sigma else [])
     opt = torch.optim.Adam(params, lr=a.lr)
-    kw = dict(lam0=a.lam0, clamp=a.clamp, prior_avg=a.prior_avg, samples=a.samples, sample_chunks=a.sample_chunks)
+    kw = dict(lam0=a.lam0, clamp=a.clamp, prior_avg=a.prior_avg, samples=a.samples, sample_chunks=a.sample_chunks,
+              em_sigma=a.em_sigma, em_rate=a.em_rate)
     run_tr, run_te, run_he = (Runner(model, z, dev, **kw) for z in (train, test, held))
-    log = open(os.path.join(a.out, "log.jsonl"), "w")
-    json.dump(vars(a), open(os.path.join(a.out, "config.json"), "w"), indent=1)
+    t_prev, step_prev = 0.0, 0
+    if a.resume:
+        ck = torch.load(a.resume, map_location=dev, weights_only=False)
+        model.load_state_dict(ck["model"])
+        run_tr.Fbar = ck["Fbar"]
+        if "opt" in ck:
+            opt.load_state_dict(ck["opt"])
+        t_prev, step_prev = ck.get("t_train", a.prev_seconds), ck.get("step", 0)
+        print(f"resumed from {a.resume}: {t_prev:.0f}s of training, {step_prev} batches", flush=True)
+    elif a.em_sigma:
+        with torch.no_grad():
+            for v in model.log_sigma.values():
+                v.fill_(math.log(a.sigma_init))
+    log = open(os.path.join(a.out, "log.jsonl"), "a" if a.resume else "w")
+    json.dump(vars(a), open(os.path.join(a.out, "config.json" if not a.resume else f"config_resume_{int(t_prev)}.json"), "w"), indent=1)
     evals = a.evals.split(",")
 
     def do_eval(tag):
@@ -193,8 +228,9 @@ def main():
                       f"turn {s['turn'][0]:.2f}->{s['turn'][1]:.2f}", flush=True)
 
     do_eval("start")
-    t_train, step, half_done = 0.0, 0, False
-    while t_train < a.time_limit:
+    t_train, step, half_done = t_prev, step_prev, False
+    t_stop = t_prev + a.time_limit
+    while t_train < t_stop:
         t0 = time.time()
         idx = rng.choice(len(wtr), a.worlds_per_batch, replace=False)
         bits = run_tr.run(wtr[idx], a.adapt, train=True, opt=opt, outer_every=a.outer_every)
@@ -203,13 +239,14 @@ def main():
         t_train += time.time() - t0
         log.write(json.dumps(dict(type="train", step=step, t=t_train, bits=bits)) + "\n")
         if step % 10 == 0:
-            sig = float(torch.cat([v.flatten() for v in model.log_sigma.values()]).exp().mean()) if a.prior_avg else None
+            sig = float(torch.cat([v.detach().flatten() for v in model.log_sigma.values()]).exp().mean()) if (a.prior_avg or a.em_sigma) else None
             print(f"batch {step}  {t_train:.0f}s  train prequential bits/step {bits:.2f}  prior sigma {sig}", flush=True)
-        if not half_done and t_train > a.time_limit / 2:
+        if not half_done and t_train > t_prev + a.time_limit / 2:
             do_eval("mid")
             half_done = True
     do_eval("end")
-    torch.save(dict(model=model.state_dict(), Fbar=run_tr.Fbar), os.path.join(a.out, "model.pt"))
+    torch.save(dict(model=model.state_dict(), Fbar=run_tr.Fbar, opt=opt.state_dict(), t_train=t_train, step=step),
+               os.path.join(a.out, "model.pt"))
 
 
 if __name__ == "__main__":

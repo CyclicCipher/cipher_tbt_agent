@@ -218,3 +218,85 @@ is missed.
   batch of worlds, σ² ← mean_w (φ_w,end − μ)² + mean_w 1/Λ_w,end. That calibrates the spread from the data the model
   actually saw, with no slow gradient.
 - **More meta-training:** 420 s is ~70 batches of long worlds, and every run was still improving.
+
+## E8c, pre-registered (2026-10-20, night): closed-form prior variance, and longer training
+
+The user: "Go ahead with the closed-form prior variance and longer training. But do not be surprised if prior
+averaging ends up not being worth it under any fix, or the fix that would make it work itself isn't worth it."
+
+**Closed-form prior variance (`--em-sigma`).** After each batch of worlds, the EM M-step of a Gaussian hierarchical
+prior, smoothed over batches at rate 0.2:
+
+  σ² ← mean_w (φ_w − μ)² + mean_w 1/(1/σ² + n · F̄)
+
+i.e. the between-world variance of the adapted parameters plus their remaining posterior variance.
+- σ starts at 0.3 (prior precision ≈ 11, like A's λ₀ = 10).
+- The Kalman step's prior precision is 1/σ². μ is still learned by the first-order gradient.
+
+**Longer training, by chained runs of ≤ 10 min each (resume from a checkpoint).** Every arm gets **1,260 s** of
+training in total (3× E8b).
+- The existing 512-step arms continue from their 420-s checkpoints (2 more segments; Adam's moments restart once, as
+  their first checkpoint did not save them).
+- The new arms train from scratch (3 segments).
+
+**Arms** (512-step worlds; 64 evaluation worlds per split at the end):
+
+| arm | configuration |
+|---|---|
+| **L-A0** | one model for all worlds (continued) |
+| **L-A** | adaptation, λ₀ = 10 (continued) |
+| **L-Ac** | adaptation, closed-form σ as the prior precision, **no averaging** |
+| **L-APc** | adaptation, closed-form σ, **with** prior averaging (posterior predictive over 4 samples in the first 4 chunks) |
+
+**Predictions:**
+
+| # | prediction |
+|---|---|
+| P9 | Longer training improves L-A's whole-world mean by ≥ 1 bit (14.41 → ≤ 13.4), and adaptation still beats the one-size model (L-A < L-A0) |
+| P10 | A calibrated prior precision is at least as good as the hand-set one: L-Ac's whole-world mean ≤ L-A's |
+| P11 | **The averaging question.** L-APc beats L-Ac by ≥ 1 bit in the first 2 chunks and ≥ 0.2 bits on the whole-world mean. If not, prior averaging is recorded as **not worth it** at this scale (the user's expectation) |
+
+## E8c results (2026-10-20)
+
+All arms: 1,260 s of training, then 64 test and 64 held-out 512-step worlds. Bits per step (lower is better);
+"early" = the first 2 chunks of a world, "late" = the last 4, "mean" = the whole world. Logs: `runs/e8c_*.txt`,
+`runs/e8/{L_A0,L_A,L_Ac,L_APc}/log.jsonl`.
+
+| arm | test early | test late | **test mean** | held-out early | held-out late | **held-out mean** | move (start → end) | turn (start → end) |
+|---|---|---|---|---|---|---|---|---|
+| L-A0, one model | 16.82 | 13.29 | **15.83** | 18.91 | 12.84 | **15.77** | 0.00 → 0.00 | 0.46 → 0.43 |
+| L-A, adaptation, λ₀ = 10 | 18.05 | 4.56 | **8.64** | 20.33 | 4.34 | **8.65** | 0.22 → 0.99 | 0.46 → 1.00 |
+| L-Ac, + closed-form σ | 16.97 | 4.04 | **7.80** | 19.14 | 3.90 | **7.91** | 0.22 → 0.99 | 0.47 → 0.99 |
+| L-APc, + closed-form σ + averaging | 27.20 | 4.65 | **9.74** | 31.34 | 4.51 | **9.74** | 0.00 → 0.99 | 0.36 → 0.98 |
+
+(At 420 s, E8b: L-A 14.41 and L-A0 17.4 on new worlds.)
+
+**Verdicts:**
+
+| # | verdict |
+|---|---|
+| P9 | **Confirmed, by far more than predicted.** L-A 14.41 → 8.64 (≥ 1 bit predicted; 5.8 measured). Adaptation beats the one-size model by 7.2 bits/step (8.64 vs 15.83), up from 3.0 at 420 s: the gap grows with training. Held-out worlds the same (8.65 vs 15.77) |
+| P10 | **Confirmed.** L-Ac 7.80 vs L-A 8.64 (test), 7.91 vs 8.65 (held-out). The calibrated prior also removes most of adaptation's start-up cost: early bits 16.97 against the one-size model's 16.82 (test) and 19.14 against 18.91 (held-out), where L-A paid 1.2–1.4 bits |
+| P11 | **Refuted. Prior averaging is recorded as not worth it at this scale** (the user's expectation). L-APc is 10 bits *worse* early (27.20 vs 16.97) and 1.9 bits worse on the mean (9.74 vs 7.80). E8b's averaging arm also started worse: two failures in two configurations |
+
+**Why averaging hurt (a diagnostic from the saved checkpoints, no re-run).**
+- **It is not the sampling noise.** With the learned σ and the Fisher, the second-order cost of predicting from one prior sample, ½ Σ F̄ σ², is only ~0.2 bits/step in both arms.
+- **The averaging arm learned a worse prior mean μ.** Predicting from μ with no adaptation at all, its early bits are 27.4, against L-Ac's 19.0. Training the first chunks through the sample mixture degraded the point estimate the rest of the world starts from.
+- The mechanism of that degradation is not established. Given the verdict, it is not pursued.
+
+**What σ learned.** The logged mean σ moved little (0.30 → 0.27), which looks like "σ did not learn". It did:
+- Weighted by the Fisher (where the data constrains the parameter), σ is 0.04–0.22 per parameter group: small where worlds agree, large on the action embeddings (0.22), where the shuffled controls live.
+- Elements the data does not constrain keep their initial σ: the EM fixed point when the posterior variance equals the prior. That is harmless, since those elements do not affect the predictions.
+- The log's unweighted mean is a misleading summary; the Fisher-weighted value should be logged.
+
+**Caveats.**
+- One seed per arm.
+- L-A and L-A0 were continued from E8b checkpoints (Adam's moments restarted once), while L-Ac and L-APc trained from scratch in 3 segments. The total training time was equal.
+
+**Where E8 stands.**
+- On the world family with hidden, shuffled physics, Bayesian in-world adaptation with an empirically calibrated prior beats the one-size model by about 8 bits per step over whole worlds, on held-out physics combinations as well.
+- By the end of a world it predicts the shuffled moves (0.99) and turns (0.99–1.00) almost perfectly.
+- The remaining cost is the first chunks of a world, before the world has been identified.
+- **Next candidates (not pre-registered):**
+  - exploration by expected information gain, to identify a world faster;
+  - learning without the logged job events.

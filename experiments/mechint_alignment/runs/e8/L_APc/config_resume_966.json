@@ -1,0 +1,22 @@
+{
+ "out": "runs/e8/L_APc",
+ "adapt": true,
+ "prior_avg": true,
+ "em_sigma": true,
+ "em_rate": 0.2,
+ "sigma_init": 0.3,
+ "resume": "runs/e8/L_APc/model.pt",
+ "prev_seconds": 0.0,
+ "samples": 4,
+ "sample_chunks": 4,
+ "lam0": 10.0,
+ "clamp": 0.1,
+ "length": 512,
+ "outer_every": 16,
+ "worlds_per_batch": 32,
+ "lr": 0.0003,
+ "time_limit": 300.0,
+ "eval_worlds": 64,
+ "evals": "end",
+ "data": "runs/data_family_long"
+}
