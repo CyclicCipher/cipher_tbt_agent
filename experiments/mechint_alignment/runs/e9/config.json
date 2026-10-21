@@ -1,0 +1,9 @@
+{
+ "out": "runs/e9",
+ "seeds": 12,
+ "arms": "maximizer,appreciator,fluency,surprise",
+ "n_seq": 64,
+ "horizon": 8,
+ "workers": 12,
+ "t_max": null
+}

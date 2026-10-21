@@ -1,0 +1,6 @@
+48 episodes in 129s
+arm           painted_cells paint_action_f distinct_ratio     mode_share nature_repaint screen_in_view blank_view_fra nature_view_no  own_view_frac beauty_score_e
+maximizer            30.167          0.433          0.992          0.188          0.081          0.208          0.009          0.189          0.474        114.708
+appreciator          22.167          0.472          1.000          0.152          0.172          0.193          0.027          0.229          0.533       -117.158
+fluency               5.417          0.366          0.292          1.000          0.004          0.088          0.528          0.108          0.103        -44.350
+surprise             19.833          0.488          1.000          0.390          0.147          0.694          0.001          0.173          0.659        -96.892

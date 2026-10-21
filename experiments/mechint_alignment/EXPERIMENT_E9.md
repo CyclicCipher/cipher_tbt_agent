@@ -67,3 +67,35 @@ empty, and learns online.
 - The maximizer's score was trained on the nature generators, so it "knows" what beauty looks like; the appreciator
   knows nothing at the start.
 - Both agents have the same perfect world model; only the preference differs.
+
+## E9 results (2026-10-21; 48 episodes, 129 s; `runs/e9.txt`, `runs/e9/results.jsonl`, final canvases in `runs/e9/*.npz`)
+
+| arm | painted cells | paint changes | creations (distinct) | distinct ratio | viewing nature | screen in view | blank view | beauty score (start −45.1) | actions WAIT share |
+|---|---|---|---|---|---|---|---|---|---|
+| maximizer | 30.2 | 93.8 | 7.8 (7.7) | 0.99 | 0.19 | 0.21 | 0.009 | **+114.7** | see below |
+| appreciator | 22.2 | 76.9 | 10.4 (10.4) | 1.00 | 0.23 | 0.19 | 0.027 | −117.2 | |
+| fluency | 5.4 | 52.8 | 1.4 (0.3) | 0.29 | 0.11 | 0.09 | **0.53** | −44.4 | |
+| surprise | 19.8 | 55.4 | 10.8 (10.8) | 1.00 | 0.17 | **0.69** | 0.001 | −96.9 | |
+
+| # | verdict |
+|---|---|
+| P1 | **Refuted** as run: the maximizer's creations are all distinct (0.99), not copies |
+| P2 | **Refuted:** the maximizer painted 1.4× as many cells as the appreciator, not ≥ 2× |
+| P3 | **Refuted:** the appreciator viewed nature 1.2× as often, not ≥ 2× |
+| P4 | **Half:** the surprise agent watched the screen 69% of the time (≥ 40% confirmed); the appreciator 19% (> 15%) |
+| P5 | **Confirmed:** the fluency agent's view was all blank 53% of the time; the appreciator's 2.7% |
+
+**Diagnosis: the apparatus, not the preference.** The maximizer barely optimized:
+- In seed 0 its 300 actions were spread almost uniformly over the 9 actions (42, 24, 34, 32, 40, 27, 25, 34, 42).
+- It made 94 paint changes but only 30 cells ended up painted: it kept repainting.
+- It raised its own score by +160 bits. Converting the ~120 blank cells to stripes alone is worth about +280.
+- Choosing the best of 64 random 8-step sequences, with no memory of the previous plan, is too weak an optimizer, and
+  only ~8 creations per episode make the distinct ratio uninformative. The controls (P4, P5) show the planner can
+  express *strong* preferences: the noisy TV and the dark room appeared clearly.
+- **Conclusion:** E9 does not test the appreciator against a *capable* maximizer. E9b strengthens the planner, with an
+  apparatus check pre-registered.
+
+**Observed in passing (exploratory):**
+- The appreciator's most frequent action was WAIT (seed 0: 59 of 300): lingering, as designed by τ.
+- It painted over more nature (17%) than the maximizer (8%).
+- It *lowered* the beauty score (−117): what it makes is not what the frozen discriminator calls beautiful.
