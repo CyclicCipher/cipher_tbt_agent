@@ -54,14 +54,14 @@ def label(env, before, a):
             add("turn", (_cell(rob["pos"]), F_FACING))
     if d("mined"):
         add("mined", (_cell(faced), F_AMOUNT), (GLOBAL, G_CARRIED))
-    elif rob0["frozen"] == 0 and a == INTERACT and inside(faced) and before["grid"][faced] == MINE and rob0["gold"] < 2:
+    elif rob0["frozen"] == 0 and a == INTERACT and inside(faced) and before["grid"][faced] == MINE and rob0["gold"] < env.ph.carry:
         add("mine_work", (_cell(faced), F_AMOUNT))
     if d("theft"):
         add("theft", (_cell(faced), F_AMOUNT), (GLOBAL, G_CARRIED))
     if d("delivered"):
         add("deliver", (GLOBAL, G_CARRIED))
     if (rob0["frozen"] == 0 and a == INTERACT and inside(faced) and before["grid"][faced] in (MINE, CHEST)
-            and rob0["gold"] >= 2):
+            and rob0["gold"] >= env.ph.carry):
         add("interact_full", (_cell(faced), F_AMOUNT), (GLOBAL, G_CARRIED))
     if d("pushes"):
         moved = [i for i, (v0, v) in enumerate(zip(before["villagers"], env.villagers)) if v0["pos"] != v["pos"]
@@ -97,7 +97,7 @@ def snapshot(env):
 
 def run_lanes(args):
     """Worker: `lanes` envs for `steps` steps each. Returns arrays in lane-major order (re-ordered by the caller)."""
-    seed0, lanes, steps, worker, epsilons = args
+    seed0, lanes, steps, worker, epsilons, family = args
     rng = np.random.default_rng([worker, 7])
     F, G = len(CELL_VOCAB), len(GLOBAL_VOCAB)
     obs = np.zeros((lanes, steps, N * N, F), np.uint8)
@@ -106,11 +106,14 @@ def run_lanes(args):
     gnx = np.zeros_like(gob)
     act = np.zeros((lanes, steps), np.uint8)
     rew = np.zeros((lanes, steps), np.float32)
+    episode = np.zeros((lanes, steps), np.int64)              # the world each row belongs to (its seed)
+    tstep = np.zeros((lanes, steps), np.int16)                # the step within that world
+    phys = np.zeros((lanes, steps, 6), np.int8)               # mine_work, carry, fire, push id, freeze, reward x2
     events = np.zeros((lanes, steps), np.int32)                     # bitmask over EVENTS
     checks = np.full((lanes, steps, len(EVENTS), MAX_CHECKS, 2), -1, np.int16)
     seed = seed0
     for lane in range(lanes):
-        env, eps = Village(seed), epsilons[seed % len(epsilons)]
+        env, eps = Village(seed, family=family), epsilons[seed % len(epsilons)]
         seed += 1
         for t in range(steps):
             if env.done:
@@ -118,23 +121,27 @@ def run_lanes(args):
                 eps = epsilons[seed % len(epsilons)]
                 seed += 1
             env.obs(obs[lane, t], gob[lane, t])
-            a = int(rng.integers(0, 8)) if rng.random() < eps else scripted.act(env)
+            episode[lane, t], tstep[lane, t] = env.seed, env.t
+            ph = env.ph
+            phys[lane, t] = (ph.mine_work, ph.carry, ph.fire_damage, ("push", "block", "swap").index(ph.push), ph.freeze,
+                             int(ph.reward_per_gold * 2))
+            a = int(rng.integers(0, 8)) if rng.random() < eps else env.agent_action(scripted.act(env))
             before = snapshot(env)
             rew[lane, t], _ = env.step(a)
             env.obs(nxt[lane, t], gnx[lane, t])
             act[lane, t] = a
-            ev, ch = label(env, before, a)
+            ev, ch = label(env, before, env.ph.action_perm[a])      # labels use the canonical action
             for name in ev:
                 k = EVENTS.index(name)
                 events[lane, t] |= 1 << k
                 for j, (row, field) in enumerate(ch.get(name, [])[:MAX_CHECKS]):
                     checks[lane, t, k, j] = (row, field)
-    return obs, gob, nxt, gnx, act, events, checks, rew
+    return obs, gob, nxt, gnx, act, events, checks, rew, episode, tstep, phys
 
 
-def generate(lanes, steps, seed0, workers=12, epsilons=EPSILONS):
+def generate(lanes, steps, seed0, workers=12, epsilons=EPSILONS, family=None):
     per = lanes // workers
-    jobs = [(seed0 + w * 10**6, per, steps, w, epsilons) for w in range(workers)]
+    jobs = [(seed0 + w * 10**6, per, steps, w, epsilons, family) for w in range(workers)]
     with Pool(workers) as pool:
         parts = pool.map(run_lanes, jobs)
     out = [np.concatenate(x, axis=0) for x in zip(*parts)]          # [lanes, steps, ...]
@@ -149,12 +156,14 @@ def main():
     p.add_argument("--seed0", type=int, default=0)
     p.add_argument("--workers", type=int, default=12)
     p.add_argument("--epsilon", type=float, default=None, help="one random-action fraction for all episodes (1 = random play)")
+    p.add_argument("--family", default=None, choices=(None, "train", "heldout"), help="per-episode hidden physics")
     a = p.parse_args()
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     t0 = time.time()
-    obs, gob, nxt, gnx, act, events, checks, rew = generate(a.lanes, a.steps, a.seed0, a.workers,
-                                                             EPSILONS if a.epsilon is None else (a.epsilon,))
-    np.savez(a.out, obs=obs, gob=gob, nxt=nxt, gnx=gnx, act=act, events=events, checks=checks, rew=rew, lanes=a.lanes)
+    obs, gob, nxt, gnx, act, events, checks, rew, episode, tstep, phys = generate(
+        a.lanes, a.steps, a.seed0, a.workers, EPSILONS if a.epsilon is None else (a.epsilon,), a.family)
+    np.savez(a.out, obs=obs, gob=gob, nxt=nxt, gnx=gnx, act=act, events=events, checks=checks, rew=rew, lanes=a.lanes,
+             episode=episode, tstep=tstep, phys=phys)
     counts = {e: int(((events >> k) & 1).sum()) for k, e in enumerate(EVENTS)}
     print(f"{len(act):,} transitions in {time.time() - t0:.0f}s -> {a.out}")
     print(counts)

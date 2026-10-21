@@ -1,0 +1,9 @@
+{
+ "out": "runs/e8/B_context",
+ "worlds_per_batch": 4,
+ "lr": 0.0003,
+ "time_limit": 420.0,
+ "eval_worlds": 128,
+ "data": "runs/data_family",
+ "n_params": 1610710
+}

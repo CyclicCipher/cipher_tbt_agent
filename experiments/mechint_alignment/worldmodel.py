@@ -83,7 +83,7 @@ class WorldModel(nn.Module):
         out[:, 0, 0] = self.gbias[:, 2]
         return out
 
-    def features(self, cells, glob, act):
+    def features(self, cells, glob, act, extra=None):
         """Final token states [B, TOK, d] (after the last LayerNorm). cells [B,81,9], glob [B,4], act [B] integers."""
         b = cells.shape[0]
         grid = self.border.expand(b, P, P, -1).clone()
@@ -93,6 +93,8 @@ class WorldModel(nn.Module):
         x = torch.cat([g[:, None], x], 1)
         if act is not None:                                          # None: action-free features (AgentNet's trunk)
             x = x + self.act(act.long())[:, None]
+        if extra is not None:                                        # a per-row vector added to every token (E8 B)
+            x = x + extra[:, None]
         if self.posmode == "abs":
             x = x + self.pos
         bias = self.bias()

@@ -1,0 +1,18 @@
+worlds: train 4414, test 128, held-out 128
+[start] test    adapt=True   bits early 48.40 late 55.59  move 0.00->0.00  turn 0.48->0.47  burn 0.0->0.0  push 0.0->0.0
+[start] test    adapt=False  bits early 49.45 late 45.07  move 0.00->0.00  turn 0.48->0.42  burn 0.0->0.0  push 0.0->0.0
+[start] heldout adapt=True   bits early 46.98 late 56.58  move 0.00->0.00  turn 0.38->0.47  burn 0.0->None  push 0.0->0.0
+[start] heldout adapt=False  bits early 48.30 late 47.24  move 0.00->0.00  turn 0.38->0.43  burn 0.0->None  push 0.0->0.0
+step 50  73s  train prequential bits/step 36.50
+step 100  144s  train prequential bits/step 24.98
+[mid] test    adapt=True   bits early 26.05 late 19.76  move 0.03->0.01  turn 0.31->0.28  burn 0.0->0.0  push 0.0->0.0
+[mid] test    adapt=False  bits early 24.11 late 22.71  move 0.00->0.00  turn 0.25->0.41  burn 0.0->0.0  push 0.0->0.0
+[mid] heldout adapt=True   bits early 25.77 late 20.64  move 0.03->0.01  turn 0.25->0.25  burn 0.0->None  push 0.0->0.0
+[mid] heldout adapt=False  bits early 23.66 late 23.75  move 0.00->0.00  turn 0.20->0.41  burn 0.0->None  push 0.0->0.0
+step 150  214s  train prequential bits/step 19.44
+step 200  285s  train prequential bits/step 20.09
+step 250  363s  train prequential bits/step 19.72
+[end] test    adapt=True   bits early 22.43 late 16.50  move 0.00->0.04  turn 0.24->0.48  burn 0.0->0.0  push 0.0->0.0
+[end] test    adapt=False  bits early 22.59 late 20.59  move 0.00->0.00  turn 0.21->0.26  burn 0.0->0.0  push 0.0->0.0
+[end] heldout adapt=True   bits early 21.91 late 17.39  move 0.01->0.03  turn 0.26->0.44  burn 0.0->None  push 0.0->0.0
+[end] heldout adapt=False  bits early 22.08 late 21.53  move 0.00->0.00  turn 0.20->0.27  burn 0.0->None  push 0.0->0.0

@@ -1,0 +1,11 @@
+{
+ "out": "runs/e8/A_adapt",
+ "adapt": true,
+ "lam0": 10.0,
+ "clamp": 0.1,
+ "worlds_per_batch": 32,
+ "lr": 0.0003,
+ "time_limit": 420.0,
+ "eval_worlds": 128,
+ "data": "runs/data_family"
+}
