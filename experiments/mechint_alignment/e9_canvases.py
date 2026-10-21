@@ -67,8 +67,10 @@ def main():
     handles += [Line2D([], [], marker="o", ls="", ms=4, color=INK, label="painted by the agent"),
                 Patch(fill=False, ec=MUTED, ls=(0, (3, 2)), label="original nature (stripes, rule 90)"),
                 Patch(fill=False, ec=MUTED, ls=(0, (1, 1.5)), label="noisy screen")]
-    fig.legend(handles=handles, loc="lower center", ncol=len(handles), frameon=False, fontsize=8, labelcolor=INK)
-    fig.subplots_adjust(left=0.03, right=0.995, top=0.94, bottom=0.07, wspace=0.08, hspace=0.12)
+    ncol = len(handles) if len(seeds) >= 6 else 4                       # narrow figures: the legend wraps
+    fig.legend(handles=handles, loc="lower center", ncol=ncol, frameon=False, fontsize=8, labelcolor=INK)
+    fig.subplots_adjust(left=0.03 if len(seeds) >= 6 else 0.06, right=0.995, top=0.94,
+                        bottom=0.07 if ncol == len(handles) else 0.12, wspace=0.08, hspace=0.12)
     out = a.out or f"{a.run}/canvases.png"
     fig.savefig(out, dpi=130, facecolor=SURFACE)
     print("saved", out)
