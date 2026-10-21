@@ -105,3 +105,51 @@ authors' code is left as it is.
 - **Not tested:** NCM with a converged tokenizer. A fair test of its accuracy needs the tokenizer trained to ≥ 99%
   exact first (chained ≤ 10-minute segments), then the generator. Also not tested: NCM's constraint-satisfaction
   advantage, which a deterministic forward simulation does not exercise.
+
+## Diagnostic: where NCM's error comes from (2026-10-21; saved checkpoints, H = 8, the same 2,048 futures)
+
+The user asked whether the tokenizer is really the issue. "The tokenizer is the bottleneck" was an inference. These
+measurements separate the error sources:
+
+| what is decoded | per-cell | exact | changed cells | agent cell |
+|---|---|---|---|---|
+| copy of the start state | 98.82% | 3.5% | 0% | 4.4% |
+| **A. the tokenizer's ceiling:** decode(encode(true end)) | 99.64% | 30.1% | 71.1% | **27.7%** |
+| **B. generator, teacher-forced** (each level from the TRUE coarser levels) | 96.93% | 0.0% | 23.2% | 0.4% |
+| **C. generator, free-running** (as evaluated) | 97.63% | 0.1% | 14.0% | 0.3% |
+
+Code accuracy per level, coarse → fine (levels 1, 2, 4, 7, 14, 28, 49, 98, 147, 196 codes):
+
+| | per level |
+|---|---|
+| B. teacher-forced | 0.79, 1.00, 1.00, 1.00, 1.00, 0.92, 0.89, 0.92, 0.85, 0.91 |
+| C. free-running | 0.79, 1.00, 1.00, 1.00, 1.00, 0.91, 0.86, 0.84, 0.70, 0.73 |
+| D. the START state's codes vs the END state's codes | 0.93, 1.00, 1.00, 1.00, 1.00, 0.99, 0.98, 0.97, 0.95, 0.94 |
+
+Distinct codes used per level (of 16): **16, 1, 1, 1, 1, 2, 3, 6, 4, 9.**
+
+**Three separate problems, not one:**
+1. **The tokenizer's codebooks collapsed.** Levels 2–5 use a single code each, and so carry no information; the fine
+   levels use 2–9 of 16. In practice there is no coarse-to-fine hierarchy: one global code, then the fine levels.
+   - My tokenizer training used the quantizer's defaults. The repo offers dead-code restarts (`restart_threshold`)
+     and k-means initialisation (`kmeans_init`), which I did not enable. The collapse is likely a consequence of
+     my training setup, not of NCM.
+2. **The tokenizer loses the rare, important symbol.** Even from perfect codes, the agent's cell (0.5% of cells) is
+   reconstructed right only 28% of the time, and changed cells 71%. Per-cell reconstruction loss barely sees a
+   symbol that rare.
+3. **The generator is under-trained, independently of the tokenizer.**
+   - Even given the true coarser levels, it gets 8–15% of fine codes wrong. Decoded, that is 96.9% per cell, below
+     the copy baseline.
+   - Simply re-encoding the *start* state would match the end state's codes better (94–99%) than the generator does
+     (70–92%): it has not learned "copy, then edit".
+   - It receives the start state as raw tokens, so it must also learn to reproduce the tokenizer's quantization of
+     the unchanged board.
+
+**Correction to the reading above.** The tokenizer caps exactness (30%) and loses the agent. Most of the per-cell
+damage (99.64% → 97.6%) comes from the generator.
+
+**A fair rerun would need:**
+- a tokenizer with dead-code restarts or k-means initialisation, checked for codebook use at every level and for
+  agent-cell accuracy;
+- then a longer-trained generator;
+- possibly a prefix that gives the generator the start state's *codes*, so copying is easy.
