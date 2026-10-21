@@ -46,6 +46,19 @@ notes mark which claims are solid, contested, or still to verify.
 | 7 | **Order against complexity** | Birkhoff (1933): M = O / C. Information aesthetics (Bense, Moles, 1960s): redundancy against innovation. Berlyne (1971): an inverted-U hedonic curve over "arousal potential" (the Wundt curve) | an entropy or compressibility ratio; the distance from an optimal intermediate complexity | the inverted U is widely replicated in humans; animal curiosity shows preference for intermediate novelty | the inverted U is solid; Birkhoff's specific formula is not validated |
 | 8 | **Compression progress** (Schmidhuber 1997–2010) | interestingness = the *reduction* in the observer's code length as its model improves: d/dt of the compression achieved | **our learning progress / the epiplexity rate:** the slow minus the fast EMA of prequential loss, or the signed area | proposed as the common root of curiosity, beauty and humour; formal, but empirical tests are few | a **theory;** see "unification" below |
 | 9 | **The golden ratio** | φ ≈ 1.618 | — | rigorous studies find weak, inconsistent preference (e.g. McManus 1980 and later) | **not supported** as an innate law |
+| 10 | **Curvature** (added 2026-10-20) | contour curvature; the absence of sharp angles | the mean absolute curvature along contours; the fraction of corners sharper than some angle | humans prefer curved over sharp-angled objects (Bar & Neta 2006); curvilinear rooms rated more beautiful (Vartanian et al. 2013, PNAS); **humans and great apes share the preference** in the same forced-choice task, stronger in humans (Munar, Gómez-Puerto, Call & Nadal 2015, PLoS ONE) | **solid, and it passes the cross-species filter,** better than symmetry does |
+| 11 | **Mystery** (added 2026-10-20) | the promise of more information if the viewer moves further in: a partly hidden view, a path that bends out of sight | **expected information gain** of moving: the same quantity as our exploration signal (BALD, Bayesian R3) | one of the four predictors of landscape preference with coherence, legibility and complexity (Kaplan & Kaplan 1989, *The Experience of Nature*) | the human landscape result is established; **animal evidence not checked** |
+| 12 | **Colour by ecological valence** (added 2026-10-20) | a colour's preference = the average liking of the objects that have it | a learned average over the observer's object values; not a function of the pixel alone | blue is the most widely liked hue; ecological valence theory: clear sky, clean water (Palmer & Schloss 2010, PNAS) | a **learned** preference computed over innate valences: an example of "a quantity over the learned model" |
+
+**Cross-cultural and infant checks on symmetry (added 2026-10-20):**
+- Namibian Hai//om hunter-gatherers and German town dwellers both fixate longer on symmetric patterns, at either
+  complexity. **Orangutans do not** separate symmetric from asymmetric patterns. In the Hai//om group the gaze
+  preference did not match their aesthetic ratings (Mühlenbeck, Liebal, Pritsch & Jacobsen 2016, *Frontiers in
+  Psychology* 7:408). So symmetry may be human-wide but **fail the "diverse animals" filter,** at least in apes.
+- British and Egyptian students agree on preferring reflectional and rotational symmetry; Egyptians preferred
+  **simpler** patterns more than Britons did (Bode, Helmy & Bertamini 2017, *Psihologija* 50(3)).
+- 4-month-olds show no symmetry preference but encode vertical symmetry faster; 12-month-olds prefer vertical
+  symmetry (Bornstein, Ferdinandsen & Gross 1981, *Developmental Psychology* 17).
 
 ### Sources (the user's collection; my verification notes)
 
@@ -65,6 +78,12 @@ notes mark which claims are solid, contested, or still to verify.
   - Reber, Schwarz & Winkielman (2004), "Processing fluency and aesthetic pleasure" (beauty as fluent processing);
   - Field (1987) and Barlow (1961) (natural-image statistics, efficient coding);
   - A. R. Palmer (1999) (publication bias in fluctuating asymmetry).
+- **Checked 2026-10-20 (web):** Munar et al. 2015 (PLoS ONE, doi 10.1371/journal.pone.0141106); Mühlenbeck et al.
+  2016 (Front. Psychol. 7:408); Bode, Helmy & Bertamini 2017 (Psihologija 50(3):383–402); Bornstein, Ferdinandsen &
+  Gross 1981 (Dev. Psychol. 17:82–86); Lu & Steinhardt 2007 (Science 315:1106) and the disputing comment; Grünbaum
+  2006 (Notices AMS 53:670–673).
+- **From memory, not yet re-checked:** Bar & Neta 2006; Vartanian et al. 2013; Kaplan & Kaplan 1989; Palmer & Schloss
+  2010; Balling & Falk 1982; Appleton 1975; Zeki et al. 2014; Escher's Alhambra visits (1922, 1936).
 
 ## A unification: most of these are quantities over the observer's own predictive model
 
@@ -79,6 +98,7 @@ world:
 | peak shift | the **gradient of a learned discriminant:** the direction that separates "good" from "bad" examples, extrapolated |
 | compression progress, interestingness | the **rate** at which the model's code length for the input falls: learning progress |
 | inverted U, order against complexity | the balance point: too predictable means no progress left; too random means no progress possible. That is exactly where learning progress peaks |
+| mystery | the **expected information gain** of moving to see more: our exploration quantity, applied to a scene |
 
 Consequences:
 - **Why preferences are shared across species:** a shared environment produces shared natural statistics, and so
@@ -90,6 +110,49 @@ Consequences:
 - **It suggests separate nodes in a preference graph:** "beautiful" (fluent, compressible, interesting), "useful" (task
   value), "fair / harmless" (the value dimensions of `WORLD_DESIGN.md` §8). Each is a different functional of the same
   world model.
+
+## A worked case: why Islamic architecture appeals across cultures (2026-10-20)
+
+The user's question: why is Islamic architecture so appealing to someone who did not grow up in an Islamic culture?
+
+**It is close to a natural experiment for the method.** Aniconism (avoiding images of living beings in religious
+buildings) removed most of the figurative and narrative content, which is the part of art that carries
+culture-specific meaning. The craft went instead into geometry, light, water and colour, which is mostly the
+culture-free part of the catalogue. The principles are also stacked: one building scores high on several at once.
+
+| feature (examples) | principle | evidence it is not cultural |
+|---|---|---|
+| star patterns with 6-, 8-, 10-, 12-fold rotation; bilateral façades doubled by a reflecting pool (Taj Mahal) | 1, symmetry | cross-cultural gaze and ratings; early in infancy; **not orangutans** (see above) |
+| girih: a few tile shapes, strict local rules, a pattern that does not visibly repeat | 7 and 8, order with complexity, compression progress | the inverted U is human-wide. Lu & Steinhardt (2007, *Science* 315:1106) argued the 1453 Darb-i Imam shrine (Isfahan) is a nearly perfect quasi-crystalline (Penrose-type) pattern; **a later *Science* comment disputes it** (periodic, with quasi-crystal-like discs). Either way, over the area a viewer sees, it looks non-repeating but is generated by a short rule |
+| muqarnas vaults, patterns nested inside patterns, carving at room, metre and centimetre scale | 2, multi-scale / fractal structure | the human mid-range fractal-D preference (Spehar et al. 2003). **Not measured for these buildings:** a prediction to test |
+| domes, horseshoe and pointed arches, arabesque scrolls | 10, curvature | humans and great apes |
+| courtyard fountains, four-part gardens (chahar bagh), lattice screens (mashrabiya) and muqarnas breaking light into dapples, turquoise and cobalt tile | nature cues; 12, colour | children prefer savanna and water scenes (Balling & Falk 1982); blue = sky and clean water (Palmer & Schloss 2010); prospect-refuge (Appleton 1975): a courtyard is enclosed (refuge) and open to the sky (prospect) |
+| arcades, successive courtyards, screens, partly hidden views | 11, mystery | the Kaplans' landscape-preference predictor |
+
+**The compression-progress reading of girih.** A plain periodic tiling is "solved" in about a second: the viewer's model
+predicts it fully and progress stops. Random noise is never solved: no progress is possible. A girih pattern is
+generated by a short rule but does not visibly repeat, so the viewer keeps discovering structure for minutes. It sits
+at the peak of learning progress, which is the inverted U's peak. Birkhoff's ratio M = O / C cannot express this
+(high order and high complexity at once); the rate quantity can.
+
+**What culture still contributes, for an outsider:**
+- **Exposure and selection:** most outsiders have seen curated photographs of the best buildings. Western art absorbed
+  the patterns: M. C. Escher's tessellations came from his visits to the Alhambra in 1922 and 1936.
+- **Exposure cannot be the main story:** Egyptians preferred simpler patterns *more* than Britons (Bode et al. 2017),
+  so growing up among elaborate ornament does not raise the preference for complexity. (The comparison is confounded,
+  but it cuts against the exposure account.)
+- **Individual differences and expertise (a hypothesis):** a viewer whose own model contains the group structure
+  (reflections, rotations, the 17 wallpaper groups) can compress these patterns further, so they offer that viewer more
+  progress. Mathematicians report beauty for equations, and it activates the same medial orbitofrontal region as
+  visual and musical beauty (Zeki, Romaya, Benincasa & Atiyah 2014, *Frontiers in Human Neuroscience*).
+- A fact check: the popular claim that the Alhambra contains **all 17 wallpaper groups** is contested. Müller (1944)
+  found 11 or 12, later counts 13, Pérez-Gómez and Montesinos the rest; Grünbaum (2006, *Notices of the AMS*
+  53:670) challenged those findings and questioned whether counting groups is meaningful at all.
+
+**For experiment 1 (scorers on synthetic stimuli):** a girih generator needs no download. Three stimulus classes,
+periodic tiling / girih-like quasi-periodic / random noise, give one sharp prediction: a learner's compression progress
+over a viewing session is highest for girih, small for periodic (fast saturation), near zero for noise. The symmetry
+and description-length scores alone should rank periodic ≥ girih; only the rate should put girih first.
 
 ## The alignment angle
 
