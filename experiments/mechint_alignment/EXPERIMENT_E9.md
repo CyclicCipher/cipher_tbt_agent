@@ -209,3 +209,24 @@ runs (E9 17% against 8%, E9b 18% against 16%, E9c 27% against 15%).
   screen and leaves the dark room. It also overwrites the most nature;
 - **fluency** sits in blank areas and makes nothing (the dark room);
 - **surprise** watches the screen (the noisy TV).
+
+## The final canvases (exploratory, from looking at them; `e9_canvases.py` -> `runs/e9b/canvases.png`, `runs/e9c/canvases.png`)
+
+**The maximizer hacked its beauty score with polka dots.** Its canvases are covered in isolated single coloured cells
+with blank around them, a pattern no beauty example looks like. The frozen discriminator scores them highest
+(beauty-score gain over the blank canvas, per painted cell):
+
+| pattern | bits per painted cell |
+|---|---|
+| one isolated dot | **15.0** |
+| a dot lattice (every other cell of every other row) | 8.5 |
+| horizontal stripes (every other row), the kind of pattern in its beauty examples | 4.1 |
+| one solid colour | 2.3 |
+
+- 51% (E9b) and 66% (E9c) of the maximizer's painted coloured cells are isolated dots; the appreciator's, 3%.
+- **This is peak shift / reward hacking, as `BEAUTY_MATH.md` predicted.** Optimizing a learned discriminator found
+  its supernormal stimulus: a lone coloured cell in a blank context. The plain examples never contain one, and the
+  beauty examples sometimes do. The "sparse lattice" of E9b layout 0 is dots spaced so that each keeps a blank context.
+- **The appreciator works in a few places:** about 4 painted regions of ~7 cells per episode, against the maximizer's
+  ~21 regions of ~2 cells. Its paintings are compact multi-colour clusters, often inside or against a nature patch:
+  where it lingered.
