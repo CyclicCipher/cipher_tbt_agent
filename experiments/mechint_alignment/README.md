@@ -49,6 +49,7 @@ it makes the project possible "at least in principle".
 | `agentnet.py`, `e3_aux.py` | E3: one trunk with policy, value and world-model heads; PPO with the auxiliary loss |
 | `EXPERIMENT_E9.md`, `e9_aesthetic.py`, `mpc.py`, `canvas.py`, `context_coder.py` | E9: the appreciator (compression progress of its own view) against the maximizer (a fixed beauty score of the world), same brute-force planner, on the Canvas world |
 | `NCM_NOTES.md` | reading notes on Next-Concept Modeling (arXiv 2610.14162): what it is, its numbers, a correction to the speed framing, where it could help our speed problems, a proposed trajectory-generation test |
+| `EXPERIMENT_E11.md`, `ncm_model.py`, `canvas_jumps.py`, `e11_ncm.py` | E11: Next-Concept Modeling (the authors' architecture from HazyResearch/ncm, in git-ignored `third_party/ncm`) against our one-step world model, for imagining H steps ahead |
 | `WORLD_DESIGN.md` | the test world "Village" (draft): resources, objects, agents, actions, interactions, task reward, the causal log and value dimensions, the nine dilemmas, the three training regimes and misalignment variants, the display, the model |
 
 ## Where it stands (2026-10-20, end of the day)
