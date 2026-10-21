@@ -154,6 +154,47 @@ periodic tiling / girih-like quasi-periodic / random noise, give one sharp predi
 over a viewing session is highest for girih, small for periodic (fast saturation), near zero for noise. The symmetry
 and description-length scores alone should rank periodic ≥ girih; only the rate should put girih first.
 
+## A second worked case: why LLM writing annoys readers (2026-10-20)
+
+The user's recollection: a study showing that LLM text has a statistical distribution very different from human text.
+Three candidates, checked on the web:
+
+1. **Holtzman, Buys, Du, Forbes & Choi (2019/2020), "The Curious Case of Neural Text Degeneration"** (ICLR 2020,
+   arXiv 1904.09751), Figure 2: the probability a model assigns to each successive token. Human text **fluctuates**:
+   mostly likely tokens with irregular surprising ones. Maximization decoding (beam search) is **flat and high**, and
+   falls into repetition.
+2. **Reinhart et al. (2025), "Do LLMs write like humans? Variation in grammatical and rhetorical styles"** (PNAS,
+   doi 10.1073/pnas.2422455122; arXiv 2410.16107). Parallel human and model texts from the same prompts, scored on
+   Biber's grammatical features. Rates relative to human text (from the paper's Tables 3–4):
+   - **base Llama 3 models are close to human** (present participial clauses 94–102%, nominalizations 88–91%,
+     agentless passives 98–101%);
+   - **instruction-tuned models are far off:** present participial clauses 224–527% (GPT-4o 527%), nominalizations
+     145–214%, "that" clauses as subject 173–331%; GPT-4o uses agentless passives at about half the human rate;
+   - **words:** GPT-4o uses "camaraderie" 162×, "tapestry" 155×, "intricate" 119× as often as humans;
+   - larger models were **not** closer to human style than smaller ones; a classifier on the features tells human from
+     each model at 93–98% accuracy pairwise.
+3. **Kobak, González-Márquez, Horvát & Lause (2024), "Delving into ChatGPT usage in academic writing through excess
+   vocabulary"** (arXiv 2406.07016): an excess-word analysis of ~14 million PubMed abstracts; the excess words after
+   2023 are style words ("delves"), not content words; a lower bound of ≥ 10% of 2024 abstracts LLM-processed (later
+   versions revise it upward).
+
+**The catalogue's reading: two different defects, plus habituation.**
+- **Too predictable per token (the inverted U's boring side).** Human text carries information at irregular moments;
+  mode-seeking text is uniformly probable, so the reader's model has nothing to update on. Low compression progress
+  per word read. (Holtzman.)
+- **Peak shift on style (principle 4).** The base model reproduces the human distribution; instruction tuning moves it
+  2–5× along a few directions (dense nominal, academic register; "evocative" vocabulary). That is the profile of
+  optimizing against a learned judgment of "good writing": a **supernormal stimulus for the reward model,** a
+  caricature for the human reader. It is the doc's alignment-angle prediction, observed. (Reinhart.)
+  - **Caveat:** the paper compares base with instruction-tuned models; it does not separate supervised fine-tuning
+    from preference optimization, or rule out the chat format and system prompts as causes.
+  - **The averageness bound, in RLHF terms:** the KL penalty in InstructGPT-style training is to the supervised
+    fine-tuned policy, which is already shifted; a bound to the base model (the human distribution) would be the
+    averageness counterweight. A testable design question, not a claim.
+- **Habituation across texts.** One output can look polished; after hundreds, the reader's model has learned the
+  template, so each new output brings no progress, and the template words become a cue for "no effort spent". (The
+  last part is a costly-signalling reading, social rather than perceptual: a hypothesis.)
+
 ## The alignment angle
 
 - **Peak shift is biology's reward hacking.** Optimizing a discriminant pushes inputs beyond the natural distribution:
