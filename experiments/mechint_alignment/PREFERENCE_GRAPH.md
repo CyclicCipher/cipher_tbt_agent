@@ -112,6 +112,16 @@ The user's caution: preserving old beauty should not be conflated with doing no 
 - Low impact would block creation that preservation allows.
 - Harm avoidance and preservation may both be vetoes, but with different content and different justification.
 
+## First lesson from the experiments (E10b)
+
+**A veto must protect the irreplaceable, not everything valued.** In E10b the preservation veto valued blank as well
+as nature, so every brush stroke cost more than the veto's tolerance. The agent became a pure looker: preservation
+turned into low impact.
+- Design rule: a veto edge acts on the *extinction* of a valued structure (its last instances), and marginal erosion
+  of common structure goes through an exchange rate.
+- Under an exchange rate, the agent moved its creation to the canvas margins (55% of its painting, against 19%),
+  where a stroke disturbs the fewest valued structures. Preservation shapes *where* to create, not only whether.
+
 ## Build order
 
 1. **E10a (now):** two nodes, appreciation and preservation, joined by a content edge. Two combinations are compared:

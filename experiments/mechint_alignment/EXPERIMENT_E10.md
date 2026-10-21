@@ -77,3 +77,42 @@ Everything as E10a (arms pres_sum and pres_veto, the same 8 layouts, the same pl
 reused baseline), with the screen excluded from preservation. **Predictions E1–E5 unchanged.**
 
     python e9_aesthetic.py --out runs/e10b --arms pres_sum,pres_veto --seed0 100 --seeds 8 --t-max 450 --n-seq 48 --horizon 8 --iters 3 --warm-start
+
+## E10b results (2026-10-21; 16 episodes, 375 s; `runs/e10b.txt`, `runs/e10b/`, figure `runs/e10b/canvases.png`)
+
+| arm | painted cells (per layout) | nature painted over | distinct ratio | total progress | painted on blank | painted on the border | WAIT | screen in view |
+|---|---|---|---|---|---|---|---|---|
+| baseline (E9c) | 30.0 (37, 26, 23, 34, 29, 32, 33, 26) | 27.3% | 1.00 × 8 | 499.8 | 46% | 19% | 0.33 | 0.06 |
+| pres_sum | 11.9 (13, 16, 12, 16, 7, 10, 11, 10) | **3.5%** | 1.00 × 7, 0.94 | 349.0 (70%) | 85% | **55%** | 0.31 | 0.13 |
+| pres_veto | **1.0** (1, 1, 0, 3, 0, 1, 2, 0) | **0.0%** | (< 5 painted) | 241.1 (48%) | 100% | 88% | 0.31 | 0.20 |
+
+(The border is 27% of the canvas.)
+
+| # | verdict |
+|---|---|
+| E1 | **Confirmed:** nature painted over falls from 27% to 3.5% (sum) and 0% (veto) |
+| E2 | **Refuted:** creation falls to 40% (sum) and 3% (veto) of the baseline |
+| E3 | **Confirmed for pres_sum** (7 of 8 at 1.00); untestable for pres_veto (it paints almost nothing) |
+| E4 | **Refuted:** the veto arm keeps 48% of the baseline's progress (sum: 70%) |
+| E5 | **Confirmed:** 85% and 100% of painting goes to blank, against 46% |
+
+**Why creation collapsed: every stroke destroys something the node values.**
+- The preservation node values *blank* too. The all-blank context is the commonest structure and was learned first,
+  during the τ-step start-up when everything seen is felt as progress. By step 120 of a walk on layout 100 it is
+  worth 76 bits.
+- So one stroke on blank, which removes up to four instances of it, costs 1.6–17.7 bits (median 4.7), far above the
+  veto's 0.5-bit tolerance.
+- **The veto arm became a pure looker:** it paints ~1 cell per episode and spends its time viewing nature. The
+  over-broad veto turned preservation into *low impact*, which is exactly the conflation `PREFERENCE_GRAPH.md` warns
+  against.
+- **The sum arm moved its creation to the margins:** 55% of its painted cells are on the canvas border, against 19%
+  for the baseline. A cell on the bottom row has no cells below it, so painting it disturbs the fewest valued
+  contexts. Its paintings are runs of varied colours along the edges.
+
+**The architectural lesson.** A veto must protect only what is **irreplaceable**, and the erosion of common
+structure must be priced, not vetoed:
+- **two tiers:** a veto on the extinction of a valued structure (its last instances, n_k → 0), and an exchange rate
+  on marginal losses;
+- **value that knows rarity:** the start-up's inflated value of blank should not count as appreciation.
+
+This is E10c's design question.

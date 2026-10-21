@@ -118,6 +118,18 @@ things, lingers, and leaves.
 - Both agents have a perfect world model.
 - The polka-dot finding and the clustering numbers are exploratory: chosen after looking at the canvases.
 
+## Adding a preservation node (E10a–E10b; `EXPERIMENT_E10.md`, `PREFERENCE_GRAPH.md`)
+
+The appreciator plus a preservation node whose content is what the appreciator appreciated (a content edge).
+- **Nature is protected:** painted over 27% → 3.5% (exchange rate) and 0% (veto). Creation moves to blank (85%) and
+  to the canvas **margins** (55% of painted cells, against 19%), where a stroke disturbs the least.
+- **Creation drops:** to 40% (exchange rate) and 3% (veto). The node also valued blank, the commonest structure, so
+  every stroke cost something. The veto made the agent a pure looker: preservation turned into low impact.
+- **Lesson:** veto only the extinction of valued structure, and price marginal erosion (E10c).
+- E10a was discarded: the noisy screen leaked into the preservation signal.
+
+![preservation canvases](runs/e10b/canvases.png)
+
 ## Next: adding more principles of beauty (proposed, not run)
 
 **The question (the user):** what happens if we add more of the principles in `BEAUTY_MATH.md` to the experiment?
