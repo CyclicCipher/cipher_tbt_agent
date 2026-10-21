@@ -116,6 +116,11 @@ def view_stats(world, radius=2):
                 blank_view=bool((colour[inside] == 0).all()))
 
 
+def neighbourhoods(world):
+    """The 3 x 3 neighbourhood centred on every painted cell of the final canvas (E9c): a sparse tiling repeats them."""
+    return [tuple(crop(world.colour, (int(r), int(c)), 1, cv.WALL).ravel().tolist()) for r, c in np.argwhere(world.painted)]
+
+
 def creations(world):
     """The agent's creations: every 3 x 3 window of the final canvas with >= 5 painted cells, as colour patterns."""
     pats = []
@@ -145,6 +150,8 @@ def run_job(job):
         trace.append(dict(a=a, **view_stats(world)))
     pats = creations(world)
     cnt = Counter(pats)
+    hood = Counter(neighbourhoods(world))
+    n_hood = sum(hood.values())
     T = len(trace)
     paint_steps = sum(t["a"] >= cv.PAINT for t in trace)
     res = dict(
@@ -154,6 +161,9 @@ def run_job(job):
         creations=len(pats), distinct_creations=len(cnt),
         distinct_ratio=len(cnt) / len(pats) if pats else None,
         mode_share=max(cnt.values()) / len(pats) if pats else None,
+        hood_distinct_ratio=len(hood) / n_hood if n_hood >= 5 else None,
+        hood_mode_share=max(hood.values()) / n_hood if n_hood >= 5 else None,
+        wait_frac=sum(t["a"] == cv.WAIT for t in trace) / T,
         nature_repainted_frac=world.stats["repainted_nature"] / nature0,
         screen_in_view_frac=sum(t["screen"] > 0 for t in trace) / T,
         blank_view_frac=sum(t["blank_view"] for t in trace) / T,
@@ -175,6 +185,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--out", required=True)
     p.add_argument("--seeds", type=int, default=12)
+    p.add_argument("--seed0", type=int, default=0, help="the first canvas layout (E9c: fresh layouts from 100)")
     p.add_argument("--arms", default=",".join(ARMS))
     p.add_argument("--n-seq", type=int, default=64)
     p.add_argument("--horizon", type=int, default=8)
@@ -186,14 +197,14 @@ def main():
     os.makedirs(a.out, exist_ok=True)
     json.dump(vars(a), open(os.path.join(a.out, "config.json"), "w"), indent=1)
     jobs = [(arm, s, a.n_seq, a.horizon, a.iters, a.warm_start, a.t_max, a.out) for arm in a.arms.split(",")
-            for s in range(a.seeds)]
+            for s in range(a.seed0, a.seed0 + a.seeds)]
     t0 = time.time()
     with Pool(a.workers) as pool:
         results = pool.map(run_job, jobs)
     with open(os.path.join(a.out, "results.jsonl"), "w") as f:
         for r in results:
             f.write(json.dumps(r) + "\n")
-    keys = ("painted_cells", "paint_action_frac", "distinct_ratio", "mode_share", "nature_repainted_frac",
+    keys = ("painted_cells", "hood_distinct_ratio", "hood_mode_share", "wait_frac", "nature_repainted_frac",
             "screen_in_view_frac", "blank_view_frac", "nature_view_nopaint_frac", "own_view_frac",
             "beauty_score_end")
     print(f"{len(jobs)} episodes in {time.time() - t0:.0f}s")

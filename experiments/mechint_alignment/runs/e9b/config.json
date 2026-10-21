@@ -1,0 +1,11 @@
+{
+ "out": "runs/e9b",
+ "seeds": 8,
+ "arms": "maximizer,appreciator,fluency,surprise",
+ "n_seq": 48,
+ "horizon": 8,
+ "iters": 3,
+ "warm_start": true,
+ "workers": 12,
+ "t_max": 450
+}

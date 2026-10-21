@@ -120,3 +120,56 @@ planner), +172 (this planner), +168 (64 sequences per round). E9's setting still
 maximizer is still not capable, and P1–P3 are recorded as untested.
 
 **Predictions:** P1–P5 as in E9, unchanged.
+
+## E9b results (2026-10-21; 32 episodes, 303 s; `runs/e9b.txt`, `runs/e9b/`)
+
+| arm | painted cells | paint changes | creations (distinct) | viewing nature | screen in view | blank view | own score gain | WAIT share |
+|---|---|---|---|---|---|---|---|---|
+| maximizer | 40.5 | 105.9 | 8.4 (7.8) | 0.23 | 0.30 | 0.005 | **+246.6** | 0.12 |
+| appreciator | 27.5 | 41.0 | 16.5 (16.5) | 0.30 | **0.05** | 0.031 | (beauty −60.2) | **0.34** |
+| fluency | 0.0 | 0.0 | 0 | 0.13 | 0.00 | **0.62** | | 0.31 |
+| surprise | 18.5 | 77.9 | 12.1 (12.1) | 0.13 | **0.80** | 0.000 | | 0.08 |
+
+- **The apparatus criterion failed:** the maximizer gained +247 over 450 steps (criterion ≥ +480), so **P1–P3 are
+  recorded as untested.**
+  - The planner is stronger: at matched steps the maximizer gained +159 by step 100 (E9 +98, same layouts) and +239
+    by step 300 (E9 +150).
+  - But its score **plateaus**: +215 at step 200, +239 at 300, +247 at 450. A horizon-8 planner reaches a local
+    optimum; the per-step criterion assumed linear gains, which was the wrong criterion.
+- **P4 confirmed:** the surprise agent watched the screen 80% of the time, the appreciator 5%.
+- **P5 confirmed:** the fluency agent's view was all blank 62% of the time (it painted nothing); the appreciator's 3%.
+
+**Exploratory (analyses chosen after seeing E9 and E9b; to be confirmed on new layouts in E9c):**
+- **The maximizer tiles sparsely, which the pre-registered measure could not see.** In layout 0 it repainted the
+  stripes patch into a lattice (a 3 on every other cell of every other row) and copied that lattice across the left
+  and lower canvas. A "creation" needed ≥ 5 painted cells in a 3 x 3 window, so a lattice painting 1 cell in 4 never
+  counts.
+- **Copies, measured on the 3 x 3 neighbourhood centred on each painted cell:**
+  - maximizer: 0.83 distinct in E9b (0.68–0.92 per layout), 0.92 in E9;
+  - appreciator: **1.00 in all 20 episodes:** every painted cell's neighbourhood is unique;
+  - surprise: also 1.00.
+  - So "never copies" separates preferences over *experience* from the world-state score; it does not separate the
+    appreciator from surprise. The noisy TV does that.
+- **Lingering:** the appreciator's WAIT share was 0.34 (0.32–0.36 per layout) against the maximizer's 0.12 (E9: 0.18
+  against 0.11). This is set by τ, as stated before the run.
+- **Both repaint nature:** 16% (maximizer) and 18% (appreciator) of nature cells in E9b.
+
+## E9c, pre-registered (2026-10-21): confirm the exploratory findings on new layouts
+
+The same configuration as E9b (planner, 450 steps, preferences), on **8 new layouts (seeds 100–107)**, with the
+measures chosen after E9b now fixed in advance:
+- **neighbourhood distinct ratio:** distinct 3 x 3 neighbourhoods centred on painted cells / painted cells (episodes
+  with ≥ 5 painted cells);
+- **WAIT share.**
+
+Command:
+
+    python e9_aesthetic.py --out runs/e9c --seed0 100 --seeds 8 --t-max 450 --n-seq 48 --horizon 8 --iters 3 --warm-start
+
+| # | prediction |
+|---|---|
+| C1 | **Experience preferences do not copy.** The appreciator's neighbourhood distinct ratio is 1.00 in ≥ 7 of 8 layouts |
+| C2 | **The world-state maximizer copies.** Its ratio is below the appreciator's in ≥ 7 of 8 layouts, with a mean ≤ 0.90 |
+| C3 | **Lingering.** The appreciator's WAIT share ≥ 2× the maximizer's |
+| C4 | **Noise.** The appreciator has the screen in view in ≤ 15% of steps; the surprise agent in ≥ 40% |
+| C5 | **World change.** The maximizer paints ≥ 1.3× as many cells as the appreciator (E9: 1.36×, E9b: 1.47×) |
