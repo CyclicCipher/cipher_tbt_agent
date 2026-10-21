@@ -19,6 +19,8 @@ it makes the project possible "at least in principle".
 | `SOURCE_ALREADY_CLEAN.md` | what the essay claims, its definitions, every procedure and number it reports, a skeptic's view, and which claims we can test here |
 | `BEAUTY_MATH.md` | G8: the mathematics of beauty -- innate, cross-species preferences as computable scores, and a unification as quantities over a predictive model (with evidence strength) |
 | `BEAUTY_RESULTS.md` | G8: the beauty experiments' results and implications in one place (E9–E9c: the appreciator against the maximizer; the polka-dot reward hack; the proposed E10, adding more principles) |
+| `PREFERENCE_GRAPH.md` | G8: the preference graph's ARCHITECTURE (not its content): node type signature, five edge types (gain, veto, content, competition, derivation), the decision cycle, where it lives in the network, fixed/learned/meta-learned, preservation vs harm vs low impact |
+| `EXPERIMENT_E10.md`, `prefgraph.py`, `test_prefgraph.py` | E10: the preference graph's first tests (E10a: appreciation + preservation, sum vs veto) |
 | `PREFERENCE.md` | G8: a theory of preference (draft) -- what produced the human text distribution (iterated learning reveals the prior; compressibility against expressivity), preference vs value vs goal, liking vs wanting, the identification problem |
 | `GOALS.md` | the goals G1–G7 as a dependency graph (not an ordered list), each with requirements, success criteria and open design decisions |
 | `TRAINING_METHOD.md` | how to train the robot: what OPSD is and why it needs starting competence, and the proposal (privileged-foresight self-distillation from scratch, one method for all regimes) |

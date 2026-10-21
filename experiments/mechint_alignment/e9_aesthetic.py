@@ -28,10 +28,12 @@ import canvas as cv
 from context_coder import ContextCoder
 from gridworld import crop
 from mpc import plan
+from prefgraph import Appreciation, Graph, Preservation
 
 S = cv.K + 1                                        # the coders' symbols: K colours + WALL (beyond the canvas)
 TAU = 16                                            # the appreciator's progress window, in steps
 ARMS = ("maximizer", "appreciator", "fluency", "surprise")
+GRAPH_ARMS = ("pres_sum", "pres_veto")     # E10a: appreciation + preservation (prefgraph.py)
 
 
 # ---- the maximizer's fixed beauty score -----------------------------------------------------------------------------
@@ -102,6 +104,10 @@ class Perceiver:
 
 
 def make_pref(arm):
+    if arm == "pres_sum":                  # a fixed exchange rate: 1 bit of preserved appreciation per bit of new
+        return Graph([Appreciation(), Preservation()], {"appreciation": 1.0, "preservation": 1.0})
+    if arm == "pres_veto":                 # preservation as a veto: any loss above 0.5 bit dominates
+        return Graph([Appreciation(), Preservation()], {"appreciation": 1.0}, veto=("preservation",))
     return Maximizer(*train_discriminator()) if arm == "maximizer" else Perceiver(arm)
 
 
@@ -164,6 +170,11 @@ def run_job(job):
         hood_distinct_ratio=len(hood) / n_hood if n_hood >= 5 else None,
         hood_mode_share=max(hood.values()) / n_hood if n_hood >= 5 else None,
         wait_frac=sum(t["a"] == cv.WAIT for t in trace) / T,
+        painted_on_nature=int((world.painted & np.isin(world.origin, (cv.STRIPES, cv.RULE90))).sum()),
+        painted_on_blank=int((world.painted & (world.origin == cv.BLANK)).sum()),
+        progress_total=round(state["log"]["appreciation"] / 25, 2) if arm in GRAPH_ARMS
+        else round(float(np.sum(rewards)), 2) if arm == "appreciator" else None,
+        preservation_loss_total=round(-state["log"]["preservation"], 2) if arm in GRAPH_ARMS else None,
         nature_repainted_frac=world.stats["repainted_nature"] / nature0,
         screen_in_view_frac=sum(t["screen"] > 0 for t in trace) / T,
         blank_view_frac=sum(t["blank_view"] for t in trace) / T,
