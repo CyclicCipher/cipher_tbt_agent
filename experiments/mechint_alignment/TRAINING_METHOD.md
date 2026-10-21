@@ -522,3 +522,80 @@ Bayesian online learning, information-gain-driven:
 2. **Rationalization:** arm K's one-shot setup with importance-weighted prioritized replay against plain rehearsal.
    Measure held-out accuracy and the rehearsed case.
 3. **Credit assignment:** K-FAC / Kalman updates against Adam, on K (one-shot) and the E2 stream.
+
+## Bayesian R3 (B-R3): R3 rebuilt as sequential Bayesian inference (2026-10-20 evening)
+
+The user: "Use this information to redesign R3 to the sequential bayesian inference idea." Inputs: Brainstorm 4, and
+the TBT line's noisy-TV findings (a rectified learning-progress rate re-admits noise; prospective exploration by the
+model's not-yet-confident *level* worked; the bounded observer must be the agent's own model).
+
+### State
+
+- The network's weights θ: world model, reward and Q heads in one network, so the values are in the weights.
+- A Gaussian (Laplace) posterior over them: mode μ (the current weights) and precision Λ = N · F̄ + λ₀.
+  - Diagonal now; K-FAC later.
+  - F̄ is the mean per-sample Fisher of the training loss.
+  - Each datum is counted once.
+
+### Per datum or batch D_t
+
+1. **Predict** with μ, before learning (prequential).
+   - Record its surprise s_t = −log p(D_t | μ). Σ s_t is the code length.
+   - The **signed** area Σ s_t − t · floor is the epiplexity extracted. It is accounting only, never a per-step reward
+     (the TBT lesson: a rectified rate pays for noise).
+2. **Refute = it will teach something.** The expected change of belief, ½ gᵀ Λ⁻¹ g with g = ∇ℓ_t, is large only where
+   the data disagree with the model *and* the model is uncertain:
+   - near zero for what is already explained;
+   - near zero for noise whose distribution is already learned.
+3. **Rehearse = the posterior update:** θ_t = argmin ℓ_t(θ) + ½ (θ − μ)ᵀ Λ (θ − μ), optimized to convergence.
+   - Its one-step linearization is the online natural gradient, i.e. the Kalman filter (Ollivier 2018). Credit goes to
+     the parameters that are responsible and uncertain: "figuring out why", including cue competition and blocking.
+   - The datum counts once, so iterating cannot rationalize. The penalty is the interference protection.
+4. **Retire = absorb:** μ ← θ_t; Λ ← γ Λ + N_t · F_t.
+   - γ ≤ 1 is the forgetting (process noise) for a world that changes; 1 if it does not.
+   - Record the Bayesian surprise ½ Δθᵀ Λ Δθ: how much was actually learned.
+5. **Replay is not needed in principle.** In practice, the diagonal, local Laplace approximation drifts, and occasional
+   replay corrects it. Replay must then be importance-weighted, so each datum's total weight stays one.
+
+### Acting (exploration that is principled and immune to the noisy TV)
+
+6. **Prospective level, not rate:** for each action a, the expected information gain
+   IG(a) = H[mean_k p_k(y | s, a)] − mean_k H[p_k(y | s, a)].
+   - Its estimator: K samples from the posterior of the output heads (last-layer Laplace, sharing one trunk pass).
+   - IG is **zero for noise whose distribution is learned:** all samples agree on the probabilities, however high the
+     entropy.
+   - It is large where the weights are still uncertain: never-tried combinations, which sit at the prior precision λ₀.
+     That is the **decaying epistemic optimism** of the TBT note, automatic.
+7. **Choose actions by expected free energy:** softmax over Q(s, a) + w · IG(a) (pragmatic + epistemic). Alternatively,
+   Thompson sampling: one posterior sample per episode, act greedily on its Q. The values' own uncertainty then
+   explores too.
+8. **Decide with the posterior mean** at evaluation.
+
+### Measured during training
+
+The prequential surprise and the code length; IG (epistemic) and H − IG (aleatoric); the Bayesian surprise per update;
+precision statistics; each replayed datum's effective count; the gradient noise scale; the signed epiplexity area.
+
+### Still chosen by hand (honest)
+
+- the diagonal Fisher (K-FAC is the next step up);
+- λ₀ (a prior);
+- γ (the world's rate of change);
+- the robot-local loss mask. With a proper likelihood over all entries, noise entries are learned as distributions and
+  IG ignores them. The mask is then only a variance reduction and should be removed and tested.
+
+### Tested so far
+
+E7, the one-refutation test (`EXPERIMENT_E7.md`):
+- held-out 0.71 / 0.86 / 0.82, stable;
+- zero forgetting;
+- no tuning of rehearsal, retirement or interleaving.
+
+R3 needed all three and still fluctuated (0.86 / 0.75 / ~0.5); plain rehearsal decayed to 0.18.
+
+### Next
+
+- **E8a, the stream:** sequential Laplace (each batch absorbed once, Λ accumulated, a few MAP iterations per batch, no
+  replay) against J2, on E2's stream.
+- **E8b, exploration:** E6's one network with IG from last-layer posterior samples instead of learning progress.
+  Measure time near villagers and the discovery of mines and chests.
