@@ -118,6 +118,88 @@ instrumental (a subgoal), with no preference of its own.
   out bypasses the behavioural non-identifiability. This is the strongest reason for the user's "values must live in
   the network's weights": only then is there a place to look.
 
+### Disinterested liking: how it connects to outputs (the user's question, 2026-10-20)
+
+The user: disinterested pleasure "can't be that it isn't connected to outputs in any way. We would prefer to be
+surrounded with beauty than by ugliness. But … most of the effect of beauty is an internal state, rather than an
+instrument for an objective." And: what is the difference between a human (or a well-made machine) that appreciates
+beauty and a brute-force optimizer that seeks to make everything beautiful?
+
+**Kant's answer** (*Critique of Judgement*, Bernard's 1914 translation, checked on Project Gutenberg):
+- **What "disinterested" means (§2):** "The satisfaction which we combine with the representation of the *existence*
+  of an object is called interest." So disinterested does not mean "no effect on behaviour". It means the pleasure
+  does not depend on the object's *existence*: only on the perceiver's processing of its representation. (The palace
+  example: whether I approve of palaces is beside the point.)
+- **The direct output is lingering (§12):** "We *linger* over the contemplation of the beautiful, because this
+  contemplation strengthens and reproduces itself." The behavioural output is **attention:** keep perceiving. That
+  is what preferential-looking studies of infants, and the eye-tracking of the Hai//om study, measure.
+- **It ends in weariness (General Remark after §22):** "All stiff regularity (such as approximates to mathematical
+  regularity) has something in it repugnant to taste"; it "produces weariness", because the entertainment in it "lasts
+  for no length of time".
+  - Marsden (*History of Sumatra*) found a regular pepper garden charming inside a wild forest. Kant's comment: a day
+    in the garden would have sent him back to the wild.
+  - That is **habituation and contrast** in 1790: the compression-progress account, and the inverted U.
+- **Interest can attach afterwards, as a second layer:**
+  - **§41, empirical interest:** "Empirically the Beautiful interests only in society." A man alone on a desert
+    island "would adorn neither his hut nor his person". Wanting beauty around us is, for Kant, mostly the wish to
+    share and communicate it.
+  - **§42, intellectual interest:** an immediate interest in natural beauty is "always a mark of a good soul", akin
+    to moral feeling.
+- **Its formative role (General Remark after §29):** "The Beautiful prepares us to love disinterestedly something,
+  even nature itself." Beauty trains a way of valuing that does not want to use or possess.
+- **The mechanism Kant proposes (§9):** the "free play" of imagination (assembling what is seen) and understanding
+  (lawfulness). The object fits our cognition as if designed for it, without any one concept closing the case:
+  "purposiveness without purpose".
+  - In our terms: the model keeps finding structure without a rule completing it. That is ongoing compression
+    progress; once a rule completes it, "stiff regularity", weariness.
+
+**The neuroscience and psychology since:**
+- **Liking against wanting** (Berridge): hedonic impact and the incentive to pursue are separable systems.
+- **Consummatory against appetitive behaviour** (ethology): contemplation is consummatory. The perceiving *is* the
+  consumption, so its natural output is "keep consuming until satiated", not "go and get more".
+- **Beauty requires thought** (Brielmann & Pelli 2017, *Current Biology*): a secondary task lowered felt beauty for
+  images rated beautiful, but not the pleasure of other stimuli. (About 30% reported beauty from candy or a soft toy,
+  often tied to personal memories, so the sensory/beautiful line is not clean. A commentary disputes their reading of
+  Kant.)
+- **A computational model of aesthetic value** (Brielmann & Dayan 2022, *Psychological Review* 129(6)): aesthetic value
+  = the **immediate** reward of processing a stimulus (fluency: its likelihood under the observer's current state) +
+  the **change in expected future** reward (how much this experience tunes the system for likely future stimuli).
+  - That is the catalogue's fluency plus compression progress, formalised and fitted to data.
+  - It reproduces exposure, complexity and symmetry effects.
+
+**Others who sharpened the distinction:**
+- **Schopenhauer** (*The World as Will and Representation*, 1818, Book III): aesthetic contemplation is a temporary
+  release from the will: wanting goes quiet.
+- **Bullough** (1912, "psychical distance"; the fog at sea): to see the fog's beauty, the danger must be put "out of
+  gear" with the practical self.
+- **Murdoch** (*The Sovereignty of Good*, 1970; the kestrel): attending to beauty "unselfs", pulling attention off
+  the anxious self. Moral training, as in Kant's §29.
+- **The dissent:** Nietzsche (*Genealogy of Morals* III §6) sided with Stendhal's "beauty is a promise of happiness":
+  beauty is interested. Dickie (1964) called the aesthetic attitude a myth.
+
+**The appreciator against the brute-force optimizer: Kant's line, made computational.**
+
+| | an appreciator | a brute-force beauty maximizer |
+|---|---|---|
+| the reward's argument | its own processing of what it perceives (the experience) | the state of the world: how much beauty *exists* (Kant's "interest") |
+| main output | attention: linger, then move on | action that transforms the world |
+| satiation | yes: weariness once the structure is learned | none: more is always better |
+| a copy of something already seen | pays about zero (no progress left), so it seeks or makes new things: **the artist** | pays in full, so it **tiles the world with copies of its argmax**, a supernormal pattern |
+| instrumental pressure | needs access, not control | full: resources, preventing interference (instrumental convergence) |
+| how it fails | wireheading, which an honest progress signal only allows by actually learning | Goodhart's law, peak shift, supernormal stimuli |
+
+**Caveats.**
+- The appreciator is not fully disinterested: compression progress also drives curiosity, which is wanting.
+- A long-horizon value of future liking re-introduces interest (Kant's §41, in our terms).
+- So the safety does not come from "reward over internal states" alone. It comes from three things together:
+  1. **satiation;**
+  2. a **consummatory** output (attention) as the main effect;
+  3. a reward that a copy cannot pay.
+
+**A decisive toy (proposed):** two agents in a world where they can make patterns. A is rewarded by a fixed beauty
+score of the world's state; B by the compression progress of its own perception. Prediction: A tiles copies of one
+pattern; B keeps making new ones and spends its time looking.
+
 ## 3. What this implies for the preference graph and beauty (draft claims)
 
 1. **Nodes are terminal preferences, state-dependent (alliesthesia), each a value head of the one network.** Values
