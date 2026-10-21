@@ -1,0 +1,4 @@
+16 episodes in 339s
+arm           painted_cells hood_distinct_ hood_mode_shar      wait_frac nature_repaint screen_in_view blank_view_fra nature_view_no  own_view_frac beauty_score_e
+pres_sum             16.750          1.000          0.062          0.214          0.040          0.116          0.048          0.329          0.221        -41.025
+pres_veto             6.500          0.920          0.180          0.136          0.000          0.382          0.178          0.103          0.073        -20.888

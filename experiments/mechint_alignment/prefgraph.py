@@ -25,9 +25,13 @@ CONTEXTS = ContextCoder(S)        # for its contexts() only (stateless)
 
 
 def world_contexts(world):
-    """The context of every paintable cell, read as in a view (WALL beyond the canvas), as a flat array."""
+    """The context of every cell the agent's actions alone determine, read as in a view (WALL beyond the canvas), as a
+    flat array. A cell is left out if it or any of its four causal neighbours is on the noisy screen: those contexts
+    change every step whatever the agent does (E10a's apparatus defect)."""
     padded = np.pad(world.colour, ((1, 0), (1, 1)), constant_values=cv.WALL)
-    return CONTEXTS.contexts(padded)[1:, 1:-1][~world.screen]
+    scr = np.pad(world.screen, ((1, 0), (1, 1)))
+    touched = scr[1:, 1:-1] | scr[:-1, :-2] | scr[:-1, 1:-1] | scr[:-1, 2:] | scr[1:, :-2]
+    return CONTEXTS.contexts(padded)[1:, 1:-1][~touched]
 
 
 class Appreciation:

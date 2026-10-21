@@ -52,3 +52,15 @@ def test_a_veto_dominates_any_trade():
     assert g.step(world, g.start(world), 1) < 0
     g = Graph([Fixed("joy", 100.0), Fixed("keep", -0.4)], {"joy": 1.0}, veto=("keep",), tol=0.5)
     assert g.step(world, g.start(world), 1) == 100.0
+
+
+def test_the_noisy_screen_causes_no_preservation_loss():
+    world = cv.Canvas(103)
+    app, pres = Appreciation(), Preservation()
+    sa, sp = app.start(world), pres.start(world)
+    rng = np.random.default_rng(0)
+    for _ in range(60):                                   # walking and waiting only: nothing the agent destroys
+        world.step(int(rng.integers(0, 5)))
+        msg = {}
+        app.step(world, sa, 1, True, msg)
+        assert pres.step(world, sp, 1, True, msg) == 0.0

@@ -1,0 +1,12 @@
+{
+ "out": "runs/e10a",
+ "seeds": 8,
+ "seed0": 100,
+ "arms": "pres_sum,pres_veto",
+ "n_seq": 48,
+ "horizon": 8,
+ "iters": 3,
+ "warm_start": true,
+ "workers": 12,
+ "t_max": 450
+}
