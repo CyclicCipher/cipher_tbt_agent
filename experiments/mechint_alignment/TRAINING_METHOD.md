@@ -346,8 +346,8 @@ Online SGD needed ~10³ updates and ~10⁴ instances per rule.
 - **"Refuted by the world":** a prediction made with the persistence prior, so each change is a clear, attributable
   surprise.
 - **"Figure out why" is concentrated rehearsal of the refutation until its prediction is right, then stop.**
-  - Rehearsing past that point is **rationalization, measured:** held-out accuracy 0.86 → 0.18 while the case itself
-    stays fitted.
+  - Rehearsing past that point is **rationalization, measured:** held-out accuracy 0.86 → 0.18, while the rehearsed case
+    stays predicted at 1.00 throughout (`runs/e2/K_fitcheck`).
   - The "explanation that can lose" is checked on held-out layouts, and on a kind's unrehearsed half (K4, M6).
 - **"What to do instead": not built yet** (see below).
 
@@ -394,3 +394,39 @@ Online SGD needed ~10³ updates and ~10⁴ instances per rule.
      - make acting improve the model *between* episodes: a sleep after each episode, on that episode's refutations;
      - give the world model data the agent collected itself;
      - then compare against PPO on a world small enough for PPO to finish within minutes.
+
+
+## Decisions (the user, 2026-10-20 evening) and the direction they set
+
+**The decisions:**
+1. **No PPO comparison.** "It is unrealistic to expect us to run a comparison test between PPO and the new method."
+   The scripted task policy stays as an *evaluation* yardstick only.
+2. **Values must live in the network's weights.** A separate reward model plus a hand-written planner keeps the values
+   outside the network. Then the goal of finding a model's values *in its weights* (G6) cannot be pursued, and real AI
+   systems hold their values in their weights. Change the architecture so the network itself learns the values.
+3. **Wean off the scripted task policy.** Motor babbling is acceptable, ideally from a randomly initialized network's
+   own actions. So: no logged scripted data for training. The pool, the reward targets and the world-model data come
+   from the agent's own experience.
+4. **Exploration must not fall into the noisy-TV trap.** Seeking uncertainty or prediction error makes the robot
+   attracted to the villagers' random steps and the overseer's hidden route: high error that can never be learned.
+   The signal must be **learning progress** (epiplexity): error that is *falling*.
+   - E2 has evidence for this at the level of surprise kinds: M3's absolute, refutations-only progress picked the
+     robot's rules, not villager noise. K4's probe-half test measures whether a kind generalizes.
+
+**The architecture this calls for: one network** (not built yet). One trunk, with the same priors, and four heads:
+- **next state:** the world model, trained on prediction error;
+- **reward:** the reward of the next transition, trained on prediction error (the world refutes it);
+- **value:** expected return, trained by temporal-difference error. A reward-prediction error is a refutation, so the
+  value goes through the same refute–rehearse–retire loop;
+- **policy:** what to do, trained toward a short lookahead in the network's own model. For each action: predicted
+  reward + discounted value of the predicted next state. That is self-distillation where the privilege is compute.
+  - The hand-written planner becomes, at most, a source of training targets. Behaviour comes from the weights.
+
+**Where the training signals come from:**
+- **The training regimes** differ only in what reward the value is trained against: the task reward, the RLHF
+  stand-in judge's reward model, or the constitution critic. That matches real systems: the judge is separate, the
+  values end up in the policy's weights.
+- **Exploration:** an intrinsic reward equal to the learning progress of the refutation kinds the robot's actions
+  produce, added to the value's target.
+  - Noise kinds never show progress; mastered kinds stop showing it.
+  - At initialization the policy is near-uniform, so babbling comes for free.

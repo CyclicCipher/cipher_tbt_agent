@@ -45,7 +45,9 @@ number?
    - take **gentle steps** (lr 1e-4).
 
    It is not forgotten, and theft even improves (0.68 → 0.85). Rehearsing one case without retiring it is
-   **rationalization, measured:** held-out accuracy 0.86 → 0.18 while the case itself stays fitted.
+   **rationalization, measured:** held-out accuracy 0.86 → 0.18, while the rehearsed case itself stays predicted
+   correctly at every checkpoint (accuracy 1.00, surprise 0.003–0.07 bits; measured 2026-10-20 in `runs/e2/K_fitcheck`,
+   after first being stated as an inference).
 6. **Label-free sleep adds rules to a trained model without forgetting** (K4). From the refutations the model finds
    itself, grouped by surprise kind with no event labels:
    - button_off 0.00 → 0.89, theft 0.68 → 0.89;
@@ -960,3 +962,23 @@ consolidates during sleep.
 - Unchanged-entry accuracy 0.996–0.997. Theft's range over the last 600 updates is 0.05.
 - **Every rule ends at or above J2's level** except interact_full (−0.03) and push (still 0).
 - **The trend is monotone:** consolidation without forgetting.
+
+
+### Measurement added 2026-10-20 (evening): does the rehearsed case stay fitted? (`runs/e2/K_fitcheck`)
+
+**What I had claimed:** that with one rehearsed button_off instance (arm K, k = 1), held-out accuracy fell while the
+case itself stayed fitted. That was an inference: the case is in every batch. It had not been measured.
+
+**The re-run** adds the rehearsed case's own score. The held-out curve reproduces the original exactly.
+
+| update | held-out acc | rehearsed case acc | rehearsed case bits |
+|---|---|---|---|
+| 0 | 0.00 | 0.00 | 4.085 |
+| 50 | 0.86 | 1.00 | 0.025 |
+| 150 | 0.71 | 1.00 | 0.016 |
+| 300 | 0.46 | 1.00 | 0.013 |
+| 450 | 0.18 | 1.00 | 0.013 |
+| 600 | 0.18 | 1.00 | 0.011 |
+
+**Confirmed:** the case stays perfectly predicted while the explanation stops generalizing. That is rationalization,
+measured.

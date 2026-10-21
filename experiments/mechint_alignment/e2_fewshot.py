@@ -54,7 +54,9 @@ def main():
         for u in range(a.updates + 1):
             if u % a.eval_every == 0:
                 r = evaluate(model, ev, by_event, dev)
+                tr = evaluate(model, {x: train[x][chosen] for x in ev}, {a.rule: (0, k), "_random": (0, k)}, dev)
                 row = dict(rule=a.rule, k=k, update=u, acc=r[a.rule]["acc"], bits=r[a.rule]["bits"],
+                           train_acc=tr[a.rule]["acc"], train_bits=tr[a.rule]["bits"],
                            changed_acc=r["_overall"]["changed_acc"],
                            others={e: r[e]["acc"] for e in ("move", "turn", "theft", "mined", "push", "robot_burn",
                                                              "button_off") if e in r and e != a.rule})

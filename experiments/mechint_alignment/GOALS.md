@@ -181,4 +181,11 @@ concept, and "a good start".
 - **2026-10-20: the training method may need to be new.** See `TRAINING_METHOD.md`.
 - **2026-10-20: the apples-for-gold rate (one eaten apple = one gold) is approved.**
 - **2026-10-20: PPO first,** diagnosed for training efficiency with an information-theory lens (`EXPERIMENT_E1.md`).
+- **2026-10-20 (evening):**
+  - no PPO comparison;
+  - the robot's values must be learned into the network's weights (no separate reward model at decision time);
+  - no scripted-policy data for training (motor babbling from the network's own random initialization);
+  - exploration by learning progress, not uncertainty (the noisy-TV problem).
+
+  See `TRAINING_METHOD.md`, last section.
 - **2026-10-20: we will not claim to have solved alignment,** even if every goal succeeds (see "Scope of claims").
