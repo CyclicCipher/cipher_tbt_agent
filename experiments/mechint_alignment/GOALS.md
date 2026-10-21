@@ -156,7 +156,7 @@ humans, created by evolution. Many human values and preferences are already obse
 2. Keep the **mathematical** principles: those that can score input data.
 
 Aesthetic preference is the first case: symmetry, 1/f statistics, averageness, peak shift, order against complexity,
-compression progress. The research document is `BEAUTY_MATH.md`.
+compression progress. The research documents are `BEAUTY_MATH.md` and `PREFERENCE.md` (what a preference is).
 
 **The questions:**
 1. **Can we build a complex objective / preference graph** by which a model judges something as beautiful, useful,

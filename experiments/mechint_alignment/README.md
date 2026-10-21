@@ -18,6 +18,7 @@ it makes the project possible "at least in principle".
 |---|---|
 | `SOURCE_ALREADY_CLEAN.md` | what the essay claims, its definitions, every procedure and number it reports, a skeptic's view, and which claims we can test here |
 | `BEAUTY_MATH.md` | G8: the mathematics of beauty -- innate, cross-species preferences as computable scores, and a unification as quantities over a predictive model (with evidence strength) |
+| `PREFERENCE.md` | G8: a theory of preference (draft) -- what produced the human text distribution (iterated learning reveals the prior; compressibility against expressivity), preference vs value vs goal, liking vs wanting, the identification problem |
 | `GOALS.md` | the goals G1–G7 as a dependency graph (not an ordered list), each with requirements, success criteria and open design decisions |
 | `TRAINING_METHOD.md` | how to train the robot: what OPSD is and why it needs starting competence, and the proposal (privileged-foresight self-distillation from scratch, one method for all regimes) |
 | `EXPERIMENT_E1.md` | E1, pre-registered: how efficiently PPO trains the robot, with an information lens (reward-channel bits, gradient noise scale, bits in the behaviour, the RL tax against distillation) |
