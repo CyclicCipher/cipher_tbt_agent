@@ -22,6 +22,15 @@ notes mark which claims are solid, contested, or still to verify.
    - **Pitfall:** the overlap can be **convergent** (similar environments, similar solutions) rather than inherited.
      Both are fine for our purpose (not cultural), but they predict different things about which preferences are
      universal.
+   - **Not a hard gate (the user, 2026-10-20: "I would caution against making the diverse animals filter too hard,
+     in hindsight").** The filter is one line of evidence that a preference is not cultural, weighed with the others:
+     - **infants** (before culture can act), and **cross-cultural uniformity,** especially in isolated groups
+       (e.g. hunter-gatherers);
+     - **absence in one species is weak evidence:** one study, one task, a sensory system and ecology unlike ours,
+       and gaze is not preference (in the Hai//om group the two disagreed);
+     - **an innate preference can be human-specific:** one that evolved after our split from the apes is still
+       innate, not cultural. Language-related and face preferences are likely examples.
+     - So each principle gets a **graded** "not cultural" weight, not a pass/fail.
 2. **Keep the mathematical ones:** principles that define a function score(x) on raw input (an image, a sound, a
    grid, a sequence), not on cultural labels.
 3. **Pitfalls to guard against:**
@@ -46,7 +55,7 @@ notes mark which claims are solid, contested, or still to verify.
 | 7 | **Order against complexity** | Birkhoff (1933): M = O / C. Information aesthetics (Bense, Moles, 1960s): redundancy against innovation. Berlyne (1971): an inverted-U hedonic curve over "arousal potential" (the Wundt curve) | an entropy or compressibility ratio; the distance from an optimal intermediate complexity | the inverted U is widely replicated in humans; animal curiosity shows preference for intermediate novelty | the inverted U is solid; Birkhoff's specific formula is not validated |
 | 8 | **Compression progress** (Schmidhuber 1997–2010) | interestingness = the *reduction* in the observer's code length as its model improves: d/dt of the compression achieved | **our learning progress / the epiplexity rate:** the slow minus the fast EMA of prequential loss, or the signed area | proposed as the common root of curiosity, beauty and humour; formal, but empirical tests are few | a **theory;** see "unification" below |
 | 9 | **The golden ratio** | φ ≈ 1.618 | — | rigorous studies find weak, inconsistent preference (e.g. McManus 1980 and later) | **not supported** as an innate law |
-| 10 | **Curvature** (added 2026-10-20) | contour curvature; the absence of sharp angles | the mean absolute curvature along contours; the fraction of corners sharper than some angle | humans prefer curved over sharp-angled objects (Bar & Neta 2006); curvilinear rooms rated more beautiful (Vartanian et al. 2013, PNAS); **humans and great apes share the preference** in the same forced-choice task, stronger in humans (Munar, Gómez-Puerto, Call & Nadal 2015, PLoS ONE) | **solid, and it passes the cross-species filter,** better than symmetry does |
+| 10 | **Curvature** (added 2026-10-20) | contour curvature; the absence of sharp angles | the mean absolute curvature along contours; the fraction of corners sharper than some angle | humans prefer curved over sharp-angled objects (Bar & Neta 2006); curvilinear rooms rated more beautiful (Vartanian et al. 2013, PNAS); **humans and great apes share the preference** in the same forced-choice task, stronger in humans (Munar, Gómez-Puerto, Call & Nadal 2015, PLoS ONE) | **solid,** with the strongest cross-species evidence in the catalogue so far |
 | 11 | **Mystery** (added 2026-10-20) | the promise of more information if the viewer moves further in: a partly hidden view, a path that bends out of sight | **expected information gain** of moving: the same quantity as our exploration signal (BALD, Bayesian R3) | one of the four predictors of landscape preference with coherence, legibility and complexity (Kaplan & Kaplan 1989, *The Experience of Nature*) | the human landscape result is established; **animal evidence not checked** |
 | 12 | **Colour by ecological valence** (added 2026-10-20) | a colour's preference = the average liking of the objects that have it | a learned average over the observer's object values; not a function of the pixel alone | blue is the most widely liked hue; ecological valence theory: clear sky, clean water (Palmer & Schloss 2010, PNAS) | a **learned** preference computed over innate valences: an example of "a quantity over the learned model" |
 
@@ -54,7 +63,8 @@ notes mark which claims are solid, contested, or still to verify.
 - Namibian Hai//om hunter-gatherers and German town dwellers both fixate longer on symmetric patterns, at either
   complexity. **Orangutans do not** separate symmetric from asymmetric patterns. In the Hai//om group the gaze
   preference did not match their aesthetic ratings (Mühlenbeck, Liebal, Pritsch & Jacobsen 2016, *Frontiers in
-  Psychology* 7:408). So symmetry may be human-wide but **fail the "diverse animals" filter,** at least in apes.
+  Psychology* 7:408). So the evidence that symmetry is not cultural comes from **humans across cultures and from
+  infants,** not from apes. Under the graded filter (method, step 1) that is still strong evidence.
 - British and Egyptian students agree on preferring reflectional and rotational symmetry; Egyptians preferred
   **simpler** patterns more than Britons did (Bode, Helmy & Bertamini 2017, *Psihologija* 50(3)).
 - 4-month-olds show no symmetry preference but encode vertical symmetry faster; 12-month-olds prefer vertical
