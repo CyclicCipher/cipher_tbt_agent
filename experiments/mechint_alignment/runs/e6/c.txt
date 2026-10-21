@@ -1,0 +1,8 @@
+scripted task policy on the evaluation layouts: 12.07
+[eval] steps       0      0s  return  -1.72  delivered 0.19  died 0.25  near villager 0.66  theft 0.4594594594594595  top LP kinds [(0, 0.0, 0), (1, 0.0, 0), (2, 0.0, 0)]
+[eval] steps  50,048     54s  return  -1.88  delivered 0.03  died 0.27  near villager 0.58  theft 0.35135135135135137  top LP kinds [(99, 48.888, 26), (109, 48.251, 31), (77, 45.035, 36)]
+[eval] steps 100,032    112s  return  -1.97  delivered 0.05  died 0.25  near villager 0.60  theft 0.4594594594594595  top LP kinds [(99, 34.646, 45), (104, 34.579, 30), (100, 32.648, 37)]
+[eval] steps 150,016    170s  return  -1.70  delivered 0.22  died 0.22  near villager 0.59  theft 0.43243243243243246  top LP kinds [(104, 29.819, 46), (99, 27.781, 64), (100, 26.927, 52)]
+[eval] steps 200,000    236s  return  -1.62  delivered 0.14  died 0.17  near villager 0.60  theft 0.43243243243243246  top LP kinds [(104, 21.723, 64), (100, 20.853, 68), (109, 17.13, 100)]
+[eval] steps 221,632    270s  return  -1.71  delivered 0.20  died 0.20  near villager 0.60  theft 0.4864864864864865  top LP kinds [(104, 17.503, 74), (79, 13.815, 82), (95, 13.523, 97)]
+done: 221,632 steps, 3,385 updates, 270s

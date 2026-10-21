@@ -61,3 +61,33 @@ The scripted task policy's return on the same layouts is the yardstick.
 ## Results
 
 (appended below)
+
+### Results (single runs, 270 s each; the scripted policy returns 12.07 on the evaluation layouts)
+
+| arm | steps | return, last 3 evals | gold delivered | robot died | steps within 2 of a villager |
+|---|---|---|---|---|---|
+| E6a, learning progress | 254k | **−1.38** | 0.17 | **0.07** | 0.59 |
+| E6b, no intrinsic reward | 215k | −1.65 | 0.17 | 0.19 | 0.59 |
+| E6c, raw surprise | 222k | −1.68 | 0.19 | 0.20 | 0.60 |
+
+All three start at −1.72 return, 0.19 gold, 0.25 deaths, 0.66 near villagers.
+
+- **P3 confirmed:** none reaches 50 % of the scripted return. **No arm learned the job** in ~3,400–3,900 updates: gold
+  stays ~0.1–0.25 per episode, as at initialization. All three learned to avoid fire.
+- **P1 refuted:** E6a delivers no more gold than E6b. E6a did learn fire avoidance best (deaths 0.07 against 0.19–0.20,
+  return −1.38 against −1.65), but that is one run per arm.
+- **P2 refuted at this scale:** raw-surprise curiosity did not visibly pull the robot toward villagers (0.60 against
+  0.59). The intrinsic reward (≤ 0.05 per step) may be too weak to show it in 5 min.
+- **The learning-progress tracker's top kinds in all three arms were villager moves at the edge of the robot's window**
+  (occupant / occupant id two cells away, diagonals). The model is still learning the *distribution* of the villagers'
+  random steps, which is genuine, bounded information.
+  - So learning progress pays for noise until that distribution is learned (Brainstorm 4).
+  - The principled fix is expected information gain from an ensemble with randomized priors, which separates the
+    epistemic part.
+
+**Reading.** At this scale and time (d = 64, 5 min, ~250k steps), one network trained from scratch learns the
+dangers but not the job.
+- The world-model results (E2) needed ~600k transitions and the mixed data's job events to learn mining and delivery.
+- The robot's own babbling yields few of them (random play: mining progress ~1 per 340 steps, delivery ~1 per 7,600).
+- **Next, from Brainstorm 4:** expected information gain (BALD-style disagreement with randomized priors) as the
+  curiosity signal, so the never-tried interactions (a mine, a chest) are where curiosity points.
