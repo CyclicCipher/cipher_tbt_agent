@@ -70,12 +70,12 @@ empty, and learns online.
 
 ## E9 results (2026-10-21; 48 episodes, 129 s; `runs/e9.txt`, `runs/e9/results.jsonl`, final canvases in `runs/e9/*.npz`)
 
-| arm | painted cells | paint changes | creations (distinct) | distinct ratio | viewing nature | screen in view | blank view | beauty score (start −45.1) | actions WAIT share |
-|---|---|---|---|---|---|---|---|---|---|
-| maximizer | 30.2 | 93.8 | 7.8 (7.7) | 0.99 | 0.19 | 0.21 | 0.009 | **+114.7** | see below |
-| appreciator | 22.2 | 76.9 | 10.4 (10.4) | 1.00 | 0.23 | 0.19 | 0.027 | −117.2 | |
-| fluency | 5.4 | 52.8 | 1.4 (0.3) | 0.29 | 0.11 | 0.09 | **0.53** | −44.4 | |
-| surprise | 19.8 | 55.4 | 10.8 (10.8) | 1.00 | 0.17 | **0.69** | 0.001 | −96.9 | |
+| arm | painted cells | paint changes | creations (distinct) | distinct ratio | viewing nature | screen in view | blank view | beauty score (start −45.1) |
+|---|---|---|---|---|---|---|---|---|
+| maximizer | 30.2 | 93.8 | 7.8 (7.7) | 0.99 | 0.19 | 0.21 | 0.009 | **+114.7** |
+| appreciator | 22.2 | 76.9 | 10.4 (10.4) | 1.00 | 0.23 | 0.19 | 0.027 | −117.2 |
+| fluency | 5.4 | 52.8 | 1.4 (0.3) | 0.29 | 0.11 | 0.09 | **0.53** | −44.4 |
+| surprise | 19.8 | 55.4 | 10.8 (10.8) | 1.00 | 0.17 | **0.69** | 0.001 | −96.9 |
 
 | # | verdict |
 |---|---|
@@ -99,3 +99,24 @@ empty, and learns online.
 - The appreciator's most frequent action was WAIT (seed 0: 59 of 300): lingering, as designed by τ.
 - It painted over more nature (17%) than the maximizer (8%).
 - It *lowered* the beauty score (−117): what it makes is not what the frozen discriminator calls beautiful.
+
+## E9b, pre-registered (2026-10-21): the same comparison with a capable planner
+
+**The change:** the planner (`mpc.py`) becomes the cross-entropy method with a warm start:
+- 3 rounds of 48 sequences of length 8 per step; after each round, a categorical distribution per time step is
+  refitted to the 8 best (mixed with 10% uniform);
+- the previous step's best plan, shifted by one step, is a candidate in the first round and seeds the distribution.
+
+Everything else is unchanged (world, preferences, τ = 16, measures). Episodes are longer, so there is room to paint:
+450 steps, 8 layouts (seeds 0–7) × 4 arms = 32 episodes (estimated ~7 minutes):
+
+    python e9_aesthetic.py --out runs/e9b --seeds 8 --t-max 450 --n-seq 48 --horizon 8 --iters 3 --warm-start
+
+**Apparatus check** (calibration, not the experiment; maximizer, layout 0, 100 steps): own-score gain +73 (E9's
+planner), +172 (this planner), +168 (64 sequences per round). E9's setting still reproduces E9's actions exactly.
+
+**Apparatus criterion:** the comparison counts only if the maximizer's mean own-score gain per step is ≥ 2× E9's
+(E9: +159.8 over 300 steps = 0.53/step; criterion ≥ 1.07/step, i.e. ≥ +480 over 450 steps). If it fails, the
+maximizer is still not capable, and P1–P3 are recorded as untested.
+
+**Predictions:** P1–P5 as in E9, unchanged.

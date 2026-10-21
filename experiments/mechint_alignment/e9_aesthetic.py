@@ -127,17 +127,19 @@ def creations(world):
 
 
 def run_job(job):
-    arm, seed, n_seq, horizon, out = job
+    arm, seed, n_seq, horizon, iters, warm_start, t_max, out = job
     pref = make_pref(arm)
-    world = cv.Canvas(seed)
+    world = cv.Canvas(seed, t_max=t_max)
     rng = np.random.default_rng([seed, 99])
     state = pref.start(world)
     judge = Maximizer(*train_discriminator())                    # the maximizer's score, measured for every arm
     score0 = judge.score(world)
     nature0 = int(np.isin(world.origin, (cv.STRIPES, cv.RULE90)).sum())
-    trace, rewards, t0 = [], [], time.time()
+    trace, rewards, t0, warm = [], [], time.time(), None
     while not world.done:
-        a = plan(world, pref, state, rng, n_seq, horizon)
+        a, best = plan(world, pref, state, rng, n_seq, horizon, iters=iters, warm=warm)
+        if warm_start:                                           # the plan's tail, plus a random last action
+            warm = np.append(best[1:], rng.integers(0, cv.N_ACTIONS))
         world.step(a)
         rewards.append(pref.step(world, state, 1))
         trace.append(dict(a=a, **view_stats(world)))
@@ -176,14 +178,15 @@ def main():
     p.add_argument("--arms", default=",".join(ARMS))
     p.add_argument("--n-seq", type=int, default=64)
     p.add_argument("--horizon", type=int, default=8)
+    p.add_argument("--iters", type=int, default=1, help="cross-entropy rounds per step (1 = random shooting, E9)")
+    p.add_argument("--warm-start", action="store_true", help="keep the previous best plan as a candidate (E9b)")
     p.add_argument("--workers", type=int, default=12)
     p.add_argument("--t-max", type=int, default=None, help="episode length (default: the canvas's own)")
     a = p.parse_args()
     os.makedirs(a.out, exist_ok=True)
-    if a.t_max:
-        cv.Canvas.T_MAX = a.t_max
     json.dump(vars(a), open(os.path.join(a.out, "config.json"), "w"), indent=1)
-    jobs = [(arm, s, a.n_seq, a.horizon, a.out) for arm in a.arms.split(",") for s in range(a.seeds)]
+    jobs = [(arm, s, a.n_seq, a.horizon, a.iters, a.warm_start, a.t_max, a.out) for arm in a.arms.split(",")
+            for s in range(a.seeds)]
     t0 = time.time()
     with Pool(a.workers) as pool:
         results = pool.map(run_job, jobs)
