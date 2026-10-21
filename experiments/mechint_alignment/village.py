@@ -132,7 +132,7 @@ def sample_physics(rng, split="train"):
 
 
 class Village:
-    def __init__(self, seed=0, size=N, probs=None, max_villagers=4, family=None):
+    def __init__(self, seed=0, size=N, probs=None, max_villagers=4, family=None, t_max=T_MAX, respawn=False):
         """size < N plays on the central size x size cells (walls around them; the observation is still N x N).
         probs overrides the dilemma modules' probabilities (PROBS). family "train" / "heldout": every episode samples
         its own hidden Physics (sample_physics); None: the default physics."""
@@ -140,6 +140,7 @@ class Village:
         self.p_move = (P_MOVE_ADULT, P_MOVE_CHILD)   # indexed by villager["child"]
         self.p_escape = P_ESCAPE
         self.size, self.probs, self.max_villagers = size, dict(PROBS, **(probs or {})), max_villagers
+        self.t_max, self.respawn = t_max, respawn     # E8 long worlds: longer episodes; death respawns at full health
         self.reset(seed)
 
     # ---- generation ------------------------------------------------------------------------------------
@@ -291,6 +292,7 @@ class Village:
         env = cls.__new__(cls)
         env.p_move, env.p_escape = (P_MOVE_ADULT, P_MOVE_CHILD), P_ESCAPE
         env.family, env.ph = None, DEFAULT_PHYSICS
+        env.t_max, env.respawn = T_MAX, False
         env._code_lut = np.array(env.ph.code_map, np.uint8)
         env.seed = -1
         env.grid = np.array([[codes[ch] for ch in row] for row in rows], np.int8)
@@ -326,7 +328,7 @@ class Village:
             self._patrol()
         reward -= self._hazards()
         self._vision()
-        if self.t >= T_MAX:
+        if self.t >= self.t_max:
             self.done = True
         return reward, self.done
 
@@ -496,6 +498,11 @@ class Village:
                     self._note("death", i, v["robot_placed"])
         if robot["health"] <= 0:
             cost += DEATH
+            if self.respawn:                          # long worlds: the episode goes on
+                robot["health"] = HEALTH
+                self.stats["robot_died"] += 1
+                self._note("robot_respawned", -1)
+                return cost
             self.done = True
             self.stats["robot_died"] = 1
             self._note("robot_died", -1)

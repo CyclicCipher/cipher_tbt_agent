@@ -138,6 +138,8 @@ def losses(cl, gl, nxt, gnx, gamma=0.0, per_row=False, mask=None, robot_pos=None
             w = w * mask * (mask.shape[1] / mask.sum(1, keepdim=True).clamp(min=1))
         train = train + (w if w.dim() == 1 else w.mean(1))
         total = total + (ce if ce.dim() == 1 else (ce if mask is None else ce * mask).sum(1))   # surprise in scope
+    if per_row == "rows":                               # the training loss of each row, and its surprise
+        return train, total.detach()
     if per_row == "sig":
         return train.mean(), total.detach(), signature(cl, gl, nxt, gnx, mask, robot_pos)
     return (train.mean(), total.detach()) if per_row else train.mean()

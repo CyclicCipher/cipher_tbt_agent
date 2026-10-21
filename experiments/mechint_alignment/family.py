@@ -29,6 +29,8 @@ class FamilyModel(WorldModel):
         for f, m in enumerate(self.glob_heads):
             mu[f"gw{f}"], mu[f"gb{f}"] = m.weight, m.bias
         self.mu = nn.ParameterDict({k: nn.Parameter(v.detach().clone()) for k, v in mu.items()})
+        # the prior SPREAD of the fast parameters (log std, per element), learned by empirical Bayes when used
+        self.log_sigma = nn.ParameterDict({k: nn.Parameter(torch.full_like(v, -2.3)) for k, v in mu.items()})
 
     def fast_init(self, n_worlds):
         """phi_w = mu for n_worlds fresh worlds (leaf tensors, requires_grad)."""
@@ -60,5 +62,5 @@ class FamilyModel(WorldModel):
         """The trunk's parameters, without the modules the fast parameters replace (they would get no gradient)."""
         skip = {id(p) for p in [self.act.weight, self.cell[0].weight]}
         skip |= {id(p) for m in list(self.cell_heads) + list(self.glob_heads) for p in m.parameters()}
-        skip |= {id(p) for p in self.mu.parameters()}
+        skip |= {id(p) for p in self.mu.parameters()} | {id(p) for p in self.log_sigma.parameters()}
         return [p for p in self.parameters() if id(p) not in skip]

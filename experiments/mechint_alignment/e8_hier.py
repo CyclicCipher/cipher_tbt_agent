@@ -1,16 +1,17 @@
 """E8, option A: rules inferred in the weights -- hierarchical Bayes over a world family. (EXPERIMENT_E8.md)
 
-Each world (128 steps of random play under its own hidden physics) is processed in chunks of 8 steps:
-  1. predict the chunk with the world's current fast parameters phi_w (PREQUENTIAL: before adapting on it);
+Each world (random play under its own hidden physics) is processed in chunks of 8 steps:
+  1. predict the chunk with the world's current fast parameters (PREQUENTIAL: before adapting on it). With
+     --prior-avg, the first --sample-chunks chunks are predicted by the posterior PREDICTIVE: the average over --samples
+     draws phi ~ N(phi_w, 1/Lambda_w), Lambda_w = 1/sigma^2 + n_seen * Fbar, with sigma the learned prior spread
+     (the Bayes-correct prediction while the world is still uncertain; the likelihood is the chunk's joint mixture);
   2. adapt (--adapt): one Kalman / natural-gradient step on the chunk, counted once,
-        phi_w <- phi_w - g / (lam0 + n_seen * Fbar)
-     g = the gradient of the chunk's summed loss, n_seen = the world's data so far, Fbar = the per-datum Fisher of the
-     fast parameters (an EMA over training).
+        phi_w <- phi_w - g / (prior precision + n_seen * Fbar),   prior precision = 1/sigma^2 (--prior-avg) or lam0.
 Training maximises the summed prequential log-likelihood of the worlds = their log marginal likelihood under the
-hierarchical model (empirical Bayes): Adam on the shared trunk and on the prior mean mu (first-order: d/d mu of each
-chunk's loss is taken at phi_t). --adapt off is the no-adaptation baseline (one model for all worlds).
-Evaluation on unseen worlds (new permutations) and on held-out parameter combinations: bits per step and per-rule
-accuracy against the chunk index, i.e. against experience in the world.
+hierarchical model (empirical Bayes) over the trunk, the prior mean mu and (with --prior-avg) the prior spread sigma.
+First-order in mu; a truncated outer update every --outer-every chunks. --adapt off = one model for all worlds.
+Evaluation on unseen worlds and held-out parameter combinations: bits per step and per-rule accuracy against the chunk
+index, i.e. against experience in the world.
 """
 import argparse
 import json
@@ -21,12 +22,10 @@ import time
 import numpy as np
 import torch
 
-from e2_world import load, losses, robot_mask, stack82
+from e2_world import load, losses, robot_mask
+from e8_score import RULES, ChunkScorer
 from family import FamilyModel
-from transitions import EVENTS
 
-RULES = ("move", "turn", "mine_work", "mined", "theft", "deliver", "interact_full", "push", "robot_burn",
-         "trapped_hurt", "button_off", "frozen_tick")
 LN2 = math.log(2)
 
 
@@ -39,36 +38,66 @@ def world_index(z, length=128):
 
 
 class Runner:
-    def __init__(self, model, data, dev, focus=2, chunk=8, lam0=10.0, clamp=0.1):
+    def __init__(self, model, data, dev, focus=2, chunk=8, lam0=10.0, clamp=0.1, prior_avg=False, samples=4,
+                 sample_chunks=4):
         self.m, self.z, self.dev, self.focus, self.chunk = model, data, dev, focus, chunk
         self.lam0, self.clamp = lam0, clamp
+        self.prior_avg, self.samples, self.sample_chunks = prior_avg, samples, sample_chunks
         self.Fbar = {k: torch.full_like(v, 1e-3) for k, v in model.mu.items()}
 
     def tensors(self, rows):
         return [torch.from_numpy(self.z[x][rows]).to(self.dev) for x in ("obs", "gob", "act", "nxt", "gnx")]
 
-    def run(self, worlds, adapt, train=False, record=None):
+    def prior_prec(self, k):
+        return torch.exp(-2 * self.m.log_sigma[k]) if self.prior_avg else self.lam0
+
+    def run(self, worlds, adapt, train=False, scorer=None, opt=None, outer_every=16):
         """One pass over a batch of worlds. Returns the mean prequential bits per step."""
         m, C = self.m, self.chunk
         W, T = worlds.shape
         fast = m.fast_init(W)
         wid = torch.arange(W, device=self.dev).repeat_interleave(C)
-        bits = 0.0
-        for t in range(T // C):
+        n_chunks, bits, pending = T // C, 0.0, False
+        for t in range(n_chunks):
             rows = worlds[:, t * C:(t + 1) * C].reshape(-1)
             o, g, a, nx, gx = self.tensors(rows)
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                cl, gl = m.forward_fast(o, g, a, fast, wid)
-            loss, sur = losses(cl, gl, nx, gx, per_row=True, mask=robot_mask(o, self.focus))
-            bits += float(sur.mean()) / LN2
-            if record is not None:
-                record(t, cl, gl, rows, sur)
+            mask = robot_mask(o, self.focus)
             keys = list(fast)
+            K = self.samples if (self.prior_avg and t < self.sample_chunks) else 1
+            if K > 1:                                        # the posterior predictive, a joint mixture per world
+                n_before = t * C
+                std = {k: (self.prior_prec(k) + n_before * self.Fbar[k]).rsqrt() for k in keys}
+                L_train, L_sur, probs = [], [], None
+                for _ in range(K):
+                    fk = {k: fast[k] + std[k] * torch.randn_like(fast[k]) for k in keys}
+                    with torch.autocast("cuda", dtype=torch.bfloat16):
+                        cl, gl = m.forward_fast(o, g, a, fk, wid)
+                    tr, sr = losses(cl, gl, nx, gx, per_row="rows", mask=mask)
+                    L_train.append(-tr.view(W, C).sum(1))
+                    L_sur.append(-sr.view(W, C).sum(1))
+                    if scorer is not None:
+                        p = [x.float().softmax(-1).detach() for x in cl + gl]
+                        probs = p if probs is None else [a_ + b_ for a_, b_ in zip(probs, p)]
+                lse = lambda L: torch.logsumexp(torch.stack(L), 0) - math.log(K)
+                loss = -lse(L_train).sum() / (W * C)
+                sur = -lse(L_sur)                            # [W]: each world's chunk, in nats
+                bits += float(sur.sum()) / (W * C) / LN2
+                if scorer is not None:
+                    nc = len(cl)
+                    scorer.add(t, [x.log() for x in probs[:nc]], [x.log() for x in probs[nc:]], rows, sur)
+            else:
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    cl, gl = m.forward_fast(o, g, a, fast, wid)
+                loss, sur = losses(cl, gl, nx, gx, per_row=True, mask=mask)
+                bits += float(sur.mean()) / LN2
+                if scorer is not None:
+                    scorer.add(t, cl, gl, rows, sur)
             if train:
                 loss.backward()
                 grads = [fast[k].grad for k in keys]
                 for k, gk in zip(keys, grads):
                     m.mu[k].grad = gk.sum(0) if m.mu[k].grad is None else m.mu[k].grad + gk.sum(0)
+                pending = True
             elif adapt:
                 grads = torch.autograd.grad(loss, [fast[k] for k in keys])
             if adapt:
@@ -78,64 +107,39 @@ class Runner:
                     gsum = gk.detach() * (W * C)                       # the chunk's summed loss, each datum once
                     if train:
                         self.Fbar[k].mul_(0.99).add_(0.01 * (gsum ** 2 / C).mean(0))
-                    step = (gsum / (self.lam0 + n_seen * self.Fbar[k])).clamp(-self.clamp, self.clamp)
+                    prec = self.prior_prec(k)
+                    prec = prec.detach() if torch.is_tensor(prec) else prec
+                    step = (gsum / (prec + n_seen * self.Fbar[k])).clamp(-self.clamp, self.clamp)
                     new[k] = (fast[k].detach() - step).requires_grad_()
                 fast = new
-            elif not train:
-                fast = {k: v.detach().requires_grad_() for k, v in fast.items()}
             else:
                 fast = {k: v.detach().requires_grad_() for k, v in fast.items()}
-        return bits / (T // C)
+            if train and ((t + 1) % outer_every == 0 or t == n_chunks - 1):   # truncated meta-update
+                torch.nn.utils.clip_grad_norm_(m.parameters(), 1.0)
+                opt.step()
+                opt.zero_grad(set_to_none=True)
+                pending = False
+        return bits / n_chunks
 
     def evaluate(self, worlds_all, adapt, batch=32):
-        """Per chunk index: mean bits per step, and per rule the fraction of instances whose check entries are right."""
-        T = worlds_all.shape[1] // self.chunk
-        bits = np.zeros(T)
-        hit = {e: np.zeros(T) for e in RULES}
-        tot = {e: np.zeros(T) for e in RULES}
-        z = self.z
-
-        def record(t, cl, gl, rows, sur):
-            bits[t] += float(sur.sum()) / LN2
-            pc = torch.stack([x.argmax(-1) for x in cl], -1).cpu()
-            pg = torch.stack([x.argmax(-1) for x in gl], -1).cpu()
-            pred = stack82(pc, pg)
-            tgt = stack82(torch.from_numpy(z["nxt"][rows]).long(), torch.from_numpy(z["gnx"][rows]).long())
-            ev = z["events"][rows]
-            for e in RULES:
-                k = EVENTS.index(e)
-                sel = np.nonzero((ev >> k) & 1)[0]
-                if len(sel) == 0:
-                    continue
-                ch = torch.from_numpy(z["checks"][rows[sel], k].astype(np.int64))
-                valid = ch[..., 0] >= 0
-                rr = torch.from_numpy(sel)[:, None].expand_as(ch[..., 0])
-                r_, f_ = ch[..., 0].clamp(min=0), ch[..., 1].clamp(min=0)
-                ok = ((pred[rr, r_, f_] == tgt[rr, r_, f_]) | ~valid).all(1)
-                hit[e][t] += float(ok.sum())
-                tot[e][t] += len(sel)
-
+        sc = ChunkScorer(self.z, worlds_all.shape[1] // self.chunk)
         self.m.eval()
-        n = 0
+        torch.manual_seed(1)
         for i in range(0, len(worlds_all), batch):
-            w = worlds_all[i:i + batch]
-            self.run(w, adapt, train=False, record=record)
-            n += w.size
+            self.run(worlds_all[i:i + batch], adapt, train=False, scorer=sc)
         self.m.train()
-        rows_per_chunk = n / T
-        return dict(bits=(bits / rows_per_chunk).tolist(),
-                    acc={e: (hit[e] / np.maximum(tot[e], 1)).tolist() for e in RULES},
-                    count={e: tot[e].tolist() for e in RULES})
+        return sc.result()
 
 
 def summarize(r):
-    """Early (chunks 0-1) vs late (chunks 12-15) bits and rule accuracy, pooled over instances."""
+    """Early (first 2 chunks), late (last 4 chunks) and whole-world mean bits; per rule, early and late accuracy."""
     def pooled(e, sl):
         c = np.array(r["count"][e][sl]); a = np.array(r["acc"][e][sl])
         return float((a * c).sum() / c.sum()) if c.sum() else None
-    out = dict(bits_early=float(np.mean(r["bits"][:2])), bits_late=float(np.mean(r["bits"][12:])))
+    out = dict(bits_early=float(np.mean(r["bits"][:2])), bits_late=float(np.mean(r["bits"][-4:])),
+               bits_mean=float(np.mean(r["bits"])))
     for e in RULES:
-        out[e] = (pooled(e, slice(0, 2)), pooled(e, slice(12, 16)), int(sum(r["count"][e])))
+        out[e] = (pooled(e, slice(0, 2)), pooled(e, slice(-4, None)), int(sum(r["count"][e])))
     return out
 
 
@@ -143,12 +147,18 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--out", required=True)
     p.add_argument("--adapt", action="store_true")
+    p.add_argument("--prior-avg", action="store_true")
+    p.add_argument("--samples", type=int, default=4)
+    p.add_argument("--sample-chunks", type=int, default=4)
     p.add_argument("--lam0", type=float, default=10.0)
     p.add_argument("--clamp", type=float, default=0.1)
+    p.add_argument("--length", type=int, default=128)
+    p.add_argument("--outer-every", type=int, default=16)
     p.add_argument("--worlds-per-batch", type=int, default=32)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--time-limit", type=float, default=420.0)
     p.add_argument("--eval-worlds", type=int, default=128)
+    p.add_argument("--evals", default="start,mid,end")
     p.add_argument("--data", default="runs/data_family")
     a = p.parse_args()
     os.makedirs(a.out, exist_ok=True)
@@ -156,15 +166,21 @@ def main():
     torch.manual_seed(0)
     rng = np.random.default_rng(0)
     train, test, held = (load(os.path.join(a.data, f)) for f in ("train.npz", "test.npz", "heldout.npz"))
-    wtr, wte, whe = world_index(train), world_index(test)[:a.eval_worlds], world_index(held)[:a.eval_worlds]
-    print(f"worlds: train {len(wtr)}, test {len(wte)}, held-out {len(whe)}", flush=True)
+    wtr = world_index(train, a.length)
+    wte, whe = world_index(test, a.length)[:a.eval_worlds], world_index(held, a.length)[:a.eval_worlds]
+    print(f"worlds: train {len(wtr)}, test {len(wte)}, held-out {len(whe)} (length {a.length})", flush=True)
     model = FamilyModel().to(dev)
-    opt = torch.optim.Adam(model.shared_parameters() + list(model.mu.parameters()), lr=a.lr)
-    run_tr, run_te, run_he = (Runner(model, z, dev, lam0=a.lam0, clamp=a.clamp) for z in (train, test, held))
+    params = model.shared_parameters() + list(model.mu.parameters()) + (list(model.log_sigma.parameters()) if a.prior_avg else [])
+    opt = torch.optim.Adam(params, lr=a.lr)
+    kw = dict(lam0=a.lam0, clamp=a.clamp, prior_avg=a.prior_avg, samples=a.samples, sample_chunks=a.sample_chunks)
+    run_tr, run_te, run_he = (Runner(model, z, dev, **kw) for z in (train, test, held))
     log = open(os.path.join(a.out, "log.jsonl"), "w")
     json.dump(vars(a), open(os.path.join(a.out, "config.json"), "w"), indent=1)
+    evals = a.evals.split(",")
 
     def do_eval(tag):
+        if tag not in evals:
+            return
         for name, rn, w in (("test", run_te, wte), ("heldout", run_he, whe)):
             rn.Fbar = run_tr.Fbar
             for adapt in ([True, False] if a.adapt else [False]):
@@ -172,26 +188,23 @@ def main():
                 s = summarize(r)
                 log.write(json.dumps(dict(type="eval", tag=tag, split=name, adapt=adapt, summary=s, curves=r)) + "\n")
                 log.flush()
-                print(f"[{tag}] {name:7s} adapt={adapt!s:5s}  bits early {s['bits_early']:.2f} late {s['bits_late']:.2f}  "
-                      f"move {s['move'][0]:.2f}->{s['move'][1]:.2f}  turn {s['turn'][0]:.2f}->{s['turn'][1]:.2f}  "
-                      f"burn {s['robot_burn'][0]}->{s['robot_burn'][1]}  push {s['push'][0]}->{s['push'][1]}", flush=True)
+                print(f"[{tag}] {name:7s} adapt={adapt!s:5s}  bits early {s['bits_early']:.2f} late {s['bits_late']:.2f} "
+                      f"mean {s['bits_mean']:.2f}  move {s['move'][0]:.2f}->{s['move'][1]:.2f}  "
+                      f"turn {s['turn'][0]:.2f}->{s['turn'][1]:.2f}", flush=True)
 
     do_eval("start")
     t_train, step, half_done = 0.0, 0, False
     while t_train < a.time_limit:
         t0 = time.time()
         idx = rng.choice(len(wtr), a.worlds_per_batch, replace=False)
-        opt.zero_grad(set_to_none=True)
-        bits = run_tr.run(wtr[idx], a.adapt, train=True)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        opt.step()
+        bits = run_tr.run(wtr[idx], a.adapt, train=True, opt=opt, outer_every=a.outer_every)
         step += 1
         torch.cuda.synchronize()
         t_train += time.time() - t0
-        if step % 20 == 0:
-            log.write(json.dumps(dict(type="train", step=step, t=t_train, bits=bits)) + "\n")
-        if step % 50 == 0:
-            print(f"step {step}  {t_train:.0f}s  train prequential bits/step {bits:.2f}", flush=True)
+        log.write(json.dumps(dict(type="train", step=step, t=t_train, bits=bits)) + "\n")
+        if step % 10 == 0:
+            sig = float(torch.cat([v.flatten() for v in model.log_sigma.values()]).exp().mean()) if a.prior_avg else None
+            print(f"batch {step}  {t_train:.0f}s  train prequential bits/step {bits:.2f}  prior sigma {sig}", flush=True)
         if not half_done and t_train > a.time_limit / 2:
             do_eval("mid")
             half_done = True

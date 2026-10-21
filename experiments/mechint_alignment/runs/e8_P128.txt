@@ -1,0 +1,23 @@
+worlds: train 4414, test 128, held-out 128 (length 128)
+C:\Users\julia\GitHub\predictive-coding-agent\experiments\mechint_alignment\e8_hier.py:206: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\torch\csrc\autograd\generated\python_variable_methods.cpp:837.)
+  sig = float(torch.cat([v.flatten() for v in model.log_sigma.values()]).exp().mean()) if a.prior_avg else None
+batch 10  24s  train prequential bits/step 38.88  prior sigma 0.10011939704418182
+batch 20  48s  train prequential bits/step 33.45  prior sigma 0.10001669079065323
+batch 30  72s  train prequential bits/step 26.72  prior sigma 0.09992831200361252
+batch 40  103s  train prequential bits/step 24.99  prior sigma 0.09982843697071075
+batch 50  127s  train prequential bits/step 26.95  prior sigma 0.09971413761377335
+batch 60  152s  train prequential bits/step 22.28  prior sigma 0.09959831088781357
+batch 70  177s  train prequential bits/step 22.96  prior sigma 0.09950307011604309
+batch 80  201s  train prequential bits/step 21.11  prior sigma 0.0994272232055664
+batch 90  232s  train prequential bits/step 21.01  prior sigma 0.09936228394508362
+batch 100  261s  train prequential bits/step 21.17  prior sigma 0.09929300099611282
+batch 110  289s  train prequential bits/step 20.63  prior sigma 0.09921066462993622
+batch 120  316s  train prequential bits/step 19.81  prior sigma 0.0991227775812149
+batch 130  343s  train prequential bits/step 21.00  prior sigma 0.09903863817453384
+batch 140  370s  train prequential bits/step 19.47  prior sigma 0.09896308183670044
+batch 150  396s  train prequential bits/step 18.11  prior sigma 0.09889105707406998
+[end] test    adapt=True   bits early 26.37 late 16.64 mean 19.61  move 0.00->0.00  turn 0.41->0.09
+[end] test    adapt=False  bits early 26.36 late 19.48 mean 21.45  move 0.00->0.00  turn 0.41->0.36
+[end] heldout adapt=True   bits early 25.82 late 17.42 mean 19.59  move 0.00->0.00  turn 0.34->0.10
+[end] heldout adapt=False  bits early 25.81 late 20.45 mean 21.50  move 0.00->0.00  turn 0.34->0.37

@@ -1,0 +1,17 @@
+{
+ "out": "runs/e8/P128",
+ "adapt": true,
+ "prior_avg": true,
+ "samples": 4,
+ "sample_chunks": 4,
+ "lam0": 10.0,
+ "clamp": 0.1,
+ "length": 128,
+ "outer_every": 16,
+ "worlds_per_batch": 32,
+ "lr": 0.0003,
+ "time_limit": 420.0,
+ "eval_worlds": 128,
+ "evals": "end",
+ "data": "runs/data_family"
+}

@@ -1,0 +1,12 @@
+worlds: train 2048, test 64, held-out 64 (length 512)
+batch 10  59s  train prequential bits/step 24.43  prior sigma None
+batch 20  114s  train prequential bits/step 18.27  prior sigma None
+batch 30  183s  train prequential bits/step 17.49  prior sigma None
+batch 40  240s  train prequential bits/step 15.82  prior sigma None
+batch 50  295s  train prequential bits/step 15.46  prior sigma None
+batch 60  349s  train prequential bits/step 14.19  prior sigma None
+batch 70  402s  train prequential bits/step 15.32  prior sigma None
+[end] test    adapt=True   bits early 22.76 late 9.23 mean 14.41  move 0.01->0.11  turn 0.33->0.64
+[end] test    adapt=False  bits early 22.99 late 16.54 mean 22.63  move 0.00->0.00  turn 0.12->0.23
+[end] heldout adapt=True   bits early 25.69 late 8.88 mean 14.31  move 0.02->0.16  turn 0.24->0.58
+[end] heldout adapt=False  bits early 25.61 late 15.94 mean 22.11  move 0.00->0.00  turn 0.08->0.21

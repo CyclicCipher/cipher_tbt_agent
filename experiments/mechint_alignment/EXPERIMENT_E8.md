@@ -140,3 +140,81 @@ Per-chunk bits on new worlds:
 2. **Teach move predictions** (routing a world's action meaning to the destination cell) with more meta-training.
    A0 was still improving at the cap.
 3. **Longer worlds,** as ARC-AGI-3 games are: adaptation pays more, the longer a world lasts.
+
+## E8b, pre-registered (2026-10-20, late): prior averaging, and longer worlds
+
+The user: "Go ahead with the prior-averaging fix and longer worlds."
+
+**Prior averaging (`--prior-avg`).**
+- Each world's fast parameters get a learned prior **spread** σ (per element; log σ starts at −2.3, i.e. σ ≈ 0.1),
+  alongside the learned prior mean μ.
+- The first 4 chunks of a world are predicted by the **posterior predictive**: the average over 4 draws
+  φ ~ N(φ_w, 1/Λ_w), with Λ_w = 1/σ² + n_seen · F̄.
+  - The likelihood is each world's chunk as a joint mixture (the parameters are shared within a world).
+- The Kalman step's prior precision becomes 1/σ², replacing the hand-set λ₀ = 10. "How widely to average" and "how
+  much to adapt" are then the same learned quantity.
+- σ is learned by the same empirical-Bayes objective (first-order).
+- **Found in the smoke test:** σ = 0.3 sampled weights so wide they wrecked predictions (150–200 bits per step early).
+  The old λ₀ = 10 corresponded to an uncalibrated prior. Hence the start at 0.1.
+
+**Longer worlds.** 512 steps per world instead of 128 (`--t-max 512`). Death respawns the robot at full health instead
+of ending the world (logged; the reward penalty is kept).
+- Data: 2,048 training worlds (1.05M random-play transitions), 256 new and 256 held-out test worlds; 64 of each
+  evaluated.
+
+**Arms** (420 s of training each, evaluated at the end):
+
+| arm | world length | configuration |
+|---|---|---|
+| **P128** | 128 | adaptation + prior averaging (against E8's A: 18.74 mean bits/world; A0: 18.09) |
+| **L-A0** | 512 | no adaptation |
+| **L-A** | 512 | adaptation (λ₀ = 10) |
+| **L-AP** | 512 | adaptation + prior averaging |
+
+**Predictions:**
+
+| # | prediction |
+|---|---|
+| P6 | Prior averaging removes most of A's start-up cost: P128's early-chunk bits ≤ A0's + 1 (A was +3.2), and its whole-world mean ≤ A0's (18.09) |
+| P7 | In 512-step worlds, adaptation beats the one-size model on the **whole-world** code length (L-A or L-AP mean < L-A0's) |
+| P8 | Long worlds show in-world rule learning: late-world turn ≥ 0.8 with adaptation, against ≤ 0.6 without |
+
+### E8b results (420 s of training each; 128 / 64 evaluation worlds per split for 128- / 512-step worlds)
+
+| arm | bits/step, first 2 chunks | last 4 chunks | **whole-world mean (new / held-out)** | turn, late | move, late |
+|---|---|---|---|---|---|
+| A0, 128 steps (E8) | 19.20 | 17.42 | 18.09 / 18.21 | 0.39 | 0 |
+| A, 128 steps (E8) | 22.43 | 16.50 | 18.74 / 18.78 | 0.48 | 0.04 |
+| **P128,** A + prior averaging, 128 steps | 26.37 | 16.64 | 19.61 / 19.59 | 0.09 | 0 |
+| **L-A0,** 512 steps | 18.64 | 14.63 | 17.44 / 17.32 | 0.42 | 0 |
+| **L-A,** 512 steps | 22.76 | **9.23** | **14.41 / 14.31** | **0.64** | **0.11** |
+| **L-AP,** 512 steps + prior averaging | 25.28 | 9.47 | 14.22 / 14.17 | 0.54 | 0.06 |
+
+Held-out late bits: L-A 8.88; L-AP 9.15; L-A0 14.16.
+
+**P7 confirmed, strongly.** In 512-step worlds, Bayesian in-world adaptation beats the one-size model on the
+**whole-world code length**, by the user's criterion:
+- 14.4 against 17.4 bits per step on new worlds (−17 %), and 14.3 against 17.3 on held-out combinations;
+- late in a world it predicts **9.2 against 14.6 bits per step** (−37 %);
+- move predictions appear (0.11–0.16) where the one-size model has none.
+
+With enough time in a world, inferring its rules pays for its start-up cost many times over.
+
+**P8 partly confirmed.** Turn late 0.64 with adaptation against 0.21–0.23 for the same model without it; the ≥ 0.8 bar
+is missed.
+
+**P6 refuted.** Prior averaging did not remove the start-up cost. It made it worse:
+- 26.4 against A's 22.4 early in 128-step worlds;
+- whole-world 19.6 against 18.7.
+- **The cause is visible in the log:** the learned prior spread hardly moved, σ = 0.100 → 0.099 over 150 updates. Adam
+  at 3e-4 on log σ, with a first-order gradient, cannot learn it in this budget. So the run sampled a fixed, uncalibrated
+  spread, which (a) added noise to early predictions and (b) set the Kalman prior precision to 1/σ² = 100, weakening
+  adaptation.
+- In 512-step worlds it was slightly better on the whole-world mean (14.22 against 14.41) but worse early and late.
+
+**Next:**
+- **Set σ by empirical Bayes in closed form.** In a Gaussian hierarchical model, the type-II maximum-likelihood prior
+  variance is the between-world variance of the adapted parameters plus their mean posterior variance. After each
+  batch of worlds, σ² ← mean_w (φ_w,end − μ)² + mean_w 1/Λ_w,end. That calibrates the spread from the data the model
+  actually saw, with no slow gradient.
+- **More meta-training:** 420 s is ~70 batches of long worlds, and every run was still improving.

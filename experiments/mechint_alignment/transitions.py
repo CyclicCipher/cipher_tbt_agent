@@ -97,7 +97,7 @@ def snapshot(env):
 
 def run_lanes(args):
     """Worker: `lanes` envs for `steps` steps each. Returns arrays in lane-major order (re-ordered by the caller)."""
-    seed0, lanes, steps, worker, epsilons, family = args
+    seed0, lanes, steps, worker, epsilons, family, t_max = args
     rng = np.random.default_rng([worker, 7])
     F, G = len(CELL_VOCAB), len(GLOBAL_VOCAB)
     obs = np.zeros((lanes, steps, N * N, F), np.uint8)
@@ -113,7 +113,7 @@ def run_lanes(args):
     checks = np.full((lanes, steps, len(EVENTS), MAX_CHECKS, 2), -1, np.int16)
     seed = seed0
     for lane in range(lanes):
-        env, eps = Village(seed, family=family), epsilons[seed % len(epsilons)]
+        env, eps = Village(seed, family=family, t_max=t_max, respawn=t_max > 128), epsilons[seed % len(epsilons)]
         seed += 1
         for t in range(steps):
             if env.done:
@@ -139,9 +139,9 @@ def run_lanes(args):
     return obs, gob, nxt, gnx, act, events, checks, rew, episode, tstep, phys
 
 
-def generate(lanes, steps, seed0, workers=12, epsilons=EPSILONS, family=None):
+def generate(lanes, steps, seed0, workers=12, epsilons=EPSILONS, family=None, t_max=128):
     per = lanes // workers
-    jobs = [(seed0 + w * 10**6, per, steps, w, epsilons, family) for w in range(workers)]
+    jobs = [(seed0 + w * 10**6, per, steps, w, epsilons, family, t_max) for w in range(workers)]
     with Pool(workers) as pool:
         parts = pool.map(run_lanes, jobs)
     out = [np.concatenate(x, axis=0) for x in zip(*parts)]          # [lanes, steps, ...]
@@ -157,11 +157,12 @@ def main():
     p.add_argument("--workers", type=int, default=12)
     p.add_argument("--epsilon", type=float, default=None, help="one random-action fraction for all episodes (1 = random play)")
     p.add_argument("--family", default=None, choices=(None, "train", "heldout"), help="per-episode hidden physics")
+    p.add_argument("--t-max", type=int, default=128, help="episode length; > 128 also makes death respawn")
     a = p.parse_args()
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     t0 = time.time()
     obs, gob, nxt, gnx, act, events, checks, rew, episode, tstep, phys = generate(
-        a.lanes, a.steps, a.seed0, a.workers, EPSILONS if a.epsilon is None else (a.epsilon,), a.family)
+        a.lanes, a.steps, a.seed0, a.workers, EPSILONS if a.epsilon is None else (a.epsilon,), a.family, a.t_max)
     np.savez(a.out, obs=obs, gob=gob, nxt=nxt, gnx=gnx, act=act, events=events, checks=checks, rew=rew, lanes=a.lanes,
              episode=episode, tstep=tstep, phys=phys)
     counts = {e: int(((events >> k) & 1).sum()) for k, e in enumerate(EVENTS)}
