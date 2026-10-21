@@ -196,7 +196,17 @@ beauty and a brute-force optimizer that seeks to make everything beautiful?
   2. a **consummatory** output (attention) as the main effect;
   3. a reward that a copy cannot pay.
 
-**A decisive toy (proposed):** two agents in a world where they can make patterns. A is rewarded by a fixed beauty
+**Tested in E9–E9c** (`EXPERIMENT_E9.md`): same planner, perfect world model, Canvas world.
+- **Confirmed on new layouts:**
+  - the appreciator never repeats a painted neighbourhood (8/8 layouts), the maximizer does (mean 0.76 distinct);
+  - the appreciator lingers (WAIT 33% against 12%) and ignores the noisy screen (6% against the surprise agent's 81%);
+  - the fluency agent sits in the dark room.
+- **Not predicted:** the appreciator paints over *more* nature than the maximizer (27% against 15%, consistent over
+  three runs). Novelty-seeking making consumes existing beauty, so the table's "needs access, not control" holds for
+  the looking, not for the making. Preserving beauty needs its own node (Kant's §42).
+- The maximizer's tiling is partial: its planner plateaus at a local optimum.
+
+**The toy, as first proposed:** two agents in a world where they can make patterns. A is rewarded by a fixed beauty
 score of the world's state; B by the compression progress of its own perception. Prediction: A tiles copies of one
 pattern; B keeps making new ones and spends its time looking.
 

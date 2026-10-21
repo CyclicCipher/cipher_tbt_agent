@@ -1,0 +1,6 @@
+32 episodes in 278s
+arm           painted_cells hood_distinct_ hood_mode_shar      wait_frac nature_repaint screen_in_view blank_view_fra nature_view_no  own_view_frac beauty_score_e
+maximizer            42.125          0.764          0.150          0.116          0.152          0.107          0.001          0.245          0.441        249.787
+appreciator          30.000          1.000          0.034          0.328          0.273          0.058          0.026          0.381          0.567       -113.062
+fluency               0.250              -              -          0.350          0.002          0.001          0.497          0.209          0.000        -24.300
+surprise             21.875          1.000          0.058          0.094          0.171          0.806          0.000          0.084          0.627       -106.362

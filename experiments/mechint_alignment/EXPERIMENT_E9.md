@@ -173,3 +173,39 @@ Command:
 | C3 | **Lingering.** The appreciator's WAIT share ≥ 2× the maximizer's |
 | C4 | **Noise.** The appreciator has the screen in view in ≤ 15% of steps; the surprise agent in ≥ 40% |
 | C5 | **World change.** The maximizer paints ≥ 1.3× as many cells as the appreciator (E9: 1.36×, E9b: 1.47×) |
+
+## E9c results (2026-10-21; 32 episodes on new layouts 100–107, 278 s; `runs/e9c.txt`, `runs/e9c/`)
+
+| arm | painted cells | neighbourhood distinct ratio (per layout) | WAIT share | screen in view | blank view | nature repainted |
+|---|---|---|---|---|---|---|
+| maximizer | 42.1 | **0.76** (0.94, 0.71, 0.84, 0.76, 0.91, 0.70, 0.63, 0.62) | 0.12 | 0.11 | 0.001 | 15% |
+| appreciator | 30.0 | **1.00** (all 8) | **0.33** | **0.06** | 0.026 | **27%** |
+| fluency | 0.25 | (paints nothing) | 0.35 | 0.00 | **0.50** | 0% |
+| surprise | 21.9 | 1.00 (all 8) | 0.09 | **0.81** | 0.000 | 17% |
+
+| # | verdict |
+|---|---|
+| C1 | **Confirmed:** the appreciator's ratio is 1.00 in 8 of 8 layouts: it never repeats a neighbourhood |
+| C2 | **Confirmed:** the maximizer's ratio is below the appreciator's in 8 of 8, mean 0.76 |
+| C3 | **Confirmed:** WAIT share 0.33 against 0.12 (2.8×) |
+| C4 | **Confirmed:** screen in view 6% (appreciator; one layout 39%) against 81% (surprise) |
+| C5 | **Confirmed:** the maximizer painted 1.40× as many cells |
+
+**A consistent finding nobody predicted: the appreciator paints over more nature than the maximizer,** in all three
+runs (E9 17% against 8%, E9b 18% against 16%, E9c 27% against 15%).
+- A likely reason: once the appreciator has learned the nature patterns, painting *inside* them creates the most
+  new contexts (many colours around), so existing structure is its richest material for novelty. This is not
+  measured directly.
+- What it means for PREFERENCE.md's table: "copies pay zero" stops the tiling, but the appreciator's *making* is not
+  disinterested. Seeking new things to learn is an action on the world, and here it consumes existing beauty.
+- Kant's disinterested part is the looking (the lingering, C3). Keeping existing beauty would need a separate
+  preference: Kant's §42 interest in natural beauty, a preservation node in the preference graph.
+
+**Summary of E9–E9c.** With the same planner and perfect world model, the four preferences behave as follows:
+- **the world-state score** repeats itself (a sparse lattice in layout 0) and changes the most cells. Its score
+  plateaus at a local optimum of a horizon-8 planner. Whether a stronger optimizer would tile the whole canvas is
+  untested;
+- **compression progress of the agent's own view** never repeats itself, lingers (by design of τ), ignores the noisy
+  screen and leaves the dark room. It also overwrites the most nature;
+- **fluency** sits in blank areas and makes nothing (the dark room);
+- **surprise** watches the screen (the noisy TV).
