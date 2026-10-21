@@ -599,3 +599,75 @@ R3 needed all three and still fluctuated (0.86 / 0.75 / ~0.5); plain rehearsal d
   replay) against J2, on E2's stream.
 - **E8b, exploration:** E6's one network with IG from last-layer posterior samples instead of learning progress.
   Measure time near villagers and the discovery of mines and chests.
+
+## Brainstorm 5 (2026-10-20, late): confident errors, cost and scaling, learning to explain
+
+**1. A datum that disagrees where the model is certain.** Two kinds of "certain" must be told apart:
+- a **sharp prediction:** low entropy, e.g. from the persistence prior;
+- **pinned parameters:** high precision.
+
+The update size depends on the second. A neural network often predicts sharply from parameters nothing has pinned
+(extrapolation). E4's spurious "interact next to a mine" rule was this case, and the Kalman gain is large there.
+
+When the parameters really are pinned, there are three explanations, each with a principled response:
+- **(a) A fluke:** barely move. This is correct; a heavy-tailed likelihood makes it robust.
+- **(b) The world changed:** raise the uncertainty, so the next data are learned fast. Infer the volatility rather than
+  fixing γ: Behrens et al. 2007, the learning rate tracks volatility; the hierarchical Gaussian filter (Mathys 2011);
+  Bayesian online change-point detection (Adams & MacKay 2007).
+- **(c) The model's hypothesis class is wrong:** a posterior predictive check. Its surprises are persistently larger
+  than its own predicted surprise (a z-score). Expand the model: a new latent cause (Gershman, Blei & Niv 2010; the TBT
+  rule "mint on refutation, never on incompleteness").
+
+Repeated identical refutations do accumulate (each counted once) and eventually overturn the prior: Bayes needs more
+evidence against well-supported beliefs. The current B-R3 (fixed γ = 1, no model expansion) under-reacts in (b) and (c).
+
+**2. Cost and scaling.**
+- **A diagonal posterior** is two parameter-sized buffers, like Adam's moments. It scales as Adam does.
+- **K-FAC / Shampoo-type structure** costs layer-factor statistics, a constant-factor overhead with amortized inverses.
+  Shampoo/SOAP-type optimizers run at large scale.
+- **The MAP update costs a few iterations per batch;** its one-step linearization (a natural-gradient / Kalman step)
+  costs about one K-FAC step.
+- **The Fisher can be accumulated from the passes already made.** E7's 50-s single-sample loop was a convenience, not
+  the cost.
+- **Information gain from posterior samples of the output heads** costs K head evaluations per trunk pass. At large
+  scale: epistemic networks ("epinets", Osband et al. 2023).
+- **Against RL:** the learning signal is supervised prediction error, dense and low-noise. E1 measured policy-gradient
+  noise ~4,000 against ~10 for the value loss. Values still need temporal-difference bootstrapping, as in DQN or MuZero.
+  The posterior machinery adds a constant factor per update.
+  - Its claimed gain is in environment samples (absorbing a datum once, fully; directed exploration). That is
+    **measured for components** (E7: one-shot learning without forgetting) and **not yet for a whole agent from
+    scratch** (E6 did not learn the job in 5 min).
+- **Known scaling limits:**
+  - Laplace is local, so the Fisher must be re-estimated while the model moves far.
+  - Precision grows with N, so learning freezes unless the volatility is inferred.
+  - A diagonal posterior misstates correlations.
+  - Many tasks over-regularize (EWC's known limit).
+
+**3. A rationalization is a theory, and learning to explain better.**
+- **In a neural world model, the "theory" an update adopts is its weight change Δθ.** It is read off as the
+  generalization footprint: which *other* predictions changed with the refuted one. This is directly a mechanistic-
+  interpretability object (G3): each B-R3 explanation is a small Δθ with a cost in nats.
+- **The balance of simple and accurate is not a free choice. It is the minimum description length:** bits to describe
+  the change of belief plus bits to encode the data given the change.
+  - B-R3's update already minimizes exactly that for the new datum: −log p(datum | θ) + ½ Δθᵀ Λ Δθ ≈ KL(new ‖ old).
+    "The cheapest change of belief that makes the observation likely" is Bayesian Occam's razor (MacKay).
+  - **Its flaw:** "cheap" is measured in the network's own parameterization. A theory that is simple about *the world*
+    (e.g. push) can be expensive in weight space when the needed features are missing (arm K).
+- **The bitter-lesson move is to learn what "cheap" means:**
+  - **Meta-learn the prior and the update rule** across many worlds with different hidden rules.
+  - **The meta-objective is the prequential log-loss on future data after updating on a refutation.** That is
+    "explanations that fail least often", and it enforces the Occam balance automatically: too simple keeps failing;
+    too complex overfits and fails on new data.
+  - **Forms:** amortized Bayesian inference, a transformer trained on samples from a prior over worlds to predict in
+    context (prior-fitted networks: Müller et al. 2022; in-context learning as implicit Bayes: Xie et al. 2021);
+    learned editors trained for generalization + locality (MEND); learned libraries of abstractions that make
+    explanations short (DreamCoder's wake–sleep).
+- **How to solve the optimization:**
+  - exact Bayes over all theories is uncomputable (Solomonoff);
+  - **local:** Laplace / natural gradient in a fixed hypothesis space (B-R3 now);
+  - **amortized:** gradient descent on the meta-objective across worlds (the bitter-lesson route; it needs the world
+    family with varied hidden rules, asked about earlier);
+  - **population:** keep several candidate explanations (posterior samples), act to discriminate between them
+    (information gain), and select by prequential loss.
+- **One computable criterion ranks whole learners:** the prequential code length of the data stream, a valid MDL code
+  for model + learning algorithm (Blier & Ollivier 2018).
