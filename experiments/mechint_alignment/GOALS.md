@@ -17,6 +17,8 @@ G1 test world ──► G2 trained models (≥ 3 checkpoints) ──► G3 inter
       └──► G4 visualizer ◄──────┘                                ├──► G5 replicate Nick's claims   │
                                                                   │                                 │
 G7 formal definitions ──────────────────────────────────────────────────────────────────────────────┘
+
+G8 innate preferences (beauty, utility, … as a preference graph) ──► G2 (a training signal), G6 (circuits to find)
 ```
 
 ---
@@ -144,6 +146,35 @@ how often this question comes up in debates.
 
 ---
 
+## G8 — Innate preferences as computable objectives: a preference graph (added 2026-10-20 by the user)
+
+**The user's thesis:** to solve alignment we will have to solve how to create the preferences that are **innate** to
+humans, created by evolution. Many human values and preferences are already observable in infants.
+
+**The method:**
+1. Separate out cultural influences by keeping only what is **common to humans and a diverse array of animal species**.
+2. Keep the **mathematical** principles: those that can score input data.
+
+Aesthetic preference is the first case: symmetry, 1/f statistics, averageness, peak shift, order against complexity,
+compression progress. The research document is `BEAUTY_MATH.md`.
+
+**The questions:**
+1. **Can we build a complex objective / preference graph** by which a model judges something as beautiful, useful,
+   etc., **separately**: different nodes, not one scalar reward?
+2. **Does that allow a smarter training method?** Perhaps it would make the model more intelligent or faster to learn,
+   for reasons only hindsight will show. One candidate reason, from `BEAUTY_MATH.md`: compression progress, a principle
+   of beauty, is the same quantity as the learning-progress / epiplexity signal that drives exploration.
+3. **Does it give clues into alignment,** or at least into how to teach models the unverifiable tasks that humans can
+   learn to do?
+
+**Dependencies:**
+- G1: the test world, where preferences can be scored by algorithm;
+- G7: definitions of "preference" and "value";
+- it feeds G2 (a training signal) and G6 (preference circuits to locate and edit).
+
+**Not designed yet:** the scorers, the preference graph's structure (lexical priorities against trade-offs), and the
+experiments (first candidates in `BEAUTY_MATH.md`).
+
 ## Scope of claims: what success here would and would not show (the user, 2026-10-20)
 
 **Success in Village would show:** in a world where values are definable and checkable, interpretability can find the
@@ -188,4 +219,6 @@ concept, and "a good start".
   - exploration by learning progress, not uncertainty (the noisy-TV problem).
 
   See `TRAINING_METHOD.md`, last section.
+- **2026-10-20 (night): goal G8 added:** innate, cross-species preferences as computable objectives (a preference
+  graph). See `BEAUTY_MATH.md`.
 - **2026-10-20: we will not claim to have solved alignment,** even if every goal succeeds (see "Scope of claims").
