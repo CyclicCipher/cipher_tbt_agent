@@ -91,3 +91,23 @@ dangers but not the job.
 - The robot's own babbling yields few of them (random play: mining progress ~1 per 340 steps, delivery ~1 per 7,600).
 - **Next, from Brainstorm 4:** expected information gain (BALD-style disagreement with randomized priors) as the
   curiosity signal, so the never-tried interactions (a mine, a chest) are where curiosity points.
+
+### Note (2026-10-20): what the TBT line already found, and what it says about E6a
+
+The TBT agent (`src/tbt/reward.py` `LearningProgress`; memory `reference_learnable_novelty`) measured this before.
+**A per-step reward of max(0, slow − fast) is a rectified *rate*, and summed over time it re-admits the noisy TV.**
+- The EMA jitter on pure noise is rectified into reward: 5.09 on a pure-noise stream.
+- The **signed** area, Σ loss − N · floor, cancels it. Measured ordering there: dark room 0.0 < noise 2.4 <
+  instantly mastered 19 < learning 141 < slow/complex 201.
+
+E6a's intrinsic reward is exactly that rectified rate per refutation. That, together with the model still learning the
+villagers' move distribution, explains why villager kinds topped E6a's learning progress.
+
+The TBT agent's exploration that worked was not the rate but a prospective **level**: go where the model is not yet
+confident (`Transform.confident`).
+- That generalizes: a never-visited cell whose features are all modelled pays nothing.
+- It dies at mastery.
+- It finds hidden goals.
+
+In a neural network, the counterpart is epistemic uncertainty with an optimistic prior: randomized-prior heads
+(Brainstorm 4).
