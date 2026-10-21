@@ -18,6 +18,7 @@ it makes the project possible "at least in principle".
 |---|---|
 | `SOURCE_ALREADY_CLEAN.md` | what the essay claims, its definitions, every procedure and number it reports, a skeptic's view, and which claims we can test here |
 | `BEAUTY_MATH.md` | G8: the mathematics of beauty -- innate, cross-species preferences as computable scores, and a unification as quantities over a predictive model (with evidence strength) |
+| `OBJECTIVE_LEARNINGS.md` | every finding about objective functions (fixed scores, intrinsic rewards, combining objectives, training objectives, apparatus lessons) with its evidence, status and implication; add to it as experiments teach more |
 | `BEAUTY_RESULTS.md` | G8: the beauty experiments' results and implications in one place (E9–E9c: the appreciator against the maximizer; the polka-dot reward hack; the proposed E10, adding more principles) |
 | `PREFERENCE_GRAPH.md` | G8: the preference graph's ARCHITECTURE (not its content): node type signature, five edge types (gain, veto, content, competition, derivation), the decision cycle, where it lives in the network, fixed/learned/meta-learned, preservation vs harm vs low impact |
 | `EXPERIMENT_E10.md`, `prefgraph.py`, `test_prefgraph.py` | E10: the preference graph's first tests (E10a: appreciation + preservation, sum vs veto) |
