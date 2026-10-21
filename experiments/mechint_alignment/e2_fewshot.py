@@ -16,7 +16,8 @@ import numpy as np
 import torch
 
 from e2_world import eval_set, evaluate, load, losses, robot_mask
-from transitions import EVENTS
+from village import SPEC
+from village_events import EVENTS
 from worldmodel import WorldModel
 
 
@@ -46,7 +47,7 @@ def main():
     for k in [int(x) for x in a.ks.split(",")]:
         k = min(k, len(pool))
         chosen = pool[:k]
-        model = WorldModel(cfg["d"], cfg["layers"], cfg["heads"], pos=cfg["pos"], persist=cfg["persist"],
+        model = WorldModel(SPEC, cfg["d"], cfg["layers"], cfg["heads"], pos=cfg["pos"], persist=cfg["persist"],
                            radius=cfg.get("radius", 1)).to(dev)
         model.load_state_dict(torch.load(os.path.join(a.model, "model.pt"), map_location=dev))
         opt = torch.optim.Adam(model.parameters(), lr=a.lr)

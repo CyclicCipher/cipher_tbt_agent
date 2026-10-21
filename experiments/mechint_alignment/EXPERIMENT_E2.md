@@ -98,7 +98,7 @@ why" (`TRAINING_METHOD.md`, Brainstorms 2–3).
 
 ## Setup
 
-**Data** (`transitions.py`):
+**Data** (`transitions.py`, now `rollouts.py` + `village_events.py`):
 - 614,400 training transitions: 256 parallel lanes × 2,400 steps, time-major. 102,400 held-out transitions come from
   layouts never trained on.
 - The behaviour policy mixes the scripted task policy with uniform random actions. Each episode draws its random

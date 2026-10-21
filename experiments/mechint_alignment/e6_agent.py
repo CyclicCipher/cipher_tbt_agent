@@ -26,7 +26,7 @@ import torch.nn.functional as F
 import scripted
 from e2_world import losses, robot_mask, robot_pos
 from onenet import OneNet
-from village import CELL_VOCAB, GLOBAL_VOCAB, N, N_ACTIONS, Village
+from village import CELL_VOCAB, GLOBAL_VOCAB, N, N_ACTIONS, SPEC, Village
 
 EVAL_SEEDS = [10**9 + i for i in range(64)]
 
@@ -115,7 +115,7 @@ def main():
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
     make = functools.partial(Village, size=a.size, max_villagers=a.villagers)
-    net = OneNet(a.d, a.layers).to(dev)
+    net = OneNet(SPEC, a.d, a.layers).to(dev)
     targ = copy.deepcopy(net)
     opt = torch.optim.Adam(net.parameters(), lr=a.lr)
     json.dump(dict(vars(a), n_params=sum(q.numel() for q in net.parameters())), open(os.path.join(a.out, "config.json"), "w"), indent=1)

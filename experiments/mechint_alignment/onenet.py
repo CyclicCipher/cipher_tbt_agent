@@ -13,14 +13,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from village import N_ACTIONS
 from worldmodel import WorldModel
 
 
 class OneNet(WorldModel):
-    def __init__(self, d=64, layers=3, heads=4, mlp=4, pos="local", persist=5.0, radius=1):
-        super().__init__(d, layers, heads, mlp, pos=pos, persist=persist, radius=radius)
-        self.act_emb = nn.Embedding(N_ACTIONS, d)
+    def __init__(self, spec, d=64, layers=3, heads=4, mlp=4, pos="local", persist=5.0, radius=1):
+        super().__init__(spec, d, layers, heads, mlp, pos=pos, persist=persist, radius=radius)
+        self.act_emb = nn.Embedding(spec.n_actions, d)
         self.mix = nn.Sequential(nn.Linear(2 * d, 2 * d), nn.GELU(), nn.Linear(2 * d, d))
         self.q, self.r = nn.Linear(d, 1), nn.Linear(d, 1)
         for m in (self.q, self.r):

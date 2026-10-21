@@ -8,7 +8,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from transitions import EVENTS, UNCHECKABLE
+from village_events import EVENTS, UNCHECKABLE
 
 RULES = [e for e in EVENTS if e not in UNCHECKABLE and e not in ("villager_death",)]
 

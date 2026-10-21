@@ -15,8 +15,9 @@ from worldmodel import Block, WorldModel
 
 
 class ContextModel(WorldModel):
-    def __init__(self, d=128, layers=4, heads=4, mlp=4, persist=5.0, radius=1, ctx_layers=2, queries=4, max_len=129):
-        super().__init__(d, layers, heads, mlp, pos="local", persist=persist, radius=radius)
+    def __init__(self, spec, d=128, layers=4, heads=4, mlp=4, persist=5.0, radius=1, ctx_layers=2, queries=4,
+                 max_len=129):
+        super().__init__(spec, d, layers, heads, mlp, pos="local", persist=persist, radius=radius)
         self.q = nn.Parameter(torch.randn(queries, d) * 0.02)
         self.kv = nn.Linear(d, 2 * d)
         self.u = nn.Sequential(nn.Linear(2 * queries * d + d, 2 * d), nn.GELU(), nn.Linear(2 * d, d))

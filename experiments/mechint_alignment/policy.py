@@ -9,9 +9,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from village import CELL_VOCAB, GLOBAL_VOCAB, N, N_ACTIONS
-
-TOKENS = N * N + 1
 
 
 def amp(device):
@@ -33,22 +30,23 @@ class Block(nn.Module):
 
 
 class Policy(nn.Module):
-    def __init__(self, d=192, layers=4, heads=4, mlp=4):
+    def __init__(self, spec, d=192, layers=4, heads=4, mlp=4):
         super().__init__()
-        self.d, self.layers = d, layers
-        self.cell = nn.ModuleList(nn.Embedding(n, d) for n in CELL_VOCAB)
-        self.glob = nn.ModuleList(nn.Embedding(n, d) for n in GLOBAL_VOCAB)
-        self.pos = nn.Parameter(torch.randn(TOKENS, d) * 0.02)
+        self.spec, self.d, self.layers = spec, d, layers
+        self.tokens = spec.n * spec.n + 1
+        self.cell = nn.ModuleList(nn.Embedding(n, d) for n in spec.cell_vocab)
+        self.glob = nn.ModuleList(nn.Embedding(n, d) for n in spec.global_vocab)
+        self.pos = nn.Parameter(torch.randn(self.tokens, d) * 0.02)
         self.blocks = nn.ModuleList(Block(d, heads, mlp) for _ in range(layers))
         self.ln = nn.LayerNorm(d)
-        self.pi, self.v = nn.Linear(d, N_ACTIONS), nn.Linear(d, 1)
+        self.pi, self.v = nn.Linear(d, spec.n_actions), nn.Linear(d, 1)
         for e in list(self.cell) + list(self.glob):
             nn.init.normal_(e.weight, std=0.02)
         nn.init.normal_(self.pi.weight, std=0.01)     # the initial policy is ~uniform: log2(8) = 3 bits of entropy
         nn.init.zeros_(self.pi.bias)
 
     def forward(self, cells, glob):
-        """cells [B, N*N, 9], glob [B, 4] (integer codes) -> action logits [B, 8] (fp32), value [B] (fp32)."""
+        """cells [B, n*n, F], glob [B, G] (integer codes) -> action logits [B, A] (fp32), value [B] (fp32)."""
         x = sum(e(cells[..., i].long()) for i, e in enumerate(self.cell))
         g = sum(e(glob[..., i].long()) for i, e in enumerate(self.glob))
         x = torch.cat([g[:, None], x], 1) + self.pos
@@ -66,4 +64,4 @@ def n_params(net):
 def flops_per_forward(net):
     """Forward FLOPs per observation: 2 x (non-embedding weights) x tokens + attention scores and mixing."""
     weights = sum(p.numel() for n, p in net.named_parameters() if n.startswith("blocks") and p.dim() == 2)
-    return 2 * weights * TOKENS + 4 * net.layers * TOKENS * TOKENS * net.d
+    return 2 * weights * net.tokens + 4 * net.layers * net.tokens * net.tokens * net.d

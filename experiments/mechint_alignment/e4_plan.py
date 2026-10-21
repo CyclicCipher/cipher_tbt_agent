@@ -13,7 +13,7 @@ import torch
 
 from episodes import run_episodes, scripted_actor, summarize
 from planner import Planner, RefutationLearner, RewardModel, run_episode, run_episode_learning, sleep_on_refutations
-from village import Village
+from village import SPEC, Village
 from worldmodel import WorldModel
 
 SEEDS = [10**9 + i for i in range(256)]
@@ -38,7 +38,7 @@ def main():
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     dev = torch.device("cuda")
     cfg = json.load(open(a.config))
-    model = WorldModel(cfg["d"], cfg["layers"], cfg["heads"], pos=cfg["pos"], persist=cfg["persist"],
+    model = WorldModel(SPEC, cfg["d"], cfg["layers"], cfg["heads"], pos=cfg["pos"], persist=cfg["persist"],
                        radius=cfg.get("radius", 1)).to(dev)
     model.load_state_dict(torch.load(a.model, map_location=dev))
     model.eval()

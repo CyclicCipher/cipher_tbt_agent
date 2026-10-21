@@ -18,6 +18,7 @@ import torch
 import info
 from episodes import PROBE_SEEDS, net_actor, run_episodes
 from policy import Policy
+from village import SPEC
 
 
 def read_log(run):
@@ -30,7 +31,7 @@ def read_log(run):
 
 
 def load(path, cfg, dev):
-    net = Policy(cfg["d"], cfg["layers"], cfg["heads"]).to(dev)
+    net = Policy(SPEC, cfg["d"], cfg["layers"], cfg["heads"]).to(dev)
     net.load_state_dict(torch.load(path, map_location=dev, weights_only=False)["model"])
     return net.eval()
 

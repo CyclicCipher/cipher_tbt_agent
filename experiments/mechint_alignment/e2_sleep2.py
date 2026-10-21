@@ -21,6 +21,7 @@ import torch
 
 from e2_fewshot2 import batch, surprise_and_kind
 from e2_world import eval_set, evaluate, load, losses, robot_mask
+from village import SPEC
 from worldmodel import WorldModel
 
 RULES = ("move", "turn", "mine_work", "mined", "deliver", "theft", "interact_full", "push", "robot_burn",
@@ -45,7 +46,7 @@ def main():
     focus = cfg.get("focus", 2)
     train, test = load(os.path.join(a.data, "train.npz")), load(os.path.join(a.data, "test.npz"))
     ev, by_event = eval_set(test)
-    model = WorldModel(cfg["d"], cfg["layers"], cfg["heads"], pos=cfg["pos"], persist=cfg["persist"],
+    model = WorldModel(SPEC, cfg["d"], cfg["layers"], cfg["heads"], pos=cfg["pos"], persist=cfg["persist"],
                        radius=cfg.get("radius", 1)).to(dev)
     model.load_state_dict(torch.load(os.path.join(a.model, "model.pt"), map_location=dev))
 

@@ -19,7 +19,8 @@ import torch
 
 from e2_fewshot2 import batch, surprise_and_kind
 from e2_world import eval_points, eval_set, evaluate, load, losses, robot_mask
-from transitions import EVENTS
+from village import SPEC
+from village_events import EVENTS
 from worldmodel import WorldModel
 
 
@@ -48,7 +49,7 @@ def main():
     steps = len(train["act"]) // L
     ev, by_event = eval_set(test)
     ev_counts = np.stack([((train["events"] >> k) & 1).reshape(-1, L).sum(1) for k in range(len(EVENTS))], 1).cumsum(0)
-    model = WorldModel(128, 4, 4, pos="local", persist=5.0, radius=1).to(dev)
+    model = WorldModel(SPEC, 128, 4, 4, pos="local", persist=5.0, radius=1).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
     slow = None
     if a.ema:                                         # the slow "cortex": an EMA of the weights, read out, never trained

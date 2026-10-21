@@ -9,7 +9,7 @@ day–night agent still work when its world model has only ever seen **random pl
 
 ## Data
 
-614,400 transitions of uniformly random actions on training layouts (`transitions.py --epsilon 1.0`).
+614,400 transitions of uniformly random actions on training layouts (`transitions.py --epsilon 1.0`, now `rollouts.py --world village --epsilon 1.0`).
 
 | rule | instances |
 |---|---|

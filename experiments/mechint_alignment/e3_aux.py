@@ -21,7 +21,7 @@ from e2_world import losses as wm_losses
 from episodes import Roller, net_actor, run_episodes, summarize
 from policy import amp
 from ppo import gae, norm
-from village import Village
+from village import SPEC, Village
 
 EVAL_SEEDS = [10**9 + i for i in range(128)]
 
@@ -57,7 +57,7 @@ def main():
     dev = torch.device("cuda")
     torch.manual_seed(a.seed)
     make = functools.partial(Village, size=a.size, max_villagers=a.villagers)
-    net = AgentNet(a.d, a.layers, a.heads, pos=a.pos, persist=a.persist).to(dev)
+    net = AgentNet(SPEC, a.d, a.layers, a.heads, pos=a.pos, persist=a.persist).to(dev)
     opt = torch.optim.Adam(net.parameters(), lr=a.lr, eps=1e-5)
     json.dump(dict(vars(a), n_params=sum(q.numel() for q in net.parameters())), open(os.path.join(a.out, "config.json"), "w"), indent=1)
     ref = summarize(run_episodes(EVAL_SEEDS, __import__("episodes").scripted_actor, make=make)[0])

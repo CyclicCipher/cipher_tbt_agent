@@ -26,6 +26,7 @@ import torch.nn.functional as F
 import info
 from episodes import EVAL_SEEDS, PROBE_SEEDS, Roller, net_actor, run_episodes, scripted_actor, summarize
 from policy import Policy, amp, flops_per_forward, n_params
+from village import SPEC
 
 
 def get_args(argv=None):
@@ -152,7 +153,7 @@ def main(argv=None):
     os.makedirs(a.out, exist_ok=True)
     dev = torch.device(a.device)
     torch.manual_seed(a.seed)
-    net = Policy(a.d, a.layers, a.heads).to(dev)
+    net = Policy(SPEC, a.d, a.layers, a.heads).to(dev)
     opt = torch.optim.Adam(net.parameters(), lr=a.lr, eps=1e-5)
     n_batch = a.envs * a.rollout
     assert n_batch % a.minibatch == 0 and a.minibatch % a.micro == 0

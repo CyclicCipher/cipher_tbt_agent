@@ -8,17 +8,16 @@
 import torch
 import torch.nn as nn
 
-from village import N_ACTIONS
 from worldmodel import WorldModel
 
 
 class AgentNet(WorldModel):
-    def __init__(self, d=128, layers=4, heads=4, mlp=4, pos="rel", persist=5.0):
-        super().__init__(d, layers, heads, mlp, pos=pos, persist=persist)
-        self.pi, self.v = nn.Linear(d, N_ACTIONS), nn.Linear(d, 1)
+    def __init__(self, spec, d=128, layers=4, heads=4, mlp=4, pos="rel", persist=5.0):
+        super().__init__(spec, d, layers, heads, mlp, pos=pos, persist=persist)
+        self.pi, self.v = nn.Linear(d, spec.n_actions), nn.Linear(d, 1)
         nn.init.normal_(self.pi.weight, std=0.01)
         nn.init.zeros_(self.pi.bias)
-        self.wm_act = nn.Embedding(N_ACTIONS, d)
+        self.wm_act = nn.Embedding(spec.n_actions, d)
         self.wm_mix = nn.Sequential(nn.Linear(2 * d, 2 * d), nn.GELU(), nn.Linear(2 * d, d))
 
     def trunk(self, cells, glob):

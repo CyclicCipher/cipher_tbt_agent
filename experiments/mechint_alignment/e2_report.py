@@ -2,7 +2,7 @@
 import json
 import sys
 
-from transitions import EVENTS, UNCHECKABLE
+from village_events import EVENTS, UNCHECKABLE
 
 
 def rows(run):

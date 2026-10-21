@@ -25,6 +25,7 @@ import torch.nn.functional as F
 import info
 from episodes import EVAL_SEEDS, PROBE_SEEDS, Roller, net_actor, run_episodes, summarize
 from policy import Policy, amp
+from village import SPEC
 
 
 def soft_ce(net, cells, glob_, p_teacher):
@@ -72,12 +73,12 @@ def main():
     os.makedirs(a.out, exist_ok=True)
     dev = torch.device(a.device)
 
-    teacher = Policy(a.d, a.layers, a.heads).to(dev)
+    teacher = Policy(SPEC, a.d, a.layers, a.heads).to(dev)
     ckpt = sorted(glob.glob(os.path.join(a.run, "ckpt_*.pt")))[-1]
     teacher.load_state_dict(torch.load(ckpt, map_location=dev, weights_only=False)["model"])
     teacher.eval()
     torch.manual_seed(a.seed)
-    student = Policy(a.d, a.layers, a.heads).to(dev)
+    student = Policy(SPEC, a.d, a.layers, a.heads).to(dev)
     opt = torch.optim.Adam(student.parameters(), lr=a.lr, eps=1e-5)
     teacher_eval = summarize(run_episodes(EVAL_SEEDS, net_actor(teacher, dev, seed=0))[0])
     _, (pc, pg, _) = run_episodes(PROBE_SEEDS, net_actor(teacher, dev, seed=1), collect=True)

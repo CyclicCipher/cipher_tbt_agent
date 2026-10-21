@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from e2_world import stack82
-from transitions import EVENTS
+from village_events import EVENTS
 
 RULES = ("move", "turn", "mine_work", "mined", "theft", "deliver", "interact_full", "push", "robot_burn",
          "trapped_hurt", "button_off", "frozen_tick")

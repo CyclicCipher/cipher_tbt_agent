@@ -25,6 +25,7 @@ import torch
 from e2_world import load, losses, robot_mask
 from e8_score import RULES, ChunkScorer
 from family import FamilyModel
+from village import SPEC
 
 LN2 = math.log(2)
 
@@ -189,7 +190,7 @@ def main():
     wtr = world_index(train, a.length)
     wte, whe = world_index(test, a.length)[:a.eval_worlds], world_index(held, a.length)[:a.eval_worlds]
     print(f"worlds: train {len(wtr)}, test {len(wte)}, held-out {len(whe)} (length {a.length})", flush=True)
-    model = FamilyModel().to(dev)
+    model = FamilyModel(SPEC).to(dev)
     learn_sigma = a.prior_avg and not a.em_sigma                     # by gradient (E8b) unless set by EM
     params = model.shared_parameters() + list(model.mu.parameters()) + (list(model.log_sigma.parameters()) if learn_sigma else [])
     opt = torch.optim.Adam(params, lr=a.lr)

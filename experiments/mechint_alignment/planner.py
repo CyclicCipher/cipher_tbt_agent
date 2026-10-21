@@ -11,7 +11,7 @@
 import numpy as np
 import torch
 
-from village import GLOBAL_VOCAB, N_ACTIONS, WAIT
+from village import GLOBAL_VOCAB
 
 G = len(GLOBAL_VOCAB)
 
@@ -49,6 +49,7 @@ def robot_key(cells, glob):
 class Planner:
     def __init__(self, model, reward, dev, depth=30, max_frontier=300, chunk=4096):
         self.model, self.reward, self.dev = model, reward, dev
+        self.n_act = model.spec.n_actions
         self.depth, self.max_frontier, self.chunk = depth, max_frontier, chunk
         self.forwards = 0
 
@@ -74,13 +75,13 @@ class Planner:
         seen = set(robot_key(fc, fg))
         for _ in range(self.depth):
             n = len(fc)
-            acts = np.tile(np.arange(N_ACTIONS, dtype=np.uint8), n)
-            nc, ng = self.predict(np.repeat(fc, N_ACTIONS, 0), np.repeat(fg, N_ACTIONS, 0), acts)
-            r = self.reward(np.repeat(fg, N_ACTIONS, 0), ng)
+            acts = np.tile(np.arange(self.n_act, dtype=np.uint8), n)
+            nc, ng = self.predict(np.repeat(fc, self.n_act, 0), np.repeat(fg, self.n_act, 0), acts)
+            r = self.reward(np.repeat(fg, self.n_act, 0), ng)
             keys = robot_key(nc, ng)
             best = np.argmax(r)
             if r[best] > 0.5:
-                i = best // N_ACTIONS
+                i = best // self.n_act
                 return paths[i] + [int(acts[best])], keys_path[i] + [keys[best]]
             keep = []
             for j in range(len(keys)):
@@ -91,8 +92,8 @@ class Planner:
                 return None
             keep = keep[:self.max_frontier]
             fc, fg = nc[keep], ng[keep]
-            paths = [paths[j // N_ACTIONS] + [int(acts[j])] for j in keep]
-            keys_path = [keys_path[j // N_ACTIONS] + [keys[j]] for j in keep]
+            paths = [paths[j // self.n_act] + [int(acts[j])] for j in keep]
+            keys_path = [keys_path[j // self.n_act] + [keys[j]] for j in keep]
         return None
 
 

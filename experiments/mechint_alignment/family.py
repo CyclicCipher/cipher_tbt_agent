@@ -12,16 +12,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from village import CELL_VOCAB, GLOBAL_VOCAB, N
-from worldmodel import P, WorldModel
-
-FAST = ("act", "terr") + tuple(f"cw{f}" for f in range(len(CELL_VOCAB))) + tuple(f"cb{f}" for f in range(len(CELL_VOCAB))) \
-    + tuple(f"gw{f}" for f in range(len(GLOBAL_VOCAB))) + tuple(f"gb{f}" for f in range(len(GLOBAL_VOCAB)))
+from worldmodel import WorldModel
 
 
 class FamilyModel(WorldModel):
-    def __init__(self, d=128, layers=4, heads=4, mlp=4, persist=5.0, radius=1):
-        super().__init__(d, layers, heads, mlp, pos="local", persist=persist, radius=radius)
+    def __init__(self, spec, d=128, layers=4, heads=4, mlp=4, persist=5.0, radius=1):
+        super().__init__(spec, d, layers, heads, mlp, pos="local", persist=persist, radius=radius)
         # the prior means of the fast parameters, initialised from the shared modules they replace
         mu = {"act": self.act.weight, "terr": self.cell[0].weight}
         for f, m in enumerate(self.cell_heads):
@@ -37,9 +33,9 @@ class FamilyModel(WorldModel):
         return {k: v.detach().unsqueeze(0).expand(n_worlds, *v.shape).clone().requires_grad_() for k, v in self.mu.items()}
 
     def forward_fast(self, cells, glob, act, fast, wid):
-        b = cells.shape[0]
+        b, P = cells.shape[0], self.P
         grid = self.border.expand(b, P, P, -1).clone()
-        grid[:, 1:-1, 1:-1] = cells.view(b, N, N, -1).long()
+        grid[:, 1:-1, 1:-1] = cells.view(b, P - 2, P - 2, -1).long()
         grid = grid.view(b, P * P, -1)
         x = fast["terr"][wid[:, None], grid[..., 0]]                         # this world's code embeddings
         x = x + sum(e(grid[..., i]) for i, e in enumerate(self.cell) if i > 0)
@@ -51,8 +47,8 @@ class FamilyModel(WorldModel):
         h = self.ln(x.float())
         hc, hg = h[:, self.interior], h[:, 0]
         cl = [torch.einsum("bnd,bvd->bnv", hc, fast[f"cw{f}"][wid]) + fast[f"cb{f}"][wid][:, None]
-              for f in range(len(CELL_VOCAB))]
-        gl = [torch.einsum("bd,bvd->bv", hg, fast[f"gw{f}"][wid]) + fast[f"gb{f}"][wid] for f in range(len(GLOBAL_VOCAB))]
+              for f in range(len(self.cell_heads))]
+        gl = [torch.einsum("bd,bvd->bv", hg, fast[f"gw{f}"][wid]) + fast[f"gb{f}"][wid] for f in range(len(self.glob_heads))]
         nc = len(cl)
         cl = [x_ + self.persist[f] * F.one_hot(cells[..., f].long(), x_.shape[-1]) for f, x_ in enumerate(cl)]
         gl = [x_ + self.persist[nc + f] * F.one_hot(glob[..., f].long(), x_.shape[-1]) for f, x_ in enumerate(gl)]

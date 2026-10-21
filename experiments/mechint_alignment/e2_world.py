@@ -25,7 +25,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from transitions import EVENTS, UNCHECKABLE
+from village import SPEC
+from village_events import EVENTS, UNCHECKABLE
 from worldmodel import WorldModel, flops_per_forward
 
 LN2 = math.log(2)
@@ -403,7 +404,7 @@ def main():
     ev, by_event = eval_set(test)
     ev_counts = np.stack([((train["events"][:steps * L] >> k) & 1).reshape(-1, L).sum(1) for k in range(len(EVENTS))], 1).cumsum(0)
 
-    model = WorldModel(a.d, a.layers, a.heads, pos=a.pos, persist=a.persist, radius=a.radius).to(dev)
+    model = WorldModel(SPEC, a.d, a.layers, a.heads, pos=a.pos, persist=a.persist, radius=a.radius).to(dev)
     heads = set(id(q) for m in list(model.cell_heads) + list(model.glob_heads) for q in m.parameters())
     trunk = [q for q in model.parameters() if a.rule != "rls" or id(q) not in heads]
     opt = torch.optim.Adam(trunk, lr=a.lr)

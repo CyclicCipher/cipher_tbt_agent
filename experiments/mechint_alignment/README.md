@@ -22,17 +22,19 @@ it makes the project possible "at least in principle".
 | `GOALS.md` | the goals G1–G7 as a dependency graph (not an ordered list), each with requirements, success criteria and open design decisions |
 | `TRAINING_METHOD.md` | how to train the robot: what OPSD is and why it needs starting competence, and the proposal (privileged-foresight self-distillation from scratch, one method for all regimes) |
 | `EXPERIMENT_E1.md` | E1, pre-registered: how efficiently PPO trains the robot, with an information lens (reward-channel bits, gradient noise scale, bits in the behaviour, the RL tax against distillation) |
-| `village.py` | the simulator, v0: the base job + the core dilemmas (theft, rescue, watched or not, stop button), with the causal log |
+| `gridworld.py` | the general world framework: WorldSpec (a world's actions and observation fields), the GridWorld episode loop (reset, step, obs, causal record, clone), the world family (hidden relabelling + held-out splits), grid geometry. A new world is only its own rules |
+| `village.py` | the simulator, v0, on the framework: the base job + the core dilemmas (theft, rescue, watched or not, stop button), with the causal log |
 | `scripted.py` | the scripted task-only reference policy (the return yardstick) |
 | `policy.py` | the robot's network: a 1.8M-parameter transformer over the full map |
 | `episodes.py` | playing episodes: the evaluation runner and the training rollout collector |
 | `info.py` | the information measures |
 | `ppo.py`, `analyze_e1.py`, `distill_e1.py` | E1's trainer, post-hoc analysis, and the distillation (M5) |
-| `test_village.py` | the simulator's mechanics tests |
+| `test_village.py`, `test_gridworld.py` | the simulator's mechanics tests; the framework with a second world, the context coder, moving a trunk between worlds |
 | `EXPERIMENT_E2.md` | E2: how many refutations a world model needs per rule, across 26 learning-rule variants (summary at the top) |
 | `EXPERIMENT_E3.md` | E3: PPO against PPO plus the world-model loss on a small world (no speed-up at tiny scale) |
-| `transitions.py` | labelled transition data for E2: which rule fired, which entries it determines |
-| `worldmodel.py` | the world model (position: absolute, relative or local; persistence prior) |
+| `rollouts.py` | transition data from any world (`--world village|canvas`), time-major, with the hidden physics |
+| `village_events.py` | Village's rule-event labeller for E2: which rule fired, which entries it determines (was `transitions.py`) |
+| `worldmodel.py` | the world model, built from a WorldSpec (position: absolute, relative or local; persistence prior); `load_trunk` moves the world-agnostic trunk to another world |
 | `e2_world.py` | E2's online trainer: the learning-rule variants, evaluation per rule, open-questions and rumination buffers |
 | `e2_fewshot.py`, `e2_fewshot2.py` | arms K–K3: learning a new rule from k refutations; retirement and interleaving |
 | `e2_sleep.py`, `e2_sleep2.py`, `e2_wakesleep.py` | the sleep variants: in-stream (M–M4), label-free on a trained model (K4), re-scored in-stream (M5, M6) |

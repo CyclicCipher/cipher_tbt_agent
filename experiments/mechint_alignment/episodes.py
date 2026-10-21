@@ -20,9 +20,9 @@ PROBE_SEEDS = [2 * 10**9 + i for i in range(64)]
 
 def run_episodes(seeds, actor, collect=False, make=Village):
     envs = [make(s) for s in seeds]
-    n = len(envs)
-    cells = np.zeros((n, N * N, len(CELL_VOCAB)), np.uint8)
-    glob = np.zeros((n, len(GLOBAL_VOCAB)), np.uint8)
+    n, spec = len(envs), envs[0].SPEC
+    cells = np.zeros((n, spec.n * spec.n, len(spec.cell_vocab)), np.uint8)
+    glob = np.zeros((n, len(spec.global_vocab)), np.uint8)
     ret = np.zeros(n)
     live = np.ones(n, bool)
     states = []

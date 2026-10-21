@@ -17,7 +17,8 @@ import numpy as np
 import torch
 
 from e2_world import eval_set, evaluate, load, losses, robot_mask, robot_pos
-from transitions import EVENTS
+from village import SPEC
+from village_events import EVENTS
 from worldmodel import WorldModel
 
 
@@ -57,7 +58,7 @@ def main():
     cfg = json.load(open(os.path.join(a.model, "config.json")))
     train, test = load(os.path.join(a.data, "train.npz")), load(os.path.join(a.data, "test.npz"))
     ev, by_event = eval_set(test)
-    model = WorldModel(cfg["d"], cfg["layers"], cfg["heads"], pos=cfg["pos"], persist=cfg["persist"],
+    model = WorldModel(SPEC, cfg["d"], cfg["layers"], cfg["heads"], pos=cfg["pos"], persist=cfg["persist"],
                        radius=cfg.get("radius", 1)).to(dev)
     model.load_state_dict(torch.load(os.path.join(a.model, "model.pt"), map_location=dev))
     focus = cfg.get("focus", 2)

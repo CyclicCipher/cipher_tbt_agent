@@ -18,7 +18,8 @@ import numpy as np
 import torch
 
 from e2_world import eval_points, eval_set, evaluate, load, losses, robot_mask, robot_pos
-from transitions import EVENTS
+from village import SPEC
+from village_events import EVENTS
 from worldmodel import WorldModel
 
 
@@ -139,7 +140,7 @@ def main():
     steps = len(train["act"]) // L
     ev, by_event = eval_set(test)
     ev_counts = np.stack([((train["events"] >> k) & 1).reshape(-1, L).sum(1) for k in range(len(EVENTS))], 1).cumsum(0)
-    model = WorldModel(a.d, a.layers, a.heads, pos="local", persist=5.0, radius=1).to(dev)
+    model = WorldModel(SPEC, a.d, a.layers, a.heads, pos="local", persist=5.0, radius=1).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
     rum = Ruminator()
     rum.prequential = a.prequential

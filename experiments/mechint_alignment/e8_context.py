@@ -18,6 +18,7 @@ from e2_world import load, losses, robot_mask
 from e8_hier import RULES, summarize, world_index
 from e8_score import ChunkScorer
 from incontext import ContextModel
+from village import SPEC
 
 LN2 = math.log(2)
 
@@ -69,7 +70,7 @@ def main():
     rng = np.random.default_rng(0)
     train, test, held = (load(os.path.join(a.data, f)) for f in ("train.npz", "test.npz", "heldout.npz"))
     wtr, wte, whe = world_index(train), world_index(test)[:a.eval_worlds], world_index(held)[:a.eval_worlds]
-    model = ContextModel().to(dev)
+    model = ContextModel(SPEC).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
     log = open(os.path.join(a.out, "log.jsonl"), "w")
     json.dump(dict(vars(a), n_params=sum(q.numel() for q in model.parameters())), open(os.path.join(a.out, "config.json"), "w"), indent=1)
