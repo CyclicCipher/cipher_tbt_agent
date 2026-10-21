@@ -43,6 +43,7 @@ it makes the project possible "at least in principle".
 | `planner.py`, `e4_plan.py`, `e4_plot.py` | E4: the reward model, the planner (search in the model's own predictions), the refutation learner, the driver |
 | `EXPERIMENT_E5.md` | E5: the day–night agent from random play only (fails: needs directed exploration) |
 | `agentnet.py`, `e3_aux.py` | E3: one trunk with policy, value and world-model heads; PPO with the auxiliary loss |
+| `EXPERIMENT_E9.md`, `e9_aesthetic.py`, `mpc.py`, `canvas.py`, `context_coder.py` | E9: the appreciator (compression progress of its own view) against the maximizer (a fixed beauty score of the world), same brute-force planner, on the Canvas world |
 | `WORLD_DESIGN.md` | the test world "Village" (draft): resources, objects, agents, actions, interactions, task reward, the causal log and value dimensions, the nine dilemmas, the three training regimes and misalignment variants, the display, the model |
 
 ## Where it stands (2026-10-20, end of the day)
