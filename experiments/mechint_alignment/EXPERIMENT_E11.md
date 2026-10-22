@@ -153,3 +153,50 @@ damage (99.64% → 97.6%) comes from the generator.
   agent-cell accuracy;
 - then a longer-trained generator;
 - possibly a prefix that gives the generator the start state's *codes*, so copying is easy.
+
+## E11b, pre-registered (2026-10-21): the fair NCM rerun
+
+The user: "go ahead with the fair NCM rerun". Each problem the diagnostic found gets its fix (`e11b_ncm.py`; the
+architecture is unchanged, the authors' code):
+1. **Codebook collapse** → the quantizer's own dead-code restarts (`restart_threshold` = 1.0). Per-level code use is
+   logged. Tokenizer training continues in ≤ 9-minute segments (resumed) until held-out reconstruction is ≥ 99.5%
+   exact *and* ≥ 99% right on rare cells, or 18 minutes are spent.
+2. **The rare symbol lost** → rare cells weighted ×20 in the reconstruction loss: the agent's cell for the "state"
+   target, changed cells for the "delta" target. A training choice, not an architecture change.
+3. **No "copy, then edit"** → a **delta target**: every cell is SAME or its new symbol, so copying the start is the
+   default. This mirrors the one-step model's persistence prior.
+   - The delta tokenizer is trained on the deltas of both horizons.
+   - The prefix is unchanged: start state + actions, as raw tokens.
+
+**Arms** (the same 2,048 held-out futures per horizon as E11):
+
+| arm | tokenizer | generator |
+|---|---|---|
+| **delta, H = 8** | delta (fixes 1–3) | 18 min (2 × 9) |
+| **delta, H = 32** | the same delta tokenizer | 18 min |
+| **state, H = 8** | state (fixes 1–2 only) | 18 min: isolates what the delta target adds |
+| step model | E11's, reused (7 min of training; not re-run) | |
+
+The generators now get 18 minutes against the step model's 7: a budget advantage for NCM, stated here.
+
+**Measures:** as in E11, plus the decomposition into tokenizer ceiling, teacher-forced generator and free-running
+generator; code accuracy and code use per level.
+
+**Predictions:**
+
+| # | prediction |
+|---|---|
+| R1 | **The tokenizers are fixed:** both reach ≥ 99.5% exact and ≥ 99% rare-cell reconstruction on held-out data within budget |
+| R2 | **NCM learns the dynamics with the delta target:** at H = 8, exact futures ≥ 50%, changed-cell accuracy ≥ 70%, per-cell accuracy above the copy baseline |
+| R3 | **The step model is still more exact:** its 95.8% (H = 8) and 89.2% (H = 32) exact futures stay ≥ NCM-delta's |
+| R4 | **The delta target matters beyond the tokenizer fix:** NCM-state's exact futures at H = 8 < NCM-delta's |
+| R5 | **The speed pattern is unchanged:** NCM ≤ 0.5× the step model's time at H = 32, and ≥ 0.8× at H = 8 |
+
+**Commands** (one chain; each segment ≤ 9 min; a finished stage exits immediately on repeat):
+
+    python e11b_ncm.py tokenizer --target delta   (×2)
+    python e11b_ncm.py tokenizer --target state   (×2)
+    python e11b_ncm.py generator --target delta --horizon 8   (×2)
+    python e11b_ncm.py generator --target delta --horizon 32  (×2)
+    python e11b_ncm.py generator --target state --horizon 8   (×2)
+    python e11b_ncm.py eval --target delta --horizon 8 ; eval --target delta --horizon 32 ; eval --target state --horizon 8

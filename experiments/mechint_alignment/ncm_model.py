@@ -29,13 +29,14 @@ LEVELS = [1, 2, 4, 7, 14, 28, 49, 98, 147, 196]         # coarse to fine; the la
 CODEBOOK = 16
 
 
-def tokenizer_config(in_vocab, length, levels=LEVELS, embed_dim=128):
+def tokenizer_config(in_vocab, length, levels=LEVELS, embed_dim=128, restart_threshold=0.0):
     return OmegaConf.create(dict(
         n_layers=4, context_length=length, embed_dim=embed_dim, in_vocab_size=in_vocab,
         vqvae_vocab_size=[CODEBOOK] * len(levels), compression_factor=1, dropout=0.1, dec_layers=1,
         pre_quant_dropout=0.0, pre_quant_groupnorm=8, pre_quant_norm_type="group", use_qk_norm=True,
         vector_quantizer_config=dict(
             clss="multiscale_residual_vector_quantizer", decay=0.99, epsilon=1e-5, commitment_cost=0.25,
+            restart_threshold=restart_threshold,           # > 0: dead codes are restarted on current inputs (E11b)
             learned_l1_sampling=True, learned_all_sampling=False,
             quant_resi=dict(enabled=True, ratio=0.5, share_mode=0, learnable_ratio=False),
             levels=dict(use_manual_levels=True, manual_levels=list(levels)),
@@ -51,18 +52,19 @@ def generator_config(prefix_len, n_levels, n_embd=256, n_layer=6, n_head=8):
         rope_base=10000, use_qk_norm=True, raw_token_prefix=True, query_level0=True, tie_heads_to_codebook=False))
 
 
-def make_tokenizer(in_vocab, length):
-    return VQVAE(**tokenizer_config(in_vocab, length))
+def make_tokenizer(in_vocab, length, **cfg):
+    return VQVAE(**tokenizer_config(in_vocab, length, **cfg))
 
 
 def make_generator(vqvae, prefix_len, **size):
     return NextConceptTransformer(vqvae_local=vqvae, config=generator_config(prefix_len, len(vqvae.vq.levels), **size))
 
 
-def tokenizer_loss(vqvae, tokens):
-    """Stage 1: reconstruction cross-entropy + VQ terms. tokens [B, L]."""
+def tokenizer_loss(vqvae, tokens, weights=None):
+    """Stage 1: reconstruction cross-entropy (optionally weighted per cell, E11b) + VQ terms. tokens [B, L]."""
     logits, vq_loss, *_ = vqvae(tokens)
-    rec = F.cross_entropy(logits.reshape(-1, logits.shape[-1]).float(), tokens.reshape(-1))
+    ce = F.cross_entropy(logits.reshape(-1, logits.shape[-1]).float(), tokens.reshape(-1), reduction="none")
+    rec = ce.mean() if weights is None else (ce * weights.reshape(-1)).sum() / weights.sum()
     return rec + vq_loss, rec
 
 
