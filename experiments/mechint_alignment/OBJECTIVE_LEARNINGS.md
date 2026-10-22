@@ -183,6 +183,8 @@ The lab records are `EXPERIMENT_E*.md`; the theory is in `BEAUTY_MATH.md`, `PREF
   idle agent first.
 - **A weak optimizer hides an objective's failure modes.** E9: random shooting barely optimized, so the maximizer
   looked harmless. Check that the optimizer is strong enough before judging the objective.
+- **Keep the best checkpoint when training is unstable.** E11b: a tokenizer reached 97% exact reconstruction, then
+  degraded to 34%, and the run saved only the final state.
 - **Summary statistics miss what the generated artifacts show.** E9b: the pre-registered copy measure could not see a
   sparse tiling, and the polka-dot hack was found by looking at the canvases. View the outputs before trusting
   any measure of them.

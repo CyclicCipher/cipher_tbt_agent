@@ -200,3 +200,64 @@ generator; code accuracy and code use per level.
     python e11b_ncm.py generator --target delta --horizon 32  (×2)
     python e11b_ncm.py generator --target state --horizon 8   (×2)
     python e11b_ncm.py eval --target delta --horizon 8 ; eval --target delta --horizon 32 ; eval --target state --horizon 8
+
+## E11b results (2026-10-21; `runs/e11b.txt`, `runs/e11b/*.jsonl`)
+
+**Tokenizers** (18 min each; neither reached the stop criterion):
+- **Delta:** exact reconstruction rose from 7% to 78%, noisily (held-out at evaluation: 64% for H = 8 deltas, 79% for
+  H = 32). Changed cells 100% and agent 99.5%: the rare-cell weighting worked. Code use [16, 7, 8, 9, 12, 15, 15, 14,
+  15, 16], no collapse. The remaining errors are false edits on unchanged cells.
+- **State:** **unstable.** Exact reconstruction reached 97% at step 3,600, then fell to 33% by the end (agent cells
+  100%). All 16 codes are used at every level. The saved checkpoint is the degraded final one: the training kept no
+  best checkpoint, an apparatus omission.
+
+**Evaluation** (the same 2,048 futures as E11; step model = E11's):
+
+| arm | tokenizer ceiling: exact / changed | NCM teacher-forced: exact / changed | **NCM free-running: exact / changed / per-cell** | step model: exact / changed | time for 144: NCM / step |
+|---|---|---|---|---|---|
+| delta, H = 8 | 63.6% / 100% | 20.0% / 89.3% | **2.3% / 4.6% / 98.21%** | 95.8% / 97.8% | 0.79 s / 0.44 s |
+| delta, H = 32 | 78.6% / 100% | 5.8% / 80.5% | **0.1% / 2.5% / 96.28%** | 89.2% / 94.4% | 0.86 s / 1.76 s |
+| state, H = 8 | 34.2% / 90.4% | 0.0% / 57.6% | **0.0% / 16.3% / 95.63%** | 95.8% / 97.8% | 0.79 s / 0.44 s |
+
+(Copy baseline per cell: 98.82% at H = 8, 97.47% at H = 32.)
+
+Code accuracy per level, delta H = 8, coarse → fine:
+
+| | per level |
+|---|---|
+| teacher-forced | 0.19, 0.78, 0.81, 0.88, 0.91, 0.93, 0.96, 0.97, 0.99, 1.00 |
+| free-running | 0.19, 0.43, 0.59, 0.59, 0.57, 0.82, 0.89, 0.80, 0.97, 0.97 |
+
+| # | verdict |
+|---|---|
+| R1 | **Refuted:** neither tokenizer reached 99.5% exact (delta 64–79%; state peaked at 97%, then degraded to 34%). Rare cells: 100% / 99.5–100% |
+| R2 | **Refuted:** NCM-delta at H = 8 is exact on 2.3% of futures, gets 4.6% of changed cells, and its per-cell accuracy is below the copy baseline |
+| R3 | **Confirmed:** the step model is far more exact (95.8% / 89.2%) |
+| R4 | Confirmed in direction (state 0.0% < delta 2.3%), but both are near zero: uninformative |
+| R5 | **Confirmed:** 0.49× the step model's time at H = 32, 1.79× at H = 8 (the same as E11) |
+
+**Where the error is now: the coarse levels.**
+- The fixes worked where they were aimed. With the delta target, the tokenizer reconstructs every changed cell, and
+  the generator *given the true coarse codes* gets 89% of changed cells right.
+- Free-running generation fails because the **coarse codes are mispredicted:** level 0 at 19% (16 possible codes),
+  levels 1–4 at 43–59%. The errors cascade into the fine levels: 89% → 5% on changed cells.
+- Conditioning corruption at 10% does not make the generator robust to error rates this high.
+
+**Why the coarse levels are hard here (interpretation).**
+- In this world the coarse code of the future, roughly "where the changes are and what they are", is the *result* of
+  composing H precise local steps (where the agent walks, what it paints). Level 0 must do the whole simulation in its
+  first pass. The one-step model does one easy local step per pass.
+- In the paper's tasks the coarse structure is *easier* than the detail: the topic of a text, the constraint
+  structure of a Sudoku. The same holds for smooth physics fields, whose low frequencies evolve slowly (which is why
+  multigrid works).
+- **Hypothesis:** coarse-to-fine generation helps when coarse structure is easier to determine than detail (design,
+  layout, constraint satisfaction, smooth fields). It hurts when coarse structure is the consequence of a long chain
+  of fine-grained steps (mechanistic simulation of discrete agents).
+- This is consistent with the user's intuition that NCM belongs in constraint-satisfaction and design tasks. The
+  Canvas design-brief test and the continuous-field world would test it directly.
+
+**Caveats:**
+- Small scale: 1.8M-parameter generators, 18 minutes, about a quarter of an epoch; code accuracy was still rising
+  slowly. These results do not show that NCM fails at scale, only that it does not learn this world's dynamics at a
+  scale where the one-step model already does.
+- The state tokenizer's late degradation, with no best checkpoint kept, also hurt the state arm.
