@@ -175,6 +175,15 @@ The lab records are `EXPERIMENT_E*.md`; the theory is in `BEAUTY_MATH.md`, `PREF
 - **Implication:** a principled-looking objective term can cost more than it gives at small scale. Keep a term only
   when it beats its own cost in the measured objective.
 
+### L16. With a learned prior, fast in-world learning is near-ideal; the cost is in the prior
+- **Finding:** measured against an exact Bayesian observer, E8c's in-world adaptation needs only 2× the ideal's
+  transitions to reach 95% accuracy on the robot's motion rules (3–7× for 99%). A single model for all worlds never
+  learns them.
+- **Evidence:** E12a, **confirmed** (128 worlds; the true hypothesis stayed consistent throughout).
+- **Implication:** data efficiency within a task comes from the prior, and the prior is where the data went
+  (meta-training over thousands of worlds). The user's thesis applies one level up: what is learned in each world is
+  discarded, so efficiency over a *stream* depends on consolidating it without forgetting.
+
 ## E. Apparatus lessons for objective experiments
 
 ### L15. How objective experiments go wrong
