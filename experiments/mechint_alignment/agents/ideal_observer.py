@@ -12,6 +12,7 @@ import numpy as np
 from worlds.village import DIRS, FLOOR, N, OCC_ADULT, OCC_CHILD, OCC_OVERSEER, OCC_ROBOT, WALL
 
 PERMS = np.array(list(itertools.permutations(range(8))), np.int8)          # [40320, 8]: index -> canonical action
+BY_ACTION = [np.argsort(PERMS[:, a], kind="stable") for a in range(8)]    # per index a: perms grouped by canonical action
 PUSH = ("push", "block", "swap")
 N_FIRE = 7                                                                  # fire's shown code is 2 + f
 AMBIGUOUS = None
@@ -64,7 +65,7 @@ class MotionObserver:
     def __init__(self, prior=None):
         """prior: weights over the joint hypotheses (SHAPE); None = uniform, tracked as a boolean mask. E13's observer
         with episodic memory starts from a mixture of earlier episodes' posteriors and the uniform prior."""
-        self.mask = np.ones(SHAPE, bool) if prior is None else np.asarray(prior, np.float64)
+        self.mask = np.ones(SHAPE, bool) if prior is None else np.array(prior, np.float64)   # a copy: updated in place
 
     def posterior(self):
         return self.mask / self.mask.sum()
@@ -89,8 +90,8 @@ class MotionObserver:
             for f in range(N_FIRE):
                 for p in range(len(PUSH)):
                     table[c, f, p] = outcome(cells, pos, facing, c, f, p)
-        counts = np.array([[np.bincount(perm_a, weights=self.mask[:, f, p], minlength=8) for p in range(len(PUSH))]
-                           for f in range(N_FIRE)])         # [N_FIRE, 3, 8]: consistent hypotheses per (f, p, c)
+        counts = self.mask[BY_ACTION[a]].reshape(8, len(PERMS) // 8, N_FIRE, len(PUSH)).sum(1, dtype=np.float64)
+        counts = counts.transpose(1, 2, 0)                   # [N_FIRE, 3, 8]: consistent hypotheses per (f, p, c)
         mass = {}
         for (c, f, p), out in table.items():
             if out is not AMBIGUOUS:
@@ -101,5 +102,5 @@ class MotionObserver:
         ok = np.zeros((8, N_FIRE, len(PUSH)), bool)
         for (c, f, p), out in table.items():
             ok[c, f, p] = out is AMBIGUOUS or out == seen
-        self.mask = self.mask * ok[perm_a]
+        self.mask *= ok[perm_a]
         return pred, prob

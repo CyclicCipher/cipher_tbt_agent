@@ -124,16 +124,28 @@ def ideal_stream(s):
             for m, r in res.items()}
 
 
+def ideal_cached(s):
+    path = f"{OUT}/ideal_s{s}.json"
+    if not os.path.exists(path):
+        json.dump(ideal_stream(s), open(path, "w"))
+    return s
+
+
 def run_ideal():
+    """Resumable: each stream's result is cached in ideal_s{s}.json; writes ideal.json when all are done."""
     t0 = time.time()
     with Pool(STREAMS) as pool:
-        parts = pool.map(ideal_stream, range(STREAMS))
+        for s in pool.imap_unordered(ideal_cached, range(STREAMS)):
+            print(f"stream {s} done  {time.time() - t0:.0f}s", flush=True)
+    parts = [json.load(open(f"{OUT}/ideal_s{s}.json")) for s in range(STREAMS)]
     json.dump(parts, open(f"{OUT}/ideal.json", "w"))
     print(f"ideal observers: {time.time() - t0:.0f}s", flush=True)
 
 
 # ---- learners ---------------------------------------------------------------------------------------------------------
-def run_learner():
+def run_learner(budget):
+    """Resumable: runs whole episodes until about `budget` seconds have passed, saves the state (library, scorers,
+    recall) to learner_state.pt, and exits; the next call continues. Writes learner.json after the last episode."""
     dev = torch.device("cuda")
     z = load(f"{OUT}/stream.npz")
     m = FamilyModel(SPEC).to(dev)
@@ -148,8 +160,20 @@ def run_learner():
     recall = {k: np.zeros((n_chunks, 2)) for k in range(1, REPEATS + 1)}  # mass on same-physics entries, count
     library = []                                                           # per position: (fast dict [S], physics [S])
     keys = list(m.mu)
-    t0 = time.time()
-    for e in range(EPISODES):
+    state_path, e0 = f"{OUT}/learner_state.pt", 0
+    if os.path.exists(state_path):
+        st = torch.load(state_path, map_location=dev, weights_only=False)
+        e0, library, recall = st["e"], st["library"], st["recall"]
+        for key, (bits, n, hit, tot) in st["sc"].items():
+            sc[key].bits, sc[key].rows, sc[key].hit, sc[key].tot = bits, n, hit, tot
+    t0, t_ep = time.time(), 0.0
+    for e in range(e0, EPISODES):
+        if e > e0 and time.time() - t0 + 1.2 * t_ep > budget:
+            torch.save(dict(e=e, library=library, recall=recall,
+                            sc={key: (x.bits, x.rows, x.hit, x.tot) for key, x in sc.items()}), state_path)
+            print(f"saved at episode {e}/{EPISODES}  {time.time() - t0:.0f}s", flush=True)
+            return
+        t_start = time.time()
         enc = z["encounter"][worlds[:, e, 0]]
         pid = z["physics_id"][worlds[:, e, 0]]
         fast = m.fast_init(S)
@@ -207,8 +231,8 @@ def run_learner():
             grads = torch.autograd.grad(loss, [fast[k] for k in keys])
             fast = run.kalman_step(fast, dict(zip(keys, grads)), S, C, (t + 1) * C)
         library.append(({k: v.detach() for k, v in fast.items()}, pid))
-        if (e + 1) % 8 == 0:
-            print(f"episode {e + 1}/{EPISODES}  {time.time() - t0:.0f}s", flush=True)
+        t_ep = time.time() - t_start
+        print(f"episode {e + 1}/{EPISODES}  library {n_lib}  {t_ep:.0f}s", flush=True)
     out = {f"{w}_{k}": sc[w, k].result() for (w, k) in sc}
     out["recall"] = {k: (recall[k][:, 0] / np.maximum(recall[k][:, 1], 1)).tolist() for k in recall}
     json.dump(out, open(f"{OUT}/learner.json", "w"))
@@ -256,9 +280,10 @@ def report():
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("stage", choices=("data", "ideal", "learner", "report"))
+    p.add_argument("--budget", type=float, default=480, help="learner: seconds per resumable segment")
     a = p.parse_args()
     os.makedirs(OUT, exist_ok=True)
-    {"data": make_data, "ideal": run_ideal, "learner": run_learner, "report": report}[a.stage]()
+    {"data": make_data, "ideal": run_ideal, "learner": lambda: run_learner(a.budget), "report": report}[a.stage]()
 
 
 if __name__ == "__main__":

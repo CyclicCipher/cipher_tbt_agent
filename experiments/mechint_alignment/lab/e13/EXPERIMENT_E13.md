@@ -45,5 +45,15 @@ memory.
 
     python -m lab.e13.e13_stream data
     python -m lab.e13.e13_stream ideal
-    python -m lab.e13.e13_stream learner
+    python -m lab.e13.e13_stream learner    # resumable: repeat until it writes learner.json
     python -m lab.e13.e13_stream report
+
+## Status (2026-10-26): dropped by the user before the learner stage finished
+
+- Done: the data (`runs/e13/stream.npz`) and both ideal observers (`runs/e13/ideal_s*.json`, `ideal.json`; 513 s).
+  The ideal observer's per-step count was rewritten as one gather; verified identical (predictions, probabilities,
+  posteriors) to the old code on 4 × 512 steps, 1.5× faster.
+- Not done: the learner stage. As written it ran every library entry in one batch, so its VRAM grew with the library
+  (3.9 of 4 GB at 19 entries). Stopped at episode 20; no learner results. If resumed: run the library forward in
+  fixed-size slices first.
+- M1–M4 not scored.
