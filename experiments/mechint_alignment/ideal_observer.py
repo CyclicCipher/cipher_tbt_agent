@@ -57,12 +57,24 @@ def outcome(cells, pos, facing, c, f, p):
     return there, c
 
 
+SHAPE = (len(PERMS), N_FIRE, len(PUSH))
+
+
 class MotionObserver:
-    def __init__(self):
-        self.mask = np.ones((len(PERMS), N_FIRE, len(PUSH)), bool)
+    def __init__(self, prior=None):
+        """prior: weights over the joint hypotheses (SHAPE); None = uniform, tracked as a boolean mask. E13's observer
+        with episodic memory starts from a mixture of earlier episodes' posteriors and the uniform prior."""
+        self.mask = np.ones(SHAPE, bool) if prior is None else np.asarray(prior, np.float64)
+
+    def posterior(self):
+        return self.mask / self.mask.sum()
 
     def entropy(self):
-        return float(np.log2(self.mask.sum()))
+        if self.mask.dtype == bool:
+            return float(np.log2(self.mask.sum()))
+        p = self.posterior()
+        p = p[p > 0]
+        return float(-(p * np.log2(p)).sum())
 
     def step(self, cells, glob, a, nxt_cells, nxt_glob):
         """Predict the robot's motion for action index a, then update on the observed motion.
@@ -89,5 +101,5 @@ class MotionObserver:
         ok = np.zeros((8, N_FIRE, len(PUSH)), bool)
         for (c, f, p), out in table.items():
             ok[c, f, p] = out is AMBIGUOUS or out == seen
-        self.mask &= ok[perm_a]
+        self.mask = self.mask * ok[perm_a]
         return pred, prob

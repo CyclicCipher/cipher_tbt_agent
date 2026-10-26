@@ -139,9 +139,11 @@ class GridWorld:
     STAT_KEYS: tuple = ()
     T_MAX = 128
 
-    def __init__(self, seed=0, family=None, t_max=None):
-        """family "train" / "heldout": every episode samples its own hidden Physics; None: the default physics."""
-        self.family = family
+    def __init__(self, seed=0, family=None, t_max=None, physics_seed=None):
+        """family "train" / "heldout": every episode samples its own hidden Physics; None: the default physics.
+        physics_seed (E13): sample the physics from this seed instead of the layout's, so a physics can recur on new
+        layouts."""
+        self.family, self.physics_seed = family, physics_seed
         self.t_max = t_max or self.T_MAX
         self.reset(seed)
 
@@ -153,7 +155,8 @@ class GridWorld:
                 break
         else:
             raise RuntimeError(f"no valid layout for seed {seed}")
-        self.ph = self.sample_physics(np.random.default_rng([seed, 3]), self.family) if self.family \
+        pseed = seed if getattr(self, "physics_seed", None) is None else self.physics_seed
+        self.ph = self.sample_physics(np.random.default_rng([pseed, 3]), self.family) if self.family \
             else self.default_physics()
         self._code_lut = np.array(self.ph.code_map, np.uint8)
         self._start(np.random.default_rng([seed, 1]))

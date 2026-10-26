@@ -65,6 +65,20 @@ class Runner:
             new = ((1 - self.em_rate) * sig2 + self.em_rate * est).clamp(1e-6, 1.0)
             self.m.log_sigma[k].copy_(0.5 * torch.log(new))
 
+    def kalman_step(self, fast, grads, W, C, n_seen, train=False):
+        """One Bayesian step of every world's fast parameters on a chunk (each datum counted once):
+        phi <- phi - g_sum / (prior precision + n_seen * Fbar), clamped. grads: of the chunk's mean loss over W*C rows."""
+        new = {}
+        for k, gk in grads.items():
+            gsum = gk.detach() * (W * C)                       # the chunk's summed loss, each datum once
+            if train:
+                self.Fbar[k].mul_(0.99).add_(0.01 * (gsum ** 2 / C).mean(0))
+            prec = self.prior_prec(k)
+            prec = prec.detach() if torch.is_tensor(prec) else prec
+            step = (gsum / (prec + n_seen * self.Fbar[k])).clamp(-self.clamp, self.clamp)
+            new[k] = (fast[k].detach() - step).requires_grad_()
+        return new
+
     def run(self, worlds, adapt, train=False, scorer=None, opt=None, outer_every=16):
         """One pass over a batch of worlds. Returns the mean prequential bits per step."""
         m, C = self.m, self.chunk
@@ -115,17 +129,7 @@ class Runner:
             elif adapt:
                 grads = torch.autograd.grad(loss, [fast[k] for k in keys])
             if adapt:
-                n_seen = (t + 1) * C
-                new = {}
-                for k, gk in zip(keys, grads):
-                    gsum = gk.detach() * (W * C)                       # the chunk's summed loss, each datum once
-                    if train:
-                        self.Fbar[k].mul_(0.99).add_(0.01 * (gsum ** 2 / C).mean(0))
-                    prec = self.prior_prec(k)
-                    prec = prec.detach() if torch.is_tensor(prec) else prec
-                    step = (gsum / (prec + n_seen * self.Fbar[k])).clamp(-self.clamp, self.clamp)
-                    new[k] = (fast[k].detach() - step).requires_grad_()
-                fast = new
+                fast = self.kalman_step(fast, dict(zip(keys, grads)), W, C, (t + 1) * C, train)
             else:
                 fast = {k: v.detach().requires_grad_() for k, v in fast.items()}
             if train and ((t + 1) % outer_every == 0 or t == n_chunks - 1):   # truncated meta-update

@@ -98,7 +98,8 @@ def sample_physics(rng, split="train"):
 class Village(GridWorld):
     SPEC, STAT_KEYS, T_MAX = SPEC, STAT_KEYS, T_MAX
 
-    def __init__(self, seed=0, size=N, probs=None, max_villagers=4, family=None, t_max=T_MAX, respawn=None):
+    def __init__(self, seed=0, size=N, probs=None, max_villagers=4, family=None, t_max=T_MAX, respawn=None,
+                 physics_seed=None):
         """size < N plays on the central size x size cells (walls around them; the observation is still N x N).
         probs overrides the dilemma modules' probabilities (PROBS). family "train" / "heldout": every episode samples
         its own hidden Physics (sample_physics); None: the default physics. respawn (default: t_max > T_MAX, as in the
@@ -107,7 +108,7 @@ class Village(GridWorld):
         self.p_escape = P_ESCAPE
         self.size, self.probs, self.max_villagers = size, dict(PROBS, **(probs or {})), max_villagers
         self.respawn = (t_max or T_MAX) > T_MAX if respawn is None else respawn
-        super().__init__(seed, family, t_max)
+        super().__init__(seed, family, t_max, physics_seed)
 
     def default_physics(self):
         return DEFAULT_PHYSICS
@@ -252,7 +253,7 @@ class Village(GridWorld):
         env = cls.__new__(cls)
         env.p_move, env.p_escape = (P_MOVE_ADULT, P_MOVE_CHILD), P_ESCAPE
         env.family, env.ph = None, DEFAULT_PHYSICS
-        env.t_max, env.respawn = T_MAX, False
+        env.t_max, env.respawn, env.physics_seed = T_MAX, False, None
         env._code_lut = np.array(env.ph.code_map, np.uint8)
         env.seed = -1
         env.grid = np.array([[codes[ch] for ch in row] for row in rows], np.int8)

@@ -28,8 +28,10 @@ def world_parts(name):
 
 
 def run_lanes(args):
-    """Worker: `lanes` worlds for `steps` steps each. Returns arrays in lane-major order (re-ordered by the caller)."""
-    world, seed0, lanes, steps, worker, epsilons, family, t_max = args
+    """Worker: `lanes` worlds for `steps` steps each. Returns arrays in lane-major order (re-ordered by the caller).
+    An optional 9th element, a list of physics seeds, gives the k-th episode of every lane that physics (E13)."""
+    world, seed0, lanes, steps, worker, epsilons, family, t_max = args[:8]
+    physics = args[8] if len(args) > 8 else None
     make, lab = world_parts(world)
     spec = make.SPEC
     rng = np.random.default_rng([worker, 7])
@@ -48,12 +50,16 @@ def run_lanes(args):
         checks = np.full((lanes, steps, len(lab.EVENTS), lab.MAX_CHECKS, 2), -1, np.int16)
     seed = seed0
     for lane in range(lanes):
-        env, eps = make(seed, family=family, t_max=t_max), epsilons[seed % len(epsilons)]
+        kw = {} if physics is None else dict(physics_seed=physics[0])
+        env, eps, episode_k = make(seed, family=family, t_max=t_max, **kw), epsilons[seed % len(epsilons)], 1
         seed += 1
         if phys is None:
             phys = np.zeros((lanes, steps, len(env.physics_vector())), np.int8)
         for t in range(steps):
             if env.done:
+                if physics is not None:
+                    env.physics_seed = physics[episode_k]
+                    episode_k += 1
                 env.reset(seed)
                 eps = epsilons[seed % len(epsilons)]
                 seed += 1
