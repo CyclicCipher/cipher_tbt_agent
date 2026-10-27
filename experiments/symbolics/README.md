@@ -15,7 +15,7 @@ Claude's controls and rewrites.
 | `continual/` | continual learning with columns | the 100-column symbolic Thousand Brains net | `controls_continual.py` (tasks sharing an input) |
 | `arc_agent/` | the ARC-AGI-3 replica agent | engine, worlds, column, bus, brain, hippocampus, test suite, the sleep plan | — |
 | `toolkit/` | the shared adelic math | — | `adelic.py`, `check_adelic_toolkit.py` (brute-force checks), `check_gemini_math.py` (checks of Gemini's math) |
-| `docs/` | write-ups | `cipher's written summary.txt` (the user's summary of the session) | `ANALYSIS.md` (verdicts), `CONTROLS.md` (controls of Gemini's versions), `REAL_ADELIC.md` (the real versions), `SURROGATES.md` (experiment A) |
+| `docs/` | write-ups | `cipher's written summary.txt` (the user's summary of the session) | `ANALYSIS.md` (verdicts), `CONTROLS.md` (controls of Gemini's versions), `REAL_ADELIC.md` (the real versions), `SURROGATES.md` (experiment A), `DREAMCODER_NOTES.md` (DreamCoder, and what it offers here) |
 
 **Running.** Claude's scripts run as modules from this folder, with the repo venv:
 
