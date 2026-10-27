@@ -193,3 +193,19 @@ The current `src/tbt/` object machinery (segmentation, recognition, object minti
 - **The learner finds which coordinate system each action lives in:** translations world-frame, rotation
   body-frame. That map is what transfers to a new piece: errors drop from 5.2 to 2.1 per 10 steps.
 - **Colour as the object (the symbolic agent's assumption) predicted 0.3% of frames.**
+
+**2026-10-27, part 13: the push_block rebuild** (`push_block_rebuild.py`). The first version of the architecture of
+§3, on the symbolic agent's own world:
+- **Columns:** frames found when cells move together, and split when they stop.
+- **Drivers:** each frame's motion is attributed by evidence to static, action, time (step count mod n) or contact
+  with another frame.
+- **Router:** attention over drivers by track record.
+
+Results:
+- **Prediction:** exact next-frame accuracy 0.93–0.98, against 0.36–0.87 for colour as the object.
+- **Time:** a patroller that moves without the agent acting is attributed to time with period 6 in every run.
+- **Play:** after one WIN, every attempt is optimal.
+- **What it still lacks:**
+  1. **Goal discovery:** the goal is copied from one WIN; it doesn't yet generalize across layouts.
+  2. **Directed exploration:** random play costs 500–1,000 steps to the first WIN, and leaves the box's contact role
+     unresolved in 3 of 9 runs.
