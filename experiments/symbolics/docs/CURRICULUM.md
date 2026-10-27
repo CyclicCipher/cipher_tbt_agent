@@ -311,3 +311,43 @@ in extrapolation (up to 10²¹).
   the physics; v1's plate law failed only on that.
 - **Expose exponents that log-y fits hide in linear coefficients** to template learning.
 - **Check safety over an enlarged box,** or abstain where the ensemble disagrees.
+
+# Experiment B2: fit to the noise floor (pre-registered 2026-10-26, before the change was built)
+
+**Why (the user, 2026-10-26):** "build the noise-floor fix and rerun". Experiment B's central failure: BIC, with the
+noise level estimated from the residual, kept adding terms that fit the nearly noise-free simulator's mesh artifacts,
+so formulas bloated, extrapolated badly and sometimes blew up, and the library learned the bloat. **This design is
+informed by B's held-out results.** The held-out data are reused (they already exist; the curriculum and library code
+never read them).
+
+**The one change:** selection uses BIC with the noise level known instead of estimated:
+- BIC = Σ (ŷ − y)² / σ² + (parameters) · log n − 2 log P(terms | library), with residuals on the y scale for both
+  transforms, so no Jacobian term is needed.
+- σ = max(the task's measured roughness, 0.002) × the standard deviation of its training y. The floor 0.002 sits
+  just above the uniform beams' roughness (≤ 0.0013). The textbook laws fit those tasks' data to ≤ 10⁻⁴ (checked on
+  5 curriculum tasks), so the floor asks for the law and no more.
+- Roughness is measured as in B: 61-point sweeps through the box centre along each input. It is now also measured for
+  the held-out tasks, as part of each task's description, like its constraints.
+- A term is now kept only if it lowers the squared error by more than σ² log n, about 4.6 σ² at n = 100.
+
+Everything else is unchanged:
+- the search, the guide, library learning (with B's amended objective), and the "solved" rule;
+- the curriculum is rerun from scratch (3 cycles) and the library re-frozen;
+- arms A1–A4 are refitted on the held-out tasks;
+- A0, the GP and the textbook laws are unchanged and reused from B, not rerun.
+
+| # | prediction (before the change was built) |
+|---|---|
+| Q1 | **Parsimony:** the median size (terms, constant included) of A4's held-out formulas at n = 100 is ≤ 6 (B: 8–16) |
+| Q2 | **Safety:** no finder-v2 fit at n = 100 has extrapolation or far NRMSE > 10 (B: up to 2·10⁶) |
+| Q3 | **Extrapolation:** A4's far NRMSE at n = 100, geometric mean over the 6 tasks, is at least 1.5× lower than B's (0.67 → ≤ 0.45) |
+| Q4 | **The cost in range is small:** A4's in-range NRMSE at n = 100 is within 1.5× of B's on at least 5 of 6 tasks |
+| Q5 | **Discovery:** at least one candidate law (≤ 6 terms, in ≤ 0.02, far ≤ 0.1) on H3 or H6 from any of A1–A4 at n = 100 (B: none) |
+| Q6 | **The stepped beam:** A4's far NRMSE on H1 at n = 100 is ≤ 0.15 (B: 0.29; the textbook law: 0.075) |
+| Q7 | **A cleaner library:** fewer than B's 22 templates, still including a bending template L³·h⁻³ (exponents within 0.1) |
+| Q8 | **The yardstick (reference only):** A4 beats the GP in far extrapolation on at least 3 of 6 tasks at n = 100 (B: 2) |
+
+    python -m regression.claude.curriculum roughness_heldout
+    python -m regression.claude.curriculum --variant nf wake 1   (then sleep 1, wake 2, sleep 2, wake 3, sleep 3)
+    python -m regression.claude.curriculum --variant nf evaluate
+    python -m regression.claude.curriculum --variant nf report
