@@ -69,3 +69,101 @@ seen half.
   over coordinates needs an encoding matched to the learner.
 - **What this does not show:** generality beyond groups. The method needs a hypothesized algebraic structure that the
   data can confirm or refute. Here it was given one hypothesis; choosing among many is the open part.
+
+# Part 2: competing hypotheses (pre-registered 2026-10-26, before the code was written)
+
+**Why (the user):** run the competing-hypotheses test. Part 1 gave the pipeline one hypothesis. Here several compete,
+on tasks the pipeline wasn't designed for, and the data must pick.
+
+**Tasks:** binary operations on 60 elements, each relabelled by a random permutation, so no numeric shortcut exists:
+
+| task | operation | true structure |
+|---|---|---|
+| T1 | addition mod 60 | cyclic abelian group |
+| T2 | Z/6 × Z/10, componentwise | abelian, not cyclic |
+| T3 | A₅, the even permutations of 5 objects, composed | non-commutative group |
+| T4 | max over a chain of 60 | semilattice (a total order) |
+| T5 | subtraction mod 60 | a quasigroup, isotopic to a group; not associative, not commutative, and outside the hypothesis space as a group |
+| T6 | a random table | none |
+
+**Hypotheses:** each is a set of axioms that both completes the table and can be contradicted.
+- **Completion rules:**
+  - commutativity: a ⊕ b = b ⊕ a;
+  - associativity: from a ⊕ b = c, b ⊕ d = f and c ⊕ d = e, infer a ⊕ f = e;
+  - idempotence: a ⊕ a = a;
+  - Latin: every row and column is a permutation. A duplicate is a contradiction, and a row or column missing exactly
+    one value gets it filled.
+- **The hypotheses:** none; commutative {comm}; commutative semigroup {comm, assoc}; semilattice {comm, assoc, idem};
+  quasigroup {Latin}; group {assoc, Latin}; abelian group {comm, assoc, Latin}.
+
+**Score** (a predictive likelihood, Occam built in):
+- The observed entries are split 80/20 three times. Each hypothesis completes the table from the 80% and predicts the
+  20%.
+- Per predicted entry: log(1 − ε) if determined and right; log ε if determined and wrong; log(1/60) if undetermined.
+  Plus log ε per contradiction met while completing. ε = 0.01.
+- Sum over the three splits. The highest score wins; ties (within 10⁻⁶) go to the hypothesis with more axioms, the
+  strongest consistent statement.
+
+**Coordinates for the winner,** from the completion of all observed entries:
+- **Abelian group:** characters, and their orders. Cyclic if one has order 60.
+- **Group:** the size of its centre (the elements that commute with all others).
+- **Semilattice:** each element's rank, #{b : a ⊕ b = a}, against the true order.
+
+Observed fractions: 50% and 25% of the table.
+
+| # | prediction |
+|---|---|
+| C1 | at 50%, the winner is right on T1 (abelian group), T2 (abelian group), T3 (group), T4 (semilattice) and T6 (none) |
+| C2 | on T5 the winner is quasigroup: the strongest hypothesis in the space consistent with the data |
+| C3 | T1 comes out cyclic (a character of order 60); T2 non-cyclic (largest order 30); T3 has a centre of size 1; T4's ranks equal the true order exactly |
+| C4 | at 25%, the winner is still right on at least 5 of the 6 tasks |
+
+**Cost:** seconds, CPU only.
+
+    python -m structure.claude.structure_hypotheses      (from experiments/symbolics)
+
+## Part 2 results (2026-10-26; `runs/structure_hypotheses.txt`, `.json`; 2.4 s in total)
+
+| task | winner at 50% | winner at 25% | unseen entries filled, and correct | coordinates |
+|---|---|---|---|---|
+| T1 Z/60 | abelian group | abelian group | all, 100% (both fractions) | a character of order 60: **cyclic** |
+| T2 Z/6 × Z/10 | abelian group | abelian group | all, 100% | largest order 30: **not cyclic** |
+| T3 A₅ | group | group | all, 100% | centre of size **1** |
+| T4 chain max | semilattice | semilattice | 97% (50%) and 88% (25%) of them, 100% correct | ranks not computable: the table is incomplete (below) |
+| T5 subtraction | quasigroup | quasigroup | none | — |
+| T6 random | none | none | none | — |
+
+**Verdicts:**
+- **C1 confirmed:** all 5 right at 50%.
+- **C2 confirmed, but only by the tie-break.** Quasigroup and none score the same on T5: Latin never fills anything,
+  because no row or column is ever one value short. The evidence for Latin is that it is never contradicted on T5,
+  while on T6 it meets about 1,480 duplicates. The score gives that no credit.
+- **C3: 3 of 4.** T1 is cyclic, T2 non-cyclic with largest order 30, and T3 has a centre of size 1. T4 fails as
+  specified: completion leaves 54 entries (27 pairs) undetermined at 50%, so the ranks can't be counted.
+- **C4 confirmed:** 6 of 6 right at 25%.
+
+**Exploratory (after C3 failed on T4):** the order the completion does determine (a ≤ b iff a ⊕ b = b), against the
+true chain:
+
+| observed | pairs ordered correctly | wrongly | undetermined |
+|---|---|---|---|
+| 50% | 1,743 | 0 | 27 |
+| 25% | 1,611 | 0 | 159 |
+
+The undetermined pairs are close neighbours in the chain. Ordering a and b by inference needs an element c between
+them with both a ⊕ c and c ⊕ b known, so nearly adjacent pairs are only settled by direct observation. "The order is
+total" isn't in the hypothesis space; with it, the rest would follow.
+
+**Reading:**
+- **The data picked the structure in every case, from a quarter of the table, in seconds.** On T1–T3 the winner
+  completed the whole table exactly. The coordinates then told cyclic from non-cyclic, and found A₅'s trivial centre.
+  The relabelling meant no numeric shortcut was available.
+- **The tie-break did real work in two places.**
+  - On T1 and T2, commutative semigroup, group and abelian group tie: each completes the table perfectly.
+  - On T5, quasigroup ties with none.
+
+  Held-out prediction credits a hypothesis for what it fills, never for a constraint that was never violated.
+- **The fix, not yet run:** a Bayesian marginal likelihood, coded entry by entry (prequential). Under Latin, an entry
+  can only be one of the values not yet in its row and column, so each observed entry costs fewer bits than under
+  none. That would credit an unviolated constraint directly, and should separate quasigroup from none on T5 without a
+  tie-break.
