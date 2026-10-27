@@ -1040,3 +1040,137 @@ by conjugation (h → P h P⁻¹).
 - **Transfer:** the action-to-group-element map carries to a new piece and board, and cuts errors from 5.2 to 2.1
   per 10 steps. What transfers is the geometry of the actions, not the object.
 - **The dominant remaining cost is first sightings,** about 4 per trial: each action's effect has to be seen once.
+
+# Part 13: the push_block rebuild of the symbolic agent (pre-registered 2026-10-27, before the code was written)
+
+**Why (the user):** pre-register and run the push_block rebuild. Time is critical: in real ARC-AGI-3 games things
+change without the agent acting.
+
+**What the symbolic agent hard-codes** (`arc_agent/gemini/brain.py`), and what the rebuild learns instead:
+
+| the symbolic agent | the rebuild |
+|---|---|
+| one column per colour | one column per frame, discovered when its cells move together (part 12, with revision); static content stays in a board memory |
+| motor map written in (ACTION1 = up) | each frame's motion learned from evidence, as a group element per driver |
+| tool colour 4, target colour 2 or 3, background = most frequent colour | none |
+| the "lateral impulse" from player to box | a learned contact driver: frame f moves by f′'s displacement when f′'s predicted cells overlap f's |
+| a Sokoban cost to plan with | the goal = the frames' poses at the first WIN, reached by search over the learned model |
+
+**Innate:**
+- the geometry: the bounded 9 × 9 grid with its translations and 90° rotations. A move that would leave the grid
+  doesn't happen; the map is partial at the edge.
+- solidity between a pusher and what it pushes: when the pushed frame can't move, the pusher doesn't either.
+
+**Each frame's motion has candidate drivers, all scored by prequential evidence:**
+- **static:** never moves;
+- **action:** the element the current action produced before, the most frequent one per action;
+- **time n:** the element seen before at the same phase, with phase = the game's step count mod n, n = 1..8. This
+  is the timestamp: motion that happens without the agent acting;
+- **contact with f′:** described above.
+
+**The vote is attention over drivers by track record.** Each frame follows the driver with the highest accumulated
+log-evidence (the hard maximum of a softmax over log-evidence). On ties the simpler driver wins: static, then
+action, then time, then contact.
+
+**Worlds:**
+- **W1:** Gemini's push_block exactly (9 × 9; player 1 at (2, 4), box 4 at (4, 4), target 2 at (6, 4)).
+- **W2:** the same mechanics, with a random layout at every reset.
+- **W3:** W2 plus a patroller: colour 6, on row 0, moving +1 for 3 steps and then −1 for 3 steps (period 6), whatever
+  the agent does. It is drawn on top and doesn't interact.
+
+**Runs:** 200 random actions per world, resetting on WIN or after 50 steps, 3 seeds. Reset transitions aren't
+scored.
+
+**Baselines:**
+- **Colour as the object:** a translation per (action, colour).
+- **No change.**
+- **For play:** Gemini's symbolic agent itself on W1, 5 runs.
+
+**Play (W1, 3 seeds):**
+1. Random exploration, learning, until the first WIN.
+2. Then 5 attempts, each planned by breadth-first search over the learned model to the frames' poses at that WIN.
+
+| # | prediction |
+|---|---|
+| Q1 | exact next-frame accuracy: the rebuild ≥ 0.95 on W1 and W2, ≥ 0.9 on W3; colour as the object ≥ 0.1 below the rebuild on W3; no change ≤ 0.3 everywhere |
+| Q2 | in every run: the player's driver is action, the box's is contact with the player, the patroller's is time with period 6, and the target never becomes a frame |
+| Q3 | W1 play: after the first WIN, every later attempt wins in 3 steps (the optimum) |
+| Q4 | the vote is decisive: by the end of each run, each frame's winning driver leads its runner-up by ≥ 5 nats |
+
+**Not tested:**
+- goals that generalize across layouts ("the box on the red cell" is a relation, and needs goal discovery);
+- things that appear, vanish or change colour over time.
+
+**Cost:** seconds, CPU only.
+
+    python -m arc_agent.claude.push_block_rebuild      (from experiments/symbolics)
+
+## Part 13 results (2026-10-27; `runs/push_block_rebuild.txt`, `.json`; 26.5 s)
+
+**The first run had two implementation bugs, where the code didn't do what this pre-registration specifies.** It is
+kept in `runs/push_block_rebuild_buggy_first_run.txt`.
+1. **Stale memory under a known frame.** Cells covered by a known frame were erased using the board memory, which
+   still held the box's colour after a push. The box then seemed to be in two places, and was never discovered in
+   W1. The fix: cells covered by a known frame are unknown.
+2. **No revision.** The pre-registration says frames are discovered as in part 12, *with revision*. The code left
+   revision out. In two W3 seeds the player and the patroller moved alike on the first step and became one frame,
+   and accuracy fell to 0.000 and 0.005. The fix: a frame whose cells stop moving together is split into the parts
+   that do, each inheriting the parent's evidence (part 12's lesson).
+
+Play results were the same in both runs. The results below are from the fixed run.
+
+| world, seed | rebuild | colour as the object | no change | revisions | frames found and their winning driver (lead over the runner-up) |
+|---|---|---|---|---|---|
+| W1, 0 | 0.975 | 0.865 | 0.115 | 0 | player: action (1,080); box: static, **tied** with contact (0.0) |
+| W1, 1 | 0.970 | 0.810 | 0.095 | 0 | player: action (1,061); box: contact with the player (7.8) |
+| W1, 2 | 0.970 | 0.810 | 0.075 | 0 | player: action (1,060); box: contact (7.8) |
+| W2, 0 | 0.960 | 0.790 | 0.180 | 0 | player: action (1,055); box: contact (31.3) |
+| W2, 1 | 0.980 | 0.840 | 0.120 | 0 | player: action (1,037); **no box frame** |
+| W2, 2 | 0.950 | 0.820 | 0.075 | 0 | player: action (1,133); box: contact (7.8) |
+| W3, 0 | 0.950 | 0.355 | 0.000 | 1 | patroller: **time, period 6** (726); player: action (1,055); box: contact (31.3) |
+| W3, 1 | 0.970 | 0.395 | 0.000 | 0 | player: action (1,037); patroller: time 6 (726); **no box frame** |
+| W3, 2 | 0.935 | 0.355 | 0.000 | 1 | patroller: time 6 (726); player: action (1,133); box: contact (7.8) |
+
+The target never became a frame.
+
+**Box pushes in each run's 200 random steps** (counted afterwards, to check the box rows):
+
+| run | W1, 0 | W1, 1 | W1, 2 | W2, 0 | W2, 1 | W2, 2 | W3, 0 | W3, 1 | W3, 2 |
+|---|---|---|---|---|---|---|---|---|---|
+| pushes | 1 | 2 | 2 | 5 | 0 | 2 | 5 | 0 | 2 |
+
+Each push after the box is discovered adds ln(0.99 · 25/0.01) = 7.8 nats for contact over static: 1 push gives 7.8,
+4 give 31.3.
+
+**Play (W1):**
+- The rebuild: the first WIN after 517, 1,005 and 588 random exploration steps; then 3, 3, 3, 3, 3 steps in every
+  attempt, for all 3 seeds.
+- Gemini's symbolic agent: 3 steps in all 5 runs, after up to 4 body-discovery steps and 15 babbling steps. Its tool
+  colour, target colour and Sokoban cost are written in.
+
+**Verdicts:**
+- **Q1 confirmed:** 0.97–0.975 (W1), 0.95–0.98 (W2), 0.935–0.97 (W3). Colour as the object is 0.55–0.6 below on W3;
+  no change is ≤ 0.18.
+- **Q2 partly refuted.** The player (action), the patroller (time, period 6) and the target (never a frame) are as
+  predicted in every run. The box's driver is contact in only 6 of 9 runs:
+  - in 2 runs the box was never pushed, so it never became a frame;
+  - in 1 run it was pushed once, which discovered it, but no later push separated contact from static.
+- **Q3 confirmed.**
+- **Q4 partly refuted:** every winning driver leads by ≥ 5 nats except the box in the run pushed once (tie).
+
+**Reading:**
+- **The rebuild learns everything the symbolic agent was given, except the goal.** That covers which cells are
+  objects, what each action does, the push, the board's edges and the patroller. And it does so with no colour, no
+  motor map and no object written in.
+  - Frames are found when cells move together, and split when they stop.
+  - Motion is attributed by evidence to action, time, contact or nothing.
+  - The patroller moves without the agent acting, and is attributed to time with period 6 in every run, from the
+    game's step count.
+- **Colour as the object fails as soon as something moves on its own** (0.36–0.40 on W3).
+- **The price of not being told the goal is exploration:** 517–1,005 random steps to the first WIN, against the
+  symbolic agent's ~22 steps with the answer written in. Once one WIN shows what to reach, planning over the learned
+  model is optimal.
+- **Contact needs evidence.** Random play pushes the box 0–5 times in 200 steps, so in 3 runs its role stayed open.
+  Both costs point at the same missing piece: directed exploration that seeks the configurations the model is
+  unsure about, such as pushing the box in a new direction. Under ARC-AGI-3's scoring (actions per level, against
+  humans) that is the next lever.
