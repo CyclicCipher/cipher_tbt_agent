@@ -77,3 +77,61 @@ hole, and so on. Hold out harder relatives, such as the six-segment beam and the
 tasks: accuracy in range, extrapolation, formula size, and run time against the current finder with primitives only.
 DreamCoder's claim, transferred: the learned library lets a polynomial-time finder solve the held-out tasks that it
 cannot solve from primitives.
+
+## Stitch: library learning by top-down synthesis (checked against the paper)
+
+**The problem:** given a corpus of programs, find the abstraction (a function body whose holes become arguments)
+that most compresses the corpus once every program is rewritten to use it.
+
+**The method, corpus-guided top-down search:**
+- Start from the most general partial abstraction, a single hole `??`. Refine it step by step, replacing a hole with a
+  primitive applied to new holes, or with an argument variable.
+- Each partial abstraction has match locations: the subtrees in the corpus it fits. Refining a hole can only shrink
+  this set (the subset property).
+- So the matched subtrees' total size is an upper bound on the compression any refinement can achieve.
+- Branch and bound: discard any partial abstraction whose bound is below the best complete abstraction found so far,
+  and expand the most promising bounds first. Two more pruning rules keep the result optimal, and the exact utility
+  accounts for an argument used several times and for overlapping matches.
+- One abstraction per iteration: rewrite the corpus with it and repeat. Later abstractions build on earlier ones,
+  giving a hierarchical library.
+
+**Against DreamCoder:** Stitch matches syntactically. It doesn't explore DreamCoder's semantic refactorings (up to
+3 steps of inverse β-reduction, in a version space), and that is the trade: 3–4 orders of magnitude faster, 2 orders
+less memory, compression as good or better. It is exact, and anytime (it can be stopped early with a useful result).
+
+**Polynomial?** Branch and bound is exponential in the worst case, in the size of the abstraction. With a cap on
+abstraction size the count of candidate bodies is a constant, so it is polynomial in the corpus, as DreamCoder's
+bound on refactoring steps is. For our formulas (sums of parametric terms), a capped Stitch or plain
+anti-unification of terms is enough.
+
+## A guide without a neural network
+
+What the guide has to do is rank which library terms a task needs before fitting. Three non-neural ways, all
+polynomial:
+
+1. **Deduction (witness functions).** Push the target down through an operator by inverting it. FlashMeta/PROSE
+   (Polozov & Gulwani, OOPSLA 2015) builds its synthesizers this way.
+   - For a sum the inverse is the residual, y − A, which is the symbolic ResNet.
+   - For a product it is the ratio y / A; for a power, the root; for exp or log, the other one.
+   - Gemini's `regression/gemini/test_target_prop.py` is this idea: invert layer 2 to get layer 1's targets.
+   Each inversion turns one hard problem into smaller ones in O(n).
+2. **Structure statistics, computed from the data directly:**
+   - log–log slopes along each input estimate power-law exponents;
+   - a functional ANOVA decomposition (Sobol indices, or HDMR fitted from random samples) shows which inputs matter
+     and whether the response, or its log, is additive. If it is, the problem splits into 1-D fits, which keeps the
+     search polynomial in high dimension;
+   - mixed second differences of log y test separability, y = g(x)·h(z);
+   - equal component shapes across inputs flag exchangeable inputs (a template);
+   - steepening toward a boundary locates a singularity just outside the domain (a shifted term).
+   These are the engineer's heuristics, written down.
+3. **A guide learned by the system itself (the meta step).** Treat the guide as a program from the statistics in 2
+   to term weights, and learn it with the same machinery: description-length compression over (statistics →
+   solution) pairs, from replays and fantasies. A rule like "additive, slopes near −3 → try Σ cᵢxᵢ⁻³" is kept if it
+   shortens the descriptions of solutions, i.e. if it saves search. The simplest version is case-based: retrieve the
+   solved tasks with the most similar statistics and up-weight the terms they used. The result is interpretable,
+   and it is the abstraction phase applied one level up: the library compresses solutions; the guide compresses how
+   solutions are found.
+
+On the stepped beam, 1 and 2 alone would likely have been enough. The response is close to additive in the six
+heights, so it splits into six 1-D fits. Each 1-D slope is near −3, so each fit proposes h^-3. All six shapes match,
+so the template follows.
