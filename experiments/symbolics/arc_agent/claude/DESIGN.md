@@ -178,3 +178,18 @@ The current `src/tbt/` object machinery (segmentation, recognition, object minti
      costs about 0.02 accuracy, because early revisits are short loops every candidate agrees on. Geometry should pay
      before any revisit: planning a shortcut (Tolman's test). F1 needs that test, or episodes too short to rediscover
      the geometry, or a geometry family too large to search within one episode.
+
+**2026-10-27, parts 11–12:**
+- **F1 is supported where it should be: planning.** On the shortcut test, carried geometry gets home by the
+  shortest way in every trial, wrap-arounds through unexplored territory included. Without it:
+  - a planner that gambles fails 5–27% of the time;
+  - a planner that plays safe takes the shortcut in only 2–21% of shortcut trials, with routes 3–5 times the
+    shortest;
+  - remembered transitions get home in 13–15%.
+- **F3 is supported, with a condition.** Objects come out as frames that move together, with no object primitive,
+  only if segmentation is revisable. One frame pair can't reveal a fixed point of the motion (a rotation's pivot) or
+  the inside of a uniform run (the aperture problem). With re-explanation on refutation, every trial ended with the
+  exact object.
+- **The learner finds which coordinate system each action lives in:** translations world-frame, rotation
+  body-frame. That map is what transfers to a new piece: errors drop from 5.2 to 2.1 per 10 steps.
+- **Colour as the object (the symbolic agent's assumption) predicted 0.3% of frames.**

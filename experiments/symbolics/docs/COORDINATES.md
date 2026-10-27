@@ -858,3 +858,185 @@ for 6 × 10 (Z/2 × Z/30) and [2] for 4 × 15 (a single rotation of order 60).
   fastest? Tolman's own test. Carried geometry knows from the first step that 6 steps north return home; a relearner
   knows only after it has wrapped once. Edge memory does better on stripes (0.59 at first visits) because stripes
   make (colour, action) → next colour partly predictable.
+
+# Parts 11 and 12 (pre-registered 2026-10-27, before the code was written)
+
+**Why (the user):** run the shortcut test, then the moving-piece test. The geometry-discovery techniques are meant for
+the columns of the symbolic agent, so that task manifolds are learned from data.
+
+## Part 11: the shortcut test (Tolman's), where geometry should pay before any revisit
+
+**Environments:** the 6 × 10 and 4 × 15 tori, with 6 colours, and with unique colours (60). 3 seeds.
+
+**Episode 1:** a 300-step walk; the most probable torus of part 8's family becomes the carried geometry, as in part
+10.
+
+**Trials,** 20 per seed and colour regime. Each trial has a new colouring and a new start, then:
+1. a 40-step random walk (exploration);
+2. an excursion: k steps of action 0, then m steps of action 2, with k uniform in 1..h−1 and m in 1..w−1;
+3. the query: go back to the start.
+
+**Agents:**
+- **Carried geometry:** its address by path integration in the learned torus, and that torus's shortest way home.
+- **Relearning (a Bayesian planner):**
+  - The 675 tori's evidence on this trial's colours gives a posterior.
+  - Each torus proposes its own shortest way home.
+  - The agent takes the proposal with the highest posterior probability of ending at the start, the shortest on
+    ties.
+- **Graph memory** (unique colours only): breadth-first search over the transitions (colour, action) → colour seen
+  in this trial.
+- **True geometry:** a sanity check.
+
+**Measures:**
+- **Success:** the agent ends at the start.
+- **Length ratio:** the path's length over the true shortest length.
+- **Shortcut trials:** those where the shortest way home wraps around the torus, which is shorter than undoing the
+  walk's displacement in the plane.
+
+| # | prediction |
+|---|---|
+| S1 | carried geometry succeeds in every trial, with the shortest length, at both colour counts |
+| S2 | relearning succeeds in ≥ 95% of trials. On shortcut trials it takes the shortest way in ≤ 20%, and its mean length ratio there is ≥ 1.2 |
+| S3 | graph memory's success rate is ≥ 0.3 below relearning's |
+| S4 | design check: ≥ 30% of trials are shortcut trials |
+
+## Part 12: the moving piece: objects as frames that move together (DESIGN.md, F3)
+
+**The scene:**
+- A 12 × 12 board that wraps at the edges, with background 0.
+- 8 landmark cells in colours 1–3, plus one distractor landmark in a colour the piece also uses.
+- The piece: a random 5-cell polyomino, each cell coloured 4, 5 or 6, chosen so that no rotation maps it onto itself.
+
+**Actions:**
+- 0–3 translate the piece by one cell in the world's directions.
+- 4 rotates it 90° about its own pivot.
+- The piece is drawn over landmarks, and they reappear when it leaves.
+- Random action sequences of 30 steps.
+
+**The learner has no object primitive. Its geometry is the innate one:** the board's translations and 90° rotations,
+576 group elements.
+- **Discovery:** it explains the first frame change as one set of cells moving by one group element, with everything
+  else staying, and picks the element that leaves the fewest cells wrong. The set that moves is the object, an
+  output rather than an assumption.
+- **After discovery:**
+  - the object's content is kept in its own frame;
+  - its pose is the group element read off each new frame by matching that content;
+  - a static memory holds the rest of the board.
+- **Each action is either a world-frame element** (the new pose is g·pose) **or a body-frame element** (the new pose
+  is pose·h). The frame is whichever stays constant across the action's transitions; on a tie, world-frame.
+
+**Baselines:**
+- **No change:** predict the same frame again.
+- **Colour as the object** (the symbolic agent's assumption): each colour's cells move by a translation learned per
+  action and colour.
+
+**Transfer:** after a 30-step trial, a new board and a new piece for 10 steps.
+- **Carried learner:** keeps the world-frame rules, and the angle of body-frame rules. The rotation's centre belongs
+  to the piece, so it must be observed once.
+- **Fresh learner:** starts from nothing.
+
+20 trials per seed, 3 seeds.
+
+| # | prediction |
+|---|---|
+| P1 | after the first transition, the discovered moving set equals the piece's cells exactly in ≥ 95% of trials |
+| P2 | by the end of a trial, the translations are classed world-frame and the rotation body-frame in ≥ 95% of trials |
+| P3 | exact next-frame prediction from transition 2 on: the learner ≥ 0.75, with its only errors at first sightings of an action plus ≤ 2 per trial from the world/body tie; colour as the object ≤ 0.2; no change 0 |
+| P4 | after discovery, the read-off pose places the piece's cells correctly in every frame |
+| P5 | transfer, frame errors in the first 10 transitions: carried learner ≤ 2.5 per trial (mean); fresh learner ≥ 3.5 |
+
+**Cost:** seconds for each part, CPU only.
+
+    python -m structure.claude.structure_shortcut      (part 11, from experiments/symbolics)
+    python -m structure.claude.structure_piece         (part 12)
+
+## Part 11 results (2026-10-27; `runs/structure_shortcut.txt`, `.json`; 7.8 s)
+
+60 trials per row: 3 seeds × 20.
+
+| environment, colours | shortcut trials | carried geometry: success, length ratio | relearning: success, shortcut taken, length ratio on shortcut trials | graph memory: success |
+|---|---|---|---|---|
+| 6 × 10, 6 | 0.78 | 1.00, 1.00 | 0.83, 0.23, 2.13 | — |
+| 6 × 10, 60 | 0.75 | 1.00, 1.00 | 0.95, 0.36, 1.92 | 0.15 |
+| 4 × 15, 6 | 0.85 | 1.00, 1.00 | 0.78, 0.22, 1.89 | — |
+| 4 × 15, 60 | 0.78 | 1.00, 1.00 | 0.73, 0.40, 1.45 | 0.13 |
+
+True geometry matched carried geometry in every trial: carried geometry was learned correctly in all runs.
+
+**Verdicts:**
+- **S1 confirmed:** carried geometry got home in every trial, always by the shortest way, wrap-arounds included.
+- **S2 refuted.** Relearning's success was 0.73–0.95 (only one row reached 0.95), and it took the shortcut in 22–40%
+  of shortcut trials (predicted ≤ 20%). Its length ratio on shortcut trials, 1.45–2.13, did meet ≥ 1.2.
+- **S3 confirmed:** graph memory succeeded in 13–15% of trials.
+- **S4 confirmed.**
+
+**Why S2 failed: a flaw in my candidate set.** Each torus proposes its own shortest way home, and periods stop at 15.
+Once the walk has strayed more than about 7 cells along an axis, no torus proposes simply undoing the displacement,
+the route that works under every hypothesis. The planner is then forced to gamble on a wrap.
+
+**Exploratory (after S2 failed):** adding "undo the displacement in the plane" as a candidate, one per action pairing.
+
+| environment, colours | relearning + plane route: success | shortcut taken | length ratio on shortcut trials |
+|---|---|---|---|
+| 6 × 10, 6 | 1.00 | 0.02 | 3.83 |
+| 6 × 10, 60 | 1.00 | 0.07 | 3.61 |
+| 4 × 15, 6 | 1.00 | 0.04 | 4.88 |
+| 4 × 15, 60 | 1.00 | 0.21 | 3.16 |
+
+**Reading:**
+- **This is where geometry pays: before any experience of the route.** Carried geometry knows from the first step
+  that the torus wraps, so it cuts through territory it has never crossed. A learner without it either gambles
+  (fails 5–27% of the time) or plays safe by undoing its walk: always home, but taking the shortcut in only 2–21% of
+  shortcut trials, with routes 3.2–4.9 times the shortest. That is Tolman's distinction between a cognitive map and
+  remembered routes.
+- **Graph memory (remembered transitions) almost never gets home.** It only knows the directed steps it has taken.
+
+## Part 12 results (`runs/structure_piece.txt`, `.json`; 37 s)
+
+60 trials (3 seeds × 20) of 30 actions; transfer over 10 actions.
+
+| measure | pre-registered learner | exploratory: revisable segmentation |
+|---|---|---|
+| moving set exact after the first transition (P1) | 0.783 | — |
+| final object model exact (pose × body = the piece's cells at the end) | 0.783 | **1.000** |
+| translations world-frame and rotation body-frame (P2) | 0.733 | 0.750 |
+| exact next frame from transition 2: learner (P3) | 0.676 | 0.818 |
+| exact next frame: colour as the object | 0.003 | 0.003 |
+| exact next frame: no change | 0.000 | 0.000 |
+| errors per trial: first sightings / world-body tie / other | 3.98 / 4.93 (max 25) / 0.47 | 3.98 / 1.02 (max 2) / 0.28 |
+| pose places the piece's cells correctly (P4) | 0.783 of frames | 0.989 of frames |
+| transfer, frame errors in 10 steps: carried / fresh (P5) | 3.98 / 6.38 | 2.12 / 5.18 |
+| revisions per trial | — | 0.32 |
+
+**Verdicts (pre-registered learner): P1–P5 refuted**, with two parts holding:
+- in P3, colour as the object ≤ 0.2 and no change = 0;
+- in P5, the fresh learner ≥ 3.5.
+
+**Diagnosis:** segmentation failed in 13 of 60 trials, and every failure spoiled the whole trial.
+- **9 failures:** the first action was a rotation. All 9 such trials failed: the pivot is a fixed point of the
+  rotation, so nothing in its cell changes, and one frame pair can't show it belongs to the piece.
+- **4 failures:** the aperture problem. Inside a run of same-coloured cells along the direction of motion, nothing
+  changes either.
+
+Both are limits of what a single frame pair can reveal. The flaw was that my learner never revised the set it first
+discovered.
+- **On the 47 trials whose segmentation was exact,** the learner did as predicted: 0.829 exact frames, and at most 1
+  tie error per trial.
+- **The remaining class errors are "both":** an action seen only at one orientation, where the data really can't tell
+  world-frame from body-frame.
+
+**Exploratory (after P1 failed):** revise on refutation. When the read-off pose doesn't reproduce the observed
+frame, re-explain that transition from scratch. The old body-frame observations are carried into the new body frame
+by conjugation (h → P h P⁻¹).
+
+**Reading:**
+- **Objects come out as frames that move together, with no object primitive, but only if the segmentation can be
+  revised.** With revision, every trial ends with the exact object after 0.32 revisions on average. This is "mint on
+  refutation", and the design's generalize-then-correct thesis: a first guess, corrected when a prediction fails.
+- **Colour as the object, the symbolic agent's assumption, predicts 0.3% of frames.** Rotation can't be expressed as
+  a per-colour translation, and the distractor landmark moves with its colour.
+- **The learner discovers which coordinate system each action lives in.** Translations act on the left (world frame:
+  pose' = g·pose). The rotation acts on the right (body frame: pose' = pose·h, about the piece's own pivot).
+- **Transfer:** the action-to-group-element map carries to a new piece and board, and cuts errors from 5.2 to 2.1
+  per 10 steps. What transfers is the geometry of the actions, not the object.
+- **The dominant remaining cost is first sightings,** about 4 per trial: each action's effect has to be seen once.
