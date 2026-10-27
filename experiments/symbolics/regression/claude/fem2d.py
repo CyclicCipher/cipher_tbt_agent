@@ -44,10 +44,10 @@ def node(i, j, nely):
     return i * (nely + 1) + j
 
 
-def solve(nelx, nely, lx, ly, solid, fixed, force):
+def solve(nelx, nely, lx, ly, solid, fixed, force, nu=NU):
     """solid: [nelx, nely] solid fractions; fixed: dof indices; force: [n_dof]. Returns the displacements."""
     a, b = lx / nelx, ly / nely
-    KE = q4_stiffness(round(a, 12), round(b, 12))
+    KE = q4_stiffness(round(a, 12), round(b, 12), round(nu, 12))
     i, j = np.meshgrid(np.arange(nelx), np.arange(nely), indexing="ij")
     n1, n2 = node(i, j, nely), node(i + 1, j, nely)
     n3, n4 = node(i + 1, j + 1, nely), node(i, j + 1, nely)
@@ -158,3 +158,94 @@ def stepped_beam(*h):
         f[2 * node(nelx, j, nely) + 1] -= wj
     u = solve(nelx, nely, lx, ly, solid, clamped_left(nely), f)
     return -np.mean([u[2 * node(nelx, j, nely) + 1] for j in tip])
+
+
+# ---- experiment B: general beams and plates (docs/CURRICULUM.md) ------------------------------------------------------
+def _band_solid(nelx, nely, lx, ly, heights, holes, sub=16):
+    """Solid fraction of a beam of len(heights) equal segments, segment i of height heights[i] centred in a domain of
+    height ly, minus circular holes [(xc, yc, r)] in absolute coordinates. Without holes the fraction is exact
+    (overlap of each element with each segment's band, computed analytically), so outputs vary smoothly with the
+    heights; with holes it is sampled on a sub x sub grid."""
+    a, b = lx / nelx, ly / nely
+    if not holes:
+        seg = lx / len(heights)
+        x0, y0 = np.arange(nelx) * a, np.arange(nely) * b
+        out = np.zeros((nelx, nely))
+        for i, h in enumerate(heights):
+            fx = np.clip(np.minimum(x0 + a, (i + 1) * seg) - np.maximum(x0, i * seg), 0, None) / a
+            fy = np.clip(np.minimum(y0 + b, ly / 2 + h / 2) - np.maximum(y0, ly / 2 - h / 2), 0, None) / b
+            out += fx[:, None] * fy[None, :]
+        return out
+    s = (np.arange(sub) + 0.5) / sub
+    X, Y = np.meshgrid((np.arange(nelx)[:, None] + s).reshape(-1) * a, (np.arange(nely)[:, None] + s).reshape(-1) * b,
+                       indexing="ij")
+    hh = np.asarray(heights, float)[np.minimum((X / (lx / len(heights))).astype(int), len(heights) - 1)]
+    solid = np.abs(Y - ly / 2) <= hh / 2
+    for xc, yc, r in holes:
+        solid &= (X - xc) ** 2 + (Y - yc) ** 2 >= r ** 2
+    return solid.reshape(nelx, sub, nely, sub).mean((1, 3))
+
+
+def beam_general(L=4.0, heights=(1.0,), nu=NU, support="cantilever", load="tip", holes=(), nely=20):
+    """Deflection of a beam of length L made of equal segments of the given heights, centred.
+    support: "cantilever" (clamped at x = 0) or "clamped" (clamped at both ends).
+    load: "tip" (unit force at the free end), "mid" (unit force at mid-span) or "uniform" (1 per unit length).
+    Returns the mean downward displacement over the solid nodes of the loaded section: the tip for a cantilever,
+    mid-span for a clamped beam."""
+    H = max(heights)
+    nelx = max(2, int(round(L / (H / nely))))
+    if support == "clamped" and nelx % 2:
+        nelx += 1
+    solid = _band_solid(nelx, nely, L, H, heights, holes)
+    b = H / nely
+    seg_of = lambda i: min(int(i * (L / nelx) / (L / len(heights))), len(heights) - 1) if i < nelx else len(heights) - 1
+    band = lambda i: [j for j in range(nely + 1) if abs(j * b - H / 2) <= heights[seg_of(i)] / 2 + 1e-9]
+    fixed = list(clamped_left(nely))
+    if support == "clamped":
+        fixed += [d for j in range(nely + 1) for d in (2 * node(nelx, j, nely), 2 * node(nelx, j, nely) + 1)]
+    f = np.zeros(2 * (nelx + 1) * (nely + 1))
+
+    def spread(i, total):
+        nodes = band(i)
+        for j in nodes:
+            f[2 * node(i, j, nely) + 1] -= total / len(nodes)
+
+    if load == "uniform":
+        for i in range(nelx + 1):
+            spread(i, (L / nelx) * (0.5 if i in (0, nelx) else 1.0))
+    else:
+        spread(nelx if load == "tip" else nelx // 2, 1.0)
+    u = solve(nelx, nely, L, H, solid, np.array(fixed), f, nu)
+    at = nelx if support == "cantilever" else nelx // 2
+    return -np.mean([u[2 * node(at, j, nely) + 1] for j in band(at)])
+
+
+@lru_cache(maxsize=None)
+def _beam_reference(L, heights, nu, support, load):
+    return beam_general(L, heights, nu, support, load)
+
+
+def beam_hole_ratio(xc, yc, r, L=4.0, nu=NU, support="cantilever", load="tip"):
+    """A beam of height 1 with a hole at (xc, yc): deflection relative to the same beam without the hole."""
+    return beam_general(L, (1.0,), nu, support, load, holes=[(xc, yc, r)]) / _beam_reference(L, (1.0,), nu, support, load)
+
+
+def plate_general(holes, lx=1.0, ly=1.0, nu=NU, per_unit=40):
+    """Compliance of an lx x ly plate in uniaxial tension (unit total force on the right edge, ux = 0 on the left),
+    with circular holes [(xc, yc, r)]."""
+    nelx, nely = int(round(per_unit * lx)), int(round(per_unit * ly))
+    fixed = np.array([2 * node(0, j, nely) for j in range(nely + 1)] + [2 * node(0, 0, nely) + 1])
+    f = edge_load(nelx, nely, 1.0, 0)
+    u = solve(nelx, nely, lx, ly, solid_fraction(nelx, nely, lx, ly, holes), fixed, f, nu)
+    return f @ u
+
+
+@lru_cache(maxsize=None)
+def _plate_reference_general(lx, ly, nu):
+    return plate_general([], lx, ly, nu)
+
+
+def plate_hole_ratio(r, xc=None, yc=None, lx=1.0, ly=1.0, nu=NU):
+    """Compliance of a plate with one hole (default: centred), relative to the plate without it."""
+    xc, yc = lx / 2 if xc is None else xc, ly / 2 if yc is None else yc
+    return plate_general([(xc, yc, r)], lx, ly, nu) / _plate_reference_general(lx, ly, nu)

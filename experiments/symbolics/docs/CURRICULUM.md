@@ -169,3 +169,65 @@ The textbook law fitted directly where one exists (H1, H4, H5).
 4. Library learning, tested on a hand-made corpus with a known best template.
 5. The curriculum: simulation, then 3 wake–sleep cycles.
 6. Freeze. Simulate the held-out tasks, fit every arm, report.
+
+## Amendments (before any held-out task was simulated)
+
+- **2026-10-26, exchangeable inputs.** Inputs now form a group when the guide's exponent estimates agree within 0.3.
+  The specified test (1-D fits that share a template) compared term syntax, and equivalent forms differ in syntax:
+  h⁻³ and (h + 0.0014)⁻³ landed in different templates on a test function, so only 2 of 4 equal inputs were grouped.
+- **2026-10-26, implementation decisions in finder version 2** (within the specification, listed for the record):
+  - The "8 best" refined each step are the 8 best distinct candidates; the same candidate from different grid
+    starts used to fill every slot.
+  - Each candidate's refinement fits only its own parameters. The kept formulas then get the joint refit.
+  - The 50-evaluation budget includes finite-difference Jacobian evaluations.
+  - Exponents and exp rates keep their sign and stay ≥ 0.25 from zero, because c·x^ε fakes log x and c·exp(εz) fakes
+    z.
+  - A shifted input's singularity sits at least 10% of the input's range outside the box.
+  - The error used in BIC has a numerical floor (10⁻¹² of the total sum of squares, on the y scale for both
+    transforms), so exact data cannot overfit.
+  - Formulas with a denominator are pole-checked whenever a term is added (a bug, found in testing: pole-ridden
+    formulas filled the beam).
+  - With the guide, the search runs both from an empty formula (both transforms) and from the assembled 1-D fits (in
+    the guide's transform, at most 4 more blocks), and BIC picks from all the formulas met.
+- **2026-10-26, discovery of unknown formulas (the user: what we're doing isn't very useful unless it can uncover
+  unknown formulas, which are much harder to find and especially to verify).**
+  There is no answer key for an unknown law, but the simulator stands in for nature: it can be queried anywhere,
+  cheaply. So a formula is verified the way a law is, by predicting far outside its data and by agreeing with known
+  limits it was never shown. Added measures, all for the held-out tasks:
+  - **Far extrapolation:** 200 designs with the inputs extended 50% of their range beyond the training box, where the
+    design stays feasible (e.g. hole radius up to 1.5× its training maximum, while the hole fits).
+  - **Limit checks, where a limit is known and absent from the training data:** for plates, the small-hole limit
+    (compliance ratio − 1 → 3πr² as r → 0); for beams, the slender limit (Euler–Bernoulli as L/h grows). Each is
+    evaluated from the formula and compared with theory.
+  - **A candidate law:** a formula with ≤ 6 terms, in-range NRMSE ≤ 0.02 and far-extrapolation NRMSE ≤ 0.1.
+  - Three held-out tasks have no textbook formula (H2, H3, H6). They are the real test. On H1, H4 and H5 the
+    textbook law is only the leading part: the simulator's steps and shear add effects no textbook gives.
+
+  | # | added prediction (before any held-out run) |
+  |---|---|
+  | P11 | A4 yields a candidate law on at least one of H3 and H6; none on H2 |
+  | P12 | where A4 yields a candidate law, its known limit (if any) is within 10% of theory |
+- **2026-10-26, the stepped beam's solid fraction is now exact** (analytic overlap of each element with each segment's
+  band, instead of 16 × 16 sampling). Sampling made outputs change in small steps as a height varied: roughness 0.015 of
+  the response's spread, at the "solved" threshold. Exact fractions bring it to 0.0086; the rest is mesh-scale. Other
+  outputs are unchanged (no band edges inside elements). The six stepped curriculum tasks were re-simulated and
+  refitted in cycle 1.
+- **2026-10-26, "solved" respects the simulator's noise.** A task is solved when its training NRMSE is
+  ≤ max(0.02, 2 × its roughness). Roughness: 61-point sweeps through the box centre along each input, the residual
+  of a degree-8 polynomial fit, over the task's training standard deviation; the largest over the inputs. Reason:
+  the beam-with-hole tasks have mesh-scale noise of about 0.04 of their (tiny) response spread, measured
+  independently of any fit. A fixed 0.02 would exclude them for the simulator's sake, not the finder's. **Seen when
+  this was decided:** cycle 1's training errors, in which several stepped and holed-beam tasks were just above 0.02.
+- **2026-10-26, library learning's description length (after sleep 1, before any held-out run).** As specified (each
+  parameter costs ½ log n, fixed or free; a template costs its size × log 7), **sleep 1 learned nothing**: of 280
+  candidate templates from 46 solved tasks, every one lengthened the description, even one matching 21 terms. A
+  template needed about 8 identical uses to pay. That is a mis-specification of the intent stated above
+  ("Stitch-style"): Stitch and DreamCoder count every program's whole description, so a template saves its body,
+  constants included, at every use. Amended: a constant costs log(120) nats (precision 0.1 over a range of 12)
+  wherever it is coded, in a template body if fixed, in each instance if free. The original result is kept
+  (`runs/curriculum/sleep1_original_objective.pkl`). **Seen when this was decided:** the cycle-1 formulas and the
+  empty sleep-1 library.
+- **Implementation decision:** templates never contain constraint-margin factors; margins index a task's own
+  constraints, not inputs, so they stay primitives.
+- **A limitation found on the way, not fixed:** when the finder fits log y, a power law becomes a linear term
+  (log y = −2.999·log h + …). Its exponent is then a linear coefficient, which templates cannot see or learn.
