@@ -72,6 +72,9 @@ def complete(T, axioms):
                 if (~kn).any():
                     fu, first = np.unique(f[~kn], return_index=True)
                     T[a, fu] = e[~kn][first]
+        if "total" in axioms:                             # every a + b is a or b (part 4); restricts, never fills
+            r, c = np.nonzero(T >= 0)
+            contra += int(np.sum((T[r, c] != r) & (T[r, c] != c)))
         if "latin" in axioms:
             for M in (T, T.T):                            # rows, then columns (T.T is a view: writes go through)
                 for r in range(n):

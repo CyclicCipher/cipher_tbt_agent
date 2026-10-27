@@ -167,3 +167,209 @@ total" isn't in the hypothesis space; with it, the rest would follow.
   can only be one of the values not yet in its row and column, so each observed entry costs fewer bits than under
   none. That would credit an unviolated constraint directly, and should separate quasigroup from none on T5 without a
   tie-break.
+
+# Parts 3–5 (pre-registered 2026-10-26, before the code was written)
+
+**Why (the user):** run the prequential marginal likelihood scoring, and work through the options part 2 left open:
+1. score hypotheses by the full Bayesian evidence (part 3);
+2. add "the order is total" (part 4);
+3. use computed coordinates as the addresses of a Spotlight-style memory (part 5).
+
+## Part 3: prequential marginal likelihood
+
+**The problem it fixes:** part 2's score credits a hypothesis only for entries it fills. An axiom that restricts
+without filling (Latin, on T5), and a hypothesis that is simply stronger (abelian group against group, on T1 and
+T2), were decided by the tie-break.
+
+**Method:** the same tasks, relabellings and observed entries as part 2 (same seeds).
+- The observed entries are coded one at a time, in a random order. Each entry's probability under hypothesis H
+  comes from the completion of the entries before it:
+
+      P(v) = (1 − ε)·q_H(v) + ε/60,   ε = 0.01
+
+  - **q_H when the completion determines the entry:** a point mass on the completed value.
+  - **Otherwise,** uniform over the allowed values:
+    - Latin: the values not yet in the entry's row or column;
+    - total (part 4): {a, b};
+    - both together: the intersection;
+    - otherwise: all 60.
+- **Score:** the log marginal likelihood, Σ log P(v). The prior over hypotheses is uniform. The highest score wins,
+  with no tie-break. The margin is the winner's score minus the runner-up's.
+- **Speed:** completions are recomputed at checkpoints, after 20 entries and then each time the count has grown by
+  15%. The entries between two checkpoints are coded from the completion at the earlier one.
+- 3 random orders; the mean is reported.
+
+| # | prediction |
+|---|---|
+| P1 | the winner is right on all 6 tasks at both fractions, with a positive margin in each of the 3 orders |
+| P2 | on T5, quasigroup beats none by ≥ 500 nats at 50% observed and ≥ 100 at 25%. (Estimate: with a fraction ρ of the table known, an entry has about 60(1 − ρ)² allowed values, so Latin saves about 1,100 and 250 nats) |
+| P3 | on T1 and T2, abelian group beats both group and commutative semigroup by ≥ 5 nats: no tie |
+| P4 | on T4, semilattice beats commutative semigroup (idempotence predicts the diagonal); on T6, none beats every other hypothesis by ≥ 100 nats |
+
+## Part 4: totality
+
+**A new hypothesis, chain** = {comm, assoc, idem, total}. "Total" says every a ⊕ b is a or b:
+- a known entry outside {a, b} is a contradiction;
+- an undetermined entry has two allowed values.
+
+It is scored as in part 3, and added to the hypothesis space for all six tasks. Part 3's verdicts use the original 7
+hypotheses only.
+
+**Rank read-out** from the completion of all observed entries:
+- "a is below b" iff a ⊕ b = b.
+- Each element scores s(a) = #{b known to be below a} − #{b known to be above a}.
+- The ranks are the order by s.
+
+**The information limit:** two elements adjacent in the chain are ordered only if one of their two entries was
+observed. No axiom recovers this. So exact ranks were never fully reachable, and part 2's C3 asked for more than the
+data hold.
+
+| # | prediction |
+|---|---|
+| Q1 | on T4, chain wins, beating semilattice by ≥ 500 nats at both fractions |
+| Q2 | on T1–T3, T5 and T6, chain loses to the part-3 winner by ≥ 100 nats |
+| Q3 | ranks: Spearman correlation with the true order ≥ 0.999, and largest rank error ≤ 2, at 50%; largest error ≤ 4 at 25% |
+
+## Part 5: computed coordinates as memory addresses (Spotlight-style, in the Tolman–Eichenbaum machine's setting)
+
+**The setting (the Tolman–Eichenbaum machine's):** an agent walks a graph using actions whose meaning never changes,
+and sees a label at each node. Labels are reshuffled every episode; the structure stays.
+
+**Environments:**
+- **E1:** a 6 × 10 torus with actions N, S, E, W. This is the group Z/6 × Z/10, and Spotlight's case: a 2-D lattice.
+- **E2:** a cycle of 60 nodes with actions ±1 and ±7 (Z/60).
+- **E3:** the Cayley graph of A₅ (one node per group element) with actions a, b and b⁻¹, where a = (1 2)(3 4) and
+  b = (1 3 5). This group is not commutative.
+
+**Episode 1:** walk until every (node, action) edge has been seen. From the transition table:
+1. **The commutator test:** does every pair of actions commute at every node?
+2. **If yes, compute the characters:** the common eigenvectors of the actions' shift operators, normalized at the
+   start node.
+   - Each character has an order, and a step per action (an integer modulo the order).
+   - Characters are added greedily, largest order first, until every node has a distinct address (the tuple of
+     phase indices).
+3. **If no, the fallback is the regular representation:** a node's address is its episode-1 node, and path
+   integration uses the episode-1 transition table.
+
+**Transferred to episode 2:** only the per-action steps (in the fallback, the table).
+
+**Episode 2:** new labels and a new 300-step random walk. Two predictors of the next label:
+- **Coordinate memory:** path-integrate the address from the start, and write address → label at each visit. These
+  are the Spotlight cells: one label per cell, with no neighbourhood read needed, because the addresses are exact.
+- **Edge memory (no structure):** (current label, action) → next label, for edges traversed in this episode.
+
+| # | prediction |
+|---|---|
+| S1 | the commutator test: E1's and E2's actions commute; E3's don't |
+| S2 | E1 needs 2 characters (Z/6 × Z/10 isn't cyclic); E2 needs 1, of order 60. On E3 only the trivial character exists (A₅ equals its own commutator subgroup), so characters give all 60 nodes one address, and the fallback is used |
+| S3 | on steps that reach a node already visited in episode 2, coordinate memory is 100% correct in all three environments. Its overall accuracy over the 300 steps beats edge memory's by ≥ 0.15 in each |
+| S4 | the transferred structure: E1 8 integers (2 characters × 4 actions), E2 4, E3's fallback 180 (60 nodes × 3 actions) |
+
+3 episode pairs per environment.
+
+**What part 5 does not test:**
+- repeated labels (the Tolman–Eichenbaum machine's harder case, which needs inference over location);
+- learned addresses;
+- transfer to a different size of environment.
+
+**Cost:** about 2 minutes in total, CPU only.
+
+    python -m structure.claude.structure_prequential      (parts 3 and 4, from experiments/symbolics)
+    python -m structure.claude.structure_transfer         (part 5)
+
+## Part 3 results (2026-10-26; `runs/structure_prequential.txt`, `.json`; 84.5 s for parts 3 and 4 together)
+
+Log marginal likelihood in nats, the mean over 3 orders. The margin is the winner's score minus the runner-up's;
+the smallest margin over the orders is in brackets.
+
+| task | winner at 50% | margin | winner at 25% | margin |
+|---|---|---|---|---|
+| T1 Z/60 | abelian group | 48 (45) over commutative semigroup; 425 over group | abelian group | 55 (51) |
+| T2 Z/6 × Z/10 | abelian group | 51 (47) over commutative semigroup; 459 over group | abelian group | 54 (46) |
+| T3 A₅ | group | 5,479 (5,476) over quasigroup | group | 2,802 (2,760) |
+| T4 chain max | semilattice | 123 (123) over commutative semigroup | semilattice | 49 (49) |
+| T5 subtraction | quasigroup | 987 (984) over none | quasigroup | 200 (200) |
+| T6 random | none | 1,750 (1,730) over commutative | none | 421 (415) |
+
+**Verdicts: P1–P4 all confirmed.**
+- **P1:** right on all 6 tasks at both fractions, with a positive margin in every order.
+- **P2:** quasigroup beats none by 987 and 200 nats (estimates were 1,100 and 250).
+- **P3:** abelian group beats commutative semigroup by 48–55 nats and group by 425 or more.
+- **P4:** semilattice beats commutative semigroup by 123 and 49; none beats the rest by 1,750 and 421.
+
+**No tie-break was needed anywhere.** The two cases part 2 decided by tie-break are now decided by evidence:
+- **T5:** e^987 in favour of the Latin rule. It never fills an entry, but every entry it restricts is cheaper.
+- **T1 and T2:** commutativity is worth about 50 nats over commutative semigroup, and Latin about 425 over group. The
+  strongest consistent hypothesis wins, because it is the one that predicts most. That is Occam's razor running the
+  other way from parameter counting: an axiom costs nothing, and it pays whenever it is true.
+
+**Exploratory (arithmetic on the results above): the code against the information-theoretic minimum.**
+- **Abelian groups:** a labelled abelian group of order 60 is one of 60!/16 + 60!/48 tables (Z/60, plus Z/2 × Z/30,
+  whose automorphism groups have orders 16 and 48). Pinning one down therefore takes at least 186.1 nats. The
+  prequential code spends 352–393 nats on T1 and T2: about twice the minimum.
+- **A₅:** tables isomorphic to A₅ number 60!/120, a minimum of 183.8 nats. The code spends 810–862: about 4.5 times.
+- **The structure is settled within the first quarter of the table.** On T1 the 50% code costs only 10 nats more than
+  the 25% code, which is what 900 more correctly predicted entries cost at ε = 0.01.
+- **Reading:** the completion rules are a sound but incomplete inference engine. The excess over the minimum
+  measures what they miss. They miss more without commutativity.
+
+## Part 4 results
+
+| | 50% | 25% |
+|---|---|---|
+| chain against semilattice on T4 | chain wins by 1,292 nats | chain wins by 1,190 |
+| chain on the other five tasks | last or second to last on every one; it loses to the winner by ≥ 1,700 nats | the same pattern, by ≥ 1,500 |
+| ranks: Spearman correlation | 0.9992 | 0.9935 |
+| largest rank error | 2 | **6** |
+| elements misplaced | 22 | 43 |
+
+**Verdicts:**
+- **Q1 confirmed.**
+- **Q2 confirmed.**
+- **Q3 confirmed at 50% and refuted at 25%:** the largest error was 6 against a predicted maximum of 4.
+
+**Reading:**
+- **Totality is the axiom that identifies the chain.** It is worth about 1,200–1,300 nats: every undetermined entry
+  has 2 allowed values instead of 60.
+- **The rank errors sit where the information limit says they must.** At 25%, each pair of chain neighbours has both
+  of its entries unobserved with probability 0.56. Runs of mutually unordered neighbours then grow long enough to
+  misplace an element by 6.
+
+## Part 5 results (`runs/structure_transfer.txt`, `.json`; 0.3 s)
+
+| | E1 torus 6 × 10 | E2 cycle 60 | E3 A₅ |
+|---|---|---|---|
+| episode-1 steps to see every edge | 1,076–1,830 | 1,209–1,943 | 1,233–1,633 |
+| non-commuting (node, action pair) cases | 0 | 0 | 120 (a with b, and a with b⁻¹, at every node) |
+| characters found | 60 | 60 | 1 (the trivial one) |
+| characters chosen (orders) | 2 (30, 30) | 1 (60) | none; 1 distinct address, fallback used |
+| transferred integers | 8 | 4 | 180 |
+| coordinate memory on revisits | 100% (all seeds) | 100% | 100% (fallback) |
+| overall accuracy over 300 steps, coordinate vs edge memory | 0.80 vs 0.43–0.50 | 0.81–0.82 vs 0.45–0.49 | 0.81–0.83 vs 0.55–0.60 |
+| edge memory on revisits by an untraversed edge | 0 of 91–111 | 0 of 98–106 | 0 of 69–78 |
+
+**Verdicts: S1–S4 all confirmed.**
+- **S1:** the commutator test splits the environments as predicted.
+- **S2:** 2 characters for the torus, 1 of order 60 for the cycle, and only the trivial character for A₅. The
+  torus's two characters have orders 30 and 30, not 6 and 10: Z/6 × Z/10 ≅ Z/2 × Z/30, and any pair whose phases
+  separate all 60 nodes serves.
+- **S3:** the gap between coordinate and edge memory is 0.23–0.37.
+- **S4:** 8, 4 and 180 integers.
+
+**Reading:**
+- **Coordinates move the learning out of the episode.** With the coordinates from episode 1, the second episode
+  needs one visit per node, and every edge is predicted on first use: the Tolman–Eichenbaum machine's result. Edge
+  memory needs one traversal per edge.
+- **The commutator test is the switch.** Commuting actions get compressed coordinates: 4–8 integers, a lattice of
+  cells.
+- **A₅ shows the abelian method's edge.** A₅ equals its own commutator subgroup, so its only character is trivial,
+  and every node gets the same address. The fallback, the episode-1 graph itself, still transfers, but at 180
+  integers.
+- **The compressed alternative is not built:** A₅'s 3-dimensional representation as the rotations of an icosahedron.
+  Addresses would be 3 × 3 rotation matrices and each action a fixed rotation, 27 numbers in all. That is the
+  non-commutative frontier: an address that is a matrix, not a phase.
+- **What is Spotlight-like and what isn't:**
+  - Like Spotlight: the split between where (the address) and what (the label stored there), and, on the torus, a
+    lattice of cells.
+  - Not like Spotlight: the addresses are computed and path-integrated, not learned by projecting a key. They are
+    exact, so no 3 × 3 read is needed, and a cell holds one label, not a DeltaNet state.
