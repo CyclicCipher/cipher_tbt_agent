@@ -4,7 +4,23 @@
 - sums are exactly rounded, so the agent is deterministic;
 - "approach" scores plans up to 30 steps under the posterior.
 
-It also fixes untried actions being discarded in search. Results: `../../docs/AGENT.md`, part 15b. The code is `homeostatic_agent.py`; its experiments are in
+It also fixes untried actions being discarded in search. Results: `../../docs/AGENT.md`, part 15b.
+
+**Parts 16–17 (2026-10-27), the current form:**
+- **Drives are deviation-weighted,** as in biology: D = (δ_p³ + δ_u³ + δ_e³)^(1/2) (Keramati & Gutkin), with dead zones
+  inside the acceptable ranges, so the agent still satisfices.
+  - **Hunger** (steps since the last WIN) scales progress's deviation.
+  - **Understanding's deviation** is the share of the reachable information a plan leaves.
+  - **Effort** is the share of the budget a plan uses.
+  - **Every plan is judged at the same moment.** Judging each at its own end made the agent myopic: it took one step
+    and replanned.
+- **The plan with the least drive wins.** Under need, curiosity yields.
+- **An efference copy** keeps each action's intended displacement apart from what happened.
+- **The agent commits to a plan** until it ends, a WIN or GAME_OVER, a surprise about what it moves, or a drop in its
+  re-scored value.
+- **Goals beyond the horizon** are planned with an inverse model: navigation, and pushes as the inverted contact
+  relation.
+- **New kinds and colours** start charged with the WINs they would have failed to explain. The code is `homeostatic_agent.py`; its experiments are in
 `../../docs/AGENT.md`.
 - **Version 1 (part 14)** used a count-based novelty bonus for curiosity. The user caught that this isn't what animal
   curiosity is: it is the same family as the Gemini agent's "epiplexity" bonus. That version is kept at commit

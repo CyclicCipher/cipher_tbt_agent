@@ -16,10 +16,14 @@ from itertools import product
 
 import numpy as np
 
-from arc_agent.claude.push_block_rebuild import EP_MAX, H, KEL, W, FrameAgent, PushWorld, mode, rot
+from arc_agent.claude.efference import Efference
+from arc_agent.claude.inverse_model import nav, push_plan
+from arc_agent.claude.push_block_rebuild import DIRS, EP_MAX, H, KEL, W, FrameAgent, PushWorld, compose, inverse, mode, rot
+from arc_agent.claude.wall_world import WallWorld, solve
 
 ALPHA, THETA, STEP_BITS, EPS = 0.5, 0.05, 0.02, 0.01
 DEPTH, DEPTH_SAT, PMIN, MAXCOMBOS, DEEP_COMBOS, TOPK = 10, 30, 0.02, 12, 3, 5
+HUNGER, GOAL_K = 25, 8                                                 # part 16: steps without a WIN at which hunger reaches 1
 LEVELS, SEEDS, CAP = 8, 3, 1500
 AFF = ("passable", "solid", "pushable")
 LOG_R = math.log(EPS / (1 - EPS))
@@ -119,16 +123,25 @@ class GoalModel:
     kind has its first cell at (x, y). Prior: half per family, split evenly (description length). Evidence: the WIN
     signal at every step, against the union of what holds for all things. Hypotheses cover every kind and colour seen
     so far, present or not: a kind that is absent (say, hidden under another thing) makes none of its hypotheses hold,
-    so they predict no WIN, and a WIN refutes them."""
-    def __init__(self):
+    so they predict no WIN, and a WIN refutes them. By the same rule, a hypothesis first registered now (a new kind or
+    colour) was false at every WIN so far, since its kind or colour wasn't there: it starts charged with those WINs
+    (part 17, from a build check)."""
+    def __init__(self, charge_new=False):
         self.err, self.kinds, self.cols = Counter(), {}, set()
+        self.charge_new, self.wins, self.known = charge_new, 0, set()
 
     def hypotheses(self, th, static):
         self.kinds.update(dict.fromkeys(t.shape for t in th))
         self.cols |= set(int(c) for c in np.unique(static) if c >= 0)
         cols = sorted(self.cols)
-        return [("cell", k, c) for k in self.kinds for c in cols] + \
-               [("at", k, x, y) for k in self.kinds for x in range(W) for y in range(H)]
+        hs = [("cell", k, c) for k in self.kinds for c in cols] + \
+             [("at", k, x, y) for k in self.kinds for x in range(W) for y in range(H)]
+        if self.charge_new and self.wins:
+            for h in hs:
+                if h not in self.known:
+                    self.err[h] += self.wins
+        self.known.update(hs)
+        return hs
 
     @staticmethod
     def holds(t, trans, static):
@@ -153,6 +166,7 @@ class GoalModel:
         for h in self.hypotheses(th, static):
             if (h in hold) != win:
                 self.err[h] += 1
+        self.wins += win
 
 
 def belief_entropy(agent, goal, aff):
@@ -164,12 +178,23 @@ def belief_entropy(agent, goal, aff):
 
 
 # ---- the model combinations, and how one of them moves the world --------------------------------------------------
-def action_table(f):
-    out = {}
+def fkey(f):
+    return (tuple(map(tuple, f.body.tolist())), tuple(f.content.tolist()))
+
+
+def action_table(f, eff=None):
+    """What each action is meant to do to this body, and the value in bits of trying it when that is unknown. With an
+    efference copy (part 16): its most probable displacement if that has probability >= 1 - PMIN, else unknown, worth
+    its posterior's entropy. Without one (part 15b): the most frequent observed effect, blocked moves included."""
+    table, bits = {}, {}
     for a in range(4):
-        e = mode(f.act.get(a, Counter()))
-        out[a] = None if e is None or e[2] != 0 else (e[0], e[1])
-    return out
+        if eff is None:
+            e = mode(f.act.get(a, Counter()))
+            table[a], bits[a] = (None if e is None or e[2] != 0 else (e[0], e[1])), UNKNOWN_BITS
+        else:
+            d, p, h = eff.intended(fkey(f), a)
+            table[a], bits[a] = (d if p >= 1 - PMIN else None), h
+    return table, bits
 
 
 def time_table(f, n):
@@ -180,17 +205,17 @@ def time_table(f, n):
     return out
 
 
-def role(f, m):
+def role(f, m, eff=None):
     if m == "static":
         return ("fixed",)
     if m == "action":
-        return ("body", action_table(f))
+        return ("body",) + action_table(f, eff)
     if m.startswith("time"):
         return ("time", int(m[4:]), time_table(f, int(m[4:])))
     return ("push", int(m.split(":")[1]))
 
 
-def model(agent, aff):
+def model(agent, aff, eff=None):
     """The things; the endogenous ones (in the search) with their combinations; the exogenous ones' future places."""
     th = things(agent)
     endo, opts, exo = [], [], {}
@@ -208,12 +233,21 @@ def model(agent, aff):
                 exo[k] = traj
                 continue
             endo.append(k)
-            opts.append([(role(f, m), p) for m, p in dp.items()])
+            opts.append([(role(f, m, eff), p) for m, p in dp.items()])
         else:
             endo.append(k)
             opts.append([((a,), p) for a, p in aff.posterior(t.shape).items()])
-    combos = sorted(((math.prod(c[1] for c in ch), tuple(c[0] for c in ch)) for ch in product(*opts)),
-                    key=lambda c: -c[0])[:MAXCOMBOS]
+    if math.prod(len(o) for o in opts) <= MAXCOMBOS:       # the full product
+        raw = [(math.prod(c[1] for c in ch), tuple(c[0] for c in ch)) for ch in product(*opts)]
+    else:                                                   # part 16: one at a time around the most probable combination
+        base = [max(o, key=lambda c: c[1]) for o in opts]
+        raw = [(math.prod(c[1] for c in base), tuple(c[0] for c in base))]
+        for i, o in enumerate(opts):
+            for c in o:
+                if c is not base[i]:
+                    ch = base[:i] + [c] + base[i + 1:]
+                    raw.append((math.prod(x[1] for x in ch), tuple(x[0] for x in ch)))
+    combos = sorted(raw, key=lambda c: -c[0])[:MAXCOMBOS]
     z = sum(c[0] for c in combos)
     where = {th[k].frame: i for i, k in enumerate(endo) if th[k].frame is not None}
     fixed = []
@@ -304,10 +338,12 @@ def search(agent, th, endo, combos, exo, post, depth):
             continue
         for a in range(4):
             nxt, unknown = [], False
+            ubits = 0.0
             for i, (_, roles) in enumerate(combos):
                 s2 = sim(ths, roles, states[i], a, agent.t + d + 1)
-                if s2 is None:
+                if s2 is None:                              # an action whose effect is unknown: worth its entropy
                     unknown, s2 = True, states[i]
+                    ubits = max([ubits] + [r[2][a] for r in roles if r[0] == "body" and r[1].get(a) is None])
                 nxt.append(s2)
             canon, npart = {}, []
             for i in range(len(combos)):
@@ -323,7 +359,7 @@ def search(agent, th, endo, combos, exo, post, depth):
                 m = mass(hs - held[parent])
                 nheld[c] = held[parent] | hs
                 nhk[c] = hk[parent] + (-m * math.log2(m) if m > 0 else 0.0)
-            q.append((nxt, npart, nheld, nhk, path + [a], UNKNOWN_BITS if unknown else 0.0))
+            q.append((nxt, npart, nheld, nhk, path + [a], ubits if unknown else 0.0))
     return nodes
 
 
@@ -343,13 +379,88 @@ def win_probability(agent, th, endo, combos, exo, post, path):
     return total
 
 
-def plan(agent, goal, aff, epistemic=True):
-    """Returns (path, kind, predicted information gain)."""
-    th, endo, combos, exo = model(agent, aff)
+def goal_plans(agent, th, endo, combos, post):
+    """Part 17: plans read off the inverse model for the GOAL_K most probable goal hypotheses, under the most probable
+    model. None if the model has more than one body, or a body or pushed object of more than one cell."""
+    roles, ths = combos[0][1], [th[k] for k in endo]
+    bodies = [i for i, r in enumerate(roles) if r[0] == "body"]
+    pushed = [i for i, r in enumerate(roles) if r[0] in ("push", "pushable")]
+    if len(bodies) != 1 or any(len(ths[i].cells) > 1 for i in bodies + pushed):
+        return None
+    b = bodies[0]
+    table, solid, objects = roles[b][1], set(), {}
+    for i, r in enumerate(roles):
+        if r[0] == "solid":
+            solid |= set(ths[i].at(ths[i].t))
+    for i in pushed:
+        objects[i] = set(ths[i].at(ths[i].t))
+    plans = []
+    for h, p in sorted(post.items(), key=lambda kv: -kv[1])[:GOAL_K]:
+        if p < 1e-9:
+            break
+        for i, t in enumerate(ths):
+            if t.shape != h[1] or (i != b and i not in pushed):
+                continue
+            ok = lambda tt, t=t, h=h: h in GoalModel.holds(t, tt, agent.static)
+            if i == b:
+                block = solid.union(*objects.values())
+                route = nav(t.t, t.cells, table, lambda x, y: inb(x, y) and (x, y) not in block, ok)
+            else:
+                rest = solid.union(*(c for j, c in objects.items() if j != i))
+                free = lambda x, y, rest=rest: inb(x, y) and (x, y) not in rest
+                route = push_plan(ths[b].cells, ths[b].t, t.cells, t.t, table, free, free, ok)
+            if route:
+                plans.append(route[:DEPTH_SAT])
+    return plans
+
+
+def beyond_horizon(agent, th, endo, combos, exo, post, nodes, macro=False):
+    """Candidates from the 10-step search and, under each of the top combinations, from a 30-step search (the shortest
+    acceptable plan and the plans most likely to win), scored under the whole posterior: [(-P(WIN), length, path)]."""
+    best_first = lambda ns: sorted((n for n in ns if n[0] > 0 and n[2] > 1e-6), key=lambda n: (-n[2], n[0]))[:TOPK]
+    cands = {tuple(n[1]) for n in best_first(nodes)}
+    plans = goal_plans(agent, th, endo, combos, post) if macro else None
+    if plans is not None:                                   # part 17: the inverse model instead of joint searches
+        cands |= {tuple(p) for p in plans}
+    for c in (combos[:DEEP_COMBOS] if plans is None else []):
+        deep = search(agent, th, endo, [(1.0, c[1])], exo, post, DEPTH_SAT)
+        acc = [n for n in deep if n[0] > 0 and n[2] >= ALPHA]
+        if acc:
+            cands.add(tuple(min(acc, key=lambda n: (n[0], -n[2]))[1]))
+        cands |= {tuple(n[1]) for n in best_first(deep)}
+    return sorted((-win_probability(agent, th, endo, combos, exo, post, list(p)), len(p), p) for p in cands)
+
+
+def drive(c, since, u0, common=False):
+    """Part 16: the deviation-weighted drive after a plan (Keramati & Gutkin's form, n = 3, m = 2). Progress: zero in
+    its dead zone (P(WIN) >= ALPHA), else the unmet chance of winning times hunger, which grows with the steps since
+    the last WIN. Understanding: zero once the reachable information is below THETA, else what the plan leaves of it."""
+    d, _, pwin, eig = c
+    h = (since + (DEPTH_SAT if common else d)) / HUNGER        # part 17: every plan judged at the same moment
+    dp = 0.0 if pwin >= ALPHA else (1 - pwin) * h
+    du = 0.0 if u0 < THETA else max(0.0, u0 - eig - THETA) / u0      # amended before the run: relative to what is reachable
+    de = d / EP_MAX if common else 0.0                         # part 17: effort, the share of the budget used
+    return (dp ** 3 + du ** 3 + de ** 3) ** 0.5
+
+
+def plan(agent, goal, aff, epistemic=True, eff=None, since=None, macro=False, common=False, out=None):
+    """Returns (path, kind, predicted information gain). since=None: the lexicographic order (part 15b); otherwise the
+    deviation-weighted drive, with since = steps since the last WIN (part 16)."""
+    th, endo, combos, exo = model(agent, aff, eff)
     if not any(r[0] == "body" for _, roles in combos for r in roles):
         return None, "random", 0.0
     post = goal.posterior(th, agent.static)
     nodes = search(agent, th, endo, combos, exo, post, DEPTH)
+    if out is not None:                                     # part 17: what commitment needs to watch
+        out.update(th=th, endo=endo, combos=combos, exo=exo, post=post)
+    if since is not None:                                   # deviation-weighted: the plan that leaves the least drive
+        u0 = max(n[3] for n in nodes)
+        cands = [n for n in nodes if n[0] > 0] +                 [(len(p), list(p), -npw, 0.0) for npw, _, p in beyond_horizon(agent, th, endo, combos, exo, post, nodes, macro)]
+        if not cands:
+            return None, "random", 0.0
+        n = min(cands, key=lambda c: (round(drive(c, since, u0, common), 12), c[0]))
+        kind = "satisfice" if n[2] >= ALPHA else "explore" if n[3] >= THETA else "approach" if n[2] > 1e-6 else None
+        return (list(n[1]), kind, n[3]) if kind else (None, "random", 0.0)
     acc = [n for n in nodes if n[0] > 0 and n[2] >= ALPHA]
     if acc:                                                 # progress: the fewest-action acceptable plan
         n = min(acc, key=lambda n: (n[0], -n[2]))
@@ -358,17 +469,7 @@ def plan(agent, goal, aff, epistemic=True):
         n = max(nodes, key=lambda n: (n[3] - STEP_BITS * n[0], -n[0]))
         if n[0] > 0 and n[3] - STEP_BITS * n[0] >= THETA:
             return list(n[1]), "explore", n[3]
-    # beyond the horizon (part 15b): candidates from the 10-step search and, under each of the top combinations, from
-    # a 30-step search (the shortest acceptable plan and the plans most likely to win), all scored under the posterior
-    best_first = lambda ns: sorted((n for n in ns if n[0] > 0 and n[2] > 1e-6), key=lambda n: (-n[2], n[0]))[:TOPK]
-    cands = {tuple(n[1]) for n in best_first(nodes)}
-    for c in combos[:DEEP_COMBOS]:
-        deep = search(agent, th, endo, [(1.0, c[1])], exo, post, DEPTH_SAT)
-        acc = [n for n in deep if n[0] > 0 and n[2] >= ALPHA]
-        if acc:
-            cands.add(tuple(min(acc, key=lambda n: (n[0], -n[2]))[1]))
-        cands |= {tuple(n[1]) for n in best_first(deep)}
-    scored = sorted((-win_probability(agent, th, endo, combos, exo, post, list(p)), len(p), p) for p in cands)
+    scored = beyond_horizon(agent, th, endo, combos, exo, post, nodes, macro)
     acc = [x for x in scored if -x[0] >= ALPHA]
     if acc:                                                 # progress beyond the horizon: the shortest acceptable plan
         _, _, path = min(acc, key=lambda x: (x[1], x[0]))
@@ -379,11 +480,11 @@ def plan(agent, goal, aff, epistemic=True):
 
 
 # ---- contact outcomes: what the body learned about a board object it moved into --------------------------------------
-def bodies_before(agent, a):
+def bodies_before(agent, a, eff=None):
     out = []
     for i, f in enumerate(agent.frames):
         if agent.choice(i) == "action":
-            d = action_table(f).get(a)
+            d = action_table(f, eff)[0].get(a)
             if d and d != (0, 0):
                 out.append((i, (f.pose[0], f.pose[1]), d))
     return out
@@ -424,67 +525,109 @@ def restart(world, layout):
 
 
 def optimum(world):
-    start, target = (world.player, world.box), world.target
-    seen, q = {start: 0}, deque([start])
-    while q:
-        p, b = q.popleft()
-        if b == target:
-            return seen[(p, b)]
-        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
-            np_, nb = (p[0] + dx, p[1] + dy), b
-            if not inb(*np_):
-                continue
-            if np_ == b:
-                nb = (b[0] + dx, b[1] + dy)
-                if not inb(*nb):
-                    continue
-            if (np_, nb) not in seen:
-                seen[(np_, nb)] = seen[(p, b)] + 1
-                q.append((np_, nb))
-    return None
+    return solve(world.player, world.box, world.target, getattr(world, "walls", set()))
 
 
-def run(kw, seed, epistemic=True):
+def trajectory(info, path, t0):
+    """Part 17: the plan's predicted positions of what it moves (body and pushed objects), under the most probable model."""
+    th, endo, combos = info["th"], info["endo"], info["combos"]
+    roles, ths = combos[0][1], [th[k] for k in endo]
+    movers = [i for i, r in enumerate(roles) if r[0] in ("body", "push", "pushable")]
+    state, out = tuple(th[k].t for k in endo), []
+    for d, a in enumerate(path):
+        nxt = sim(ths, roles, state, a, t0 + d + 1)
+        state = state if nxt is None else nxt
+        out.append({ths[i].key: state[i] for i in movers})
+    return out
+
+
+def run(kw, seed, epistemic=True, eff_on=False, drives_on=False, walls=False, commit=False, macro=False, common=False):
     rng = np.random.default_rng(seed)
-    world = PushWorld(np.random.default_rng(100 + seed), **kw)
-    agent, goal, aff = FrameAgent(score_discovery=True), GoalModel(), Affordances()
+    world = WallWorld(np.random.default_rng(100 + seed)) if walls else PushWorld(np.random.default_rng(100 + seed), **kw)
+    agent, goal, aff = FrameAgent(score_discovery=True), GoalModel(charge_new=commit), Affordances()
+    eff = Efference() if eff_on else None
     F = world.reset()
     layout = (world.player, world.box, world.target)
     agent.start(F)
-    level, total, lsteps, attempts, path, kind = 0, 0, 0, 0, [], None
+    level, total, lsteps, attempts, path, kind, since = 0, 0, 0, 0, [], None, 0
     first_win, levels, opt, decisions, gains, leads, pending = None, [], optimum(world), [], [], [], None
+    deco_contacts, wall_bumps, wall_solid = 0, 0, None
+    traj, pwin0, lengths, triggers, t_start = [], 0.0, [], Counter(), time.time()
     while level < LEVELS and total < CAP:
         if not path:
             if pending is not None:
                 gains.append((pending[0], pending[1] - belief_entropy(agent, goal, aff)))
                 pending = None
-            path, kind, info = plan(agent, goal, aff, epistemic)
+            info_out = {} if commit else None
+            path, kind, info = plan(agent, goal, aff, epistemic, eff, since if drives_on else None, macro, common, info_out)
             path = path or []
             if kind == "explore":
                 pending = (info, belief_entropy(agent, goal, aff))
             if not path:
                 path, kind = [int(rng.integers(4))], "random"
-            decisions.append((level, kind))
+            decisions.append((level, kind, since))
+            lengths.append(len(path))
+            if commit and info_out:
+                traj = trajectory(info_out, path, agent.t)
+                pwin0 = win_probability(agent, info_out["th"], info_out["endo"], info_out["combos"], info_out["exo"],
+                                        info_out["post"], path)
+            else:
+                traj = []
         a = path.pop(0)
-        th_before, nframes, bodies = things(agent), len(agent.frames), bodies_before(agent, a)
+        th_before, nframes, bodies = things(agent), len(agent.frames), bodies_before(agent, a, eff)
+        if eff is not None:                                 # the efference copy: each body's state before the step
+            occupied, static_before, before = set(), agent.static.copy(), []
+            for f in agent.frames:
+                occupied |= {(x + f.pose[0], y + f.pose[1]) for x, y in rot(f.body, f.pose[2]).tolist()}
+            for i, f in enumerate(agent.frames):
+                if agent.choice(i) == "action":
+                    cells = [tuple(c) for c in rot(f.body, f.pose[2]).tolist()]
+                    own = {(x + f.pose[0], y + f.pose[1]) for x, y in cells}
+                    before.append((i, fkey(f), (f.pose[0], f.pose[1]), f.pose, cells, own))
         pred = agent.predict(a)
+        p0 = world.player
         F2, win = world.step(a)
-        total, lsteps = total + 1, lsteps + 1
+        total, lsteps, since = total + 1, lsteps + 1, since + 1
+        if walls:                                           # measures only (the agent never sees these)
+            deco_contacts += world.player != p0 and world.player in world.deco
+            dest = (p0[0] + DIRS[a][0], p0[1] + DIRS[a][1])
+            wall_bumps += level == 0 and dest in world.walls
         agent.observe(F, a, F2, world.t)
+        if eff is not None:
+            for i, k, t0, pose0, cells, own in before:
+                if i < len(agent.frames):
+                    e = compose(agent.frames[i].pose, inverse(pose0))
+                    free = lambda x, y, own=own: inb(x, y) and static_before[y, x] == 0 and ((x, y) not in occupied or (x, y) in own)
+                    eff.observe(k, a, t0, e, cells, free)
         contact_update(agent, aff, th_before, nframes, bodies)
         goal.observe(things(agent), agent.static, win)
         for f in agent.frames[nframes:]:                     # E3: the box's driver straight after its discovery
             if 4 in f.content.tolist():
                 ev = f.evidence
                 leads.append(float(max(v for m, v in ev.items() if m.startswith("push")) - ev["static"]))
-        if pred is None or not np.array_equal(pred, F2):
-            path = []
+        if not commit:
+            if pred is None or not np.array_equal(pred, F2):
+                path = []
+        elif path:                                          # part 17: keep the plan unless a decision point arrives
+            expected = traj.pop(0) if traj else {}
+            where = {t.key: t.t for t in things(agent)}
+            if any(where.get(k) != v for k, v in expected.items()):
+                path, _ = [], triggers.update(["surprise"])
+            elif kind in ("satisfice", "satisfice (deep)", "approach"):
+                th_, endo_, combos_, exo_ = model(agent, aff, eff)
+                pw = win_probability(agent, th_, endo_, combos_, exo_, goal.posterior(th_, agent.static), path)
+                if pw < pwin0 - 0.1 or (pwin0 >= ALPHA and pw < ALPHA):
+                    path, _ = [], triggers.update(["value"])
         F = F2
         if win:
             if first_win is None:
                 first_win = total
-            levels.append(dict(level=level, steps=lsteps, optimum=opt, first_attempt=attempts == 0))
-            level, lsteps, attempts, path = level + 1, 0, 0, []
+            if walls and level == 0:                        # Q2: the wall's solidity at the end of the first level
+                wc = sorted(world.walls, key=lambda c: (c[1], c[0]))
+                shape = (tuple((x - wc[0][0], y - wc[0][1]) for x, y in wc), tuple(5 for _ in wc))
+                wall_solid = aff.posterior(shape).get("solid", 0.0)
+            levels.append(dict(level=level, steps=lsteps, optimum=opt, first_attempt=attempts == 0, deco=deco_contacts))
+            level, lsteps, attempts, path, since, deco_contacts = level + 1, 0, 0, [], 0, 0
             F = world.reset()
             layout, opt = (world.player, world.box, world.target), optimum(world)
             agent.start(F)
@@ -492,8 +635,17 @@ def run(kw, seed, epistemic=True):
             attempts, path = attempts + 1, []
             F = restart(world, layout)
             agent.start(F)
+    wrong = []                                              # Q1: the body's belief about each action, at the end
+    for i, f in enumerate(agent.frames):
+        if agent.choice(i) == "action":
+            table, _ = action_table(f, eff)
+            if eff is not None:
+                wrong += [a for a in range(4) if eff.intended(fkey(f), a)[0] != DIRS[a] or eff.intended(fkey(f), a)[1] < 1 - PMIN]
+            else:
+                wrong += [a for a in range(4) if table[a] != DIRS[a]]
     return dict(first_win=first_win, levels=levels, total_steps=total, decisions=decisions, gains=gains,
-                box_discovery_leads=leads)
+                box_discovery_leads=leads, wrong_actions=wrong, wall_bumps_level1=wall_bumps, wall_solid=wall_solid,
+                plan_lengths=lengths, triggers=dict(triggers), seconds=time.time() - t_start)
 
 
 def main():
@@ -505,14 +657,14 @@ def main():
             out[f"{name} / {agent_kind}"] = runs
             later = [l for r in runs for l in r["levels"] if l["level"] >= 1]
             l3 = [l for r in runs for l in r["levels"] if l["level"] >= 2]
-            dec3 = [k for r in runs for lv, k in r["decisions"] if lv >= 2]
+            dec3 = [k for r in runs for lv, k, _ in r["decisions"] if lv >= 2]
             gains = [g for r in runs for g in r["gains"]]
             print(f"{name:30s} {agent_kind:22s} first WIN at {[r['first_win'] for r in runs]} | levels done "
                   f"{[len(r['levels']) for r in runs]} | levels 2-8 first attempt "
                   f"{np.mean([l['first_attempt'] for l in later]) if later else float('nan'):.2f} | level 3+ excess "
                   f"{np.mean([l['steps'] - l['optimum'] for l in l3]) if l3 else float('nan'):.2f} | explore share in levels 3+ "
                   f"{np.mean([k == 'explore' for k in dec3]) if dec3 else float('nan'):.2f} | decisions "
-                  f"{dict(Counter(k for r in runs for _, k in r['decisions']))} | box lead after discovery "
+                  f"{dict(Counter(k for r in runs for _, k, _ in r['decisions']))} | box lead after discovery "
                   f"{[round(x, 1) for r in runs for x in r['box_discovery_leads']]} | realized gain > 0 "
                   f"{np.mean([g[1] > 0 for g in gains]) if gains else float('nan'):.2f} of {len(gains)} | {time.time() - t0:.0f} s",
                   flush=True)
@@ -520,5 +672,63 @@ def main():
     json.dump(out, open("runs/homeostatic_agent_v2.json", "w"), indent=1, default=str)
 
 
+def part16():
+    t0 = time.time()
+    out = {}
+    global LEVELS, CAP
+    arms = (("L", False, False), ("LE", True, False), ("DW", False, True), ("DE", True, True))
+    w4_arms = (("L", False, False), ("LE", True, False), ("DE", True, True), ("DW", False, True))
+    worlds = WORLDS + (("W4 walls + distractors", None),)
+    for name, kw in worlds:
+        if kw is None:                                      # amendment 3: W4 has 5 levels and a 300-step cap, all arms
+            LEVELS, CAP = 5, 300
+        for arm, eff_on, drives_on in (w4_arms if kw is None else arms):
+            runs = [run(kw or {}, seed, True, eff_on, drives_on, walls=kw is None) for seed in range(SEEDS)]
+            out[f"{name} / {arm}"] = runs
+            later = [l for r in runs for l in r["levels"] if l["level"] >= 1]
+            l3 = [l for r in runs for l in r["levels"] if l["level"] >= 2]
+            dec = [(k, since) for r in runs for _, k, since in r["decisions"]]
+            early = [k == "explore" for k, since in dec if since < 20]
+            late = [k == "explore" for k, since in dec if since >= 20]
+            print(f"{name:30s} {arm:3s} first WIN {[r['first_win'] for r in runs]} | levels {[len(r['levels']) for r in runs]} | "
+                  f"2-8 first attempt {np.mean([l['first_attempt'] for l in later]) if later else float('nan'):.2f} | "
+                  f"3+ excess {np.mean([l['steps'] - l['optimum'] for l in l3]) if l3 else float('nan'):.2f} | "
+                  f"2-8 mean steps {np.mean([l['steps'] for l in later]) if later else float('nan'):.1f}, "
+                  f"distractor contacts/level {np.mean([l['deco'] for l in later]) if later else float('nan'):.2f} | "
+                  f"explore share early {np.mean(early) if early else float('nan'):.2f} late {np.mean(late) if late else float('nan'):.2f} | "
+                  f"wrong actions {[r['wrong_actions'] for r in runs]} | wall bumps L1 {[r['wall_bumps_level1'] for r in runs]}, "
+                  f"solid {[None if r['wall_solid'] is None else round(r['wall_solid'], 3) for r in runs]} | {time.time() - t0:.0f} s",
+                  flush=True)
+    print(f"total {time.time() - t0:.1f} s")
+    json.dump(out, open("runs/homeostatic_agent_part16.json", "w"), indent=1, default=str)
+
+
+def part17():
+    global LEVELS, CAP
+    t0 = time.time()
+    out = {}
+    arms = (("LE17", False), ("DE17", True))
+    for name, kw in WORLDS + (("W4 walls + distractors", None),):
+        LEVELS, CAP = (5, 300) if kw is None else (8, 1500)
+        for arm, drives_on in arms:
+            runs = [run(kw or {}, seed, True, True, drives_on, walls=kw is None, commit=True, macro=True, common=drives_on)
+                    for seed in range(SEEDS)]
+            out[f"{name} / {arm}"] = runs
+            later = [l for r in runs for l in r["levels"] if l["level"] >= 1]
+            l3 = [l for r in runs for l in r["levels"] if l["level"] >= 2]
+            steps = sum(r["total_steps"] for r in runs)
+            print(f"{name:30s} {arm:4s} first WIN {[r['first_win'] for r in runs]} | levels {[len(r['levels']) for r in runs]} | "
+                  f"2+ first attempt {np.mean([l['first_attempt'] for l in later]) if later else float('nan'):.2f} | "
+                  f"3+ excess {np.mean([l['steps'] - l['optimum'] for l in l3]) if l3 else float('nan'):.2f} | "
+                  f"decisions/step {sum(len(r['decisions']) for r in runs) / steps:.2f} | "
+                  f"ms/step {1000 * sum(r['seconds'] for r in runs) / steps:.0f} | "
+                  f"median plan length {np.median([x for r in runs for x in r['plan_lengths']]):.0f} | "
+                  f"triggers {dict(sum((Counter(r['triggers']) for r in runs), Counter()))} | "
+                  f"decisions {dict(Counter(k for r in runs for _, k, _ in r['decisions']))} | {time.time() - t0:.0f} s", flush=True)
+    print(f"total {time.time() - t0:.1f} s")
+    json.dump(out, open("runs/homeostatic_agent_part17.json", "w"), indent=1, default=str)
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    part17() if "--part17" in sys.argv else part16() if "--part16" in sys.argv else main()

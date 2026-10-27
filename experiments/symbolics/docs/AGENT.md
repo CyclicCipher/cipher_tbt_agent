@@ -294,3 +294,280 @@ The box's lead straight after its discovery: 7.8 nats in all 18 runs.
 2. **The arbitration between variables is lexicographic.** Active inference adds risk and ambiguity into one
    expected free energy, and a homeostatic agent weighs drives by how far out of range each is. Which arbitration is
    right is a question about the agent's values.
+
+# Part 16: an efference copy, and biologically weighted drives (pre-registered 2026-10-27, before the code was written)
+
+**Why (the user):** pre-register and run both.
+- **Biological drive weighting:** urgency grows faster than linearly with deviation (Keramati & Gutkin 2014). Needs
+  act as gains on one value scale, and competing drives are settled by selection (basal ganglia; hunger suppressing
+  other drives, Burnett et al. 2016).
+- **An efference copy:** what an action was meant to do, kept apart from what happened. A mismatch is then
+  information about the world, not about the action.
+
+## The efference copy (`arc_agent/claude/efference.py`)
+
+**What it holds:** hypotheses, for each (body kind, action), over the intended displacement: the 25 translations
+within 2 cells, including none, with a uniform prior. After each step:
+- **The body moved by d:** evidence for exactly d (1 − ε; ε/25 for the others).
+- **It didn't move:** evidence against every displacement that would have landed on a free in-grid cell (likelihood
+  ε). Off-board or occupied destinations, and "no move", stay at 1 − ε. Such a block says nothing about the action;
+  it is attributed to the world.
+
+**How the planner uses it:**
+- If an action's most probable displacement has probability ≥ 0.98, the body is planned to move by it.
+- Otherwise the action is uncertain. Trying it is a search leaf worth the entropy of its displacement posterior.
+- A move into a board object that doesn't happen marks that object solid (the existing contact update, now driven by
+  the intended displacement).
+
+**Without it** (part 15b): the most frequent observed effect per action, blocked moves included.
+
+## Deviation-weighted drives
+
+Candidates: every node of the 10-step search, plus the plans beyond the horizon (as in part 15b).
+
+**Hunger:** h = (steps since the last WIN or the run's start, plus the plan's length) / 25. It keeps growing past 1
+while no WIN comes.
+
+**For each candidate, the two drives after the plan:**
+- **progress:** δ_p = 0 if the plan's P(WIN) ≥ 0.5 (the dead zone); otherwise δ_p = (1 − P(WIN)) · h.
+- **understanding:** δ_u = 0 if U₀ < θ; otherwise δ_u = max(0, U₀ − EIG(plan) − θ) / max(U₀, 1). Here U₀ is the
+  largest information gain reachable now, and θ = 0.05 bits.
+
+**Drive:** D = (δ_p³ + δ_u³)^(1/2), Keramati & Gutkin's form with n = 3, m = 2.
+
+**Selection:** the plan with the smallest D wins, the shorter on ties. This stands in for selection by salience.
+
+**What it should do:**
+- **Early in a level,** with hunger low, curiosity dominates.
+- **As steps pass without a WIN,** progress dominates, even while uncertainty remains.
+- **Once both are in range,** D = 0, and the shortest acceptable plan wins: still satisficing.
+
+**Without it** (part 15b): the lexicographic order.
+
+## Model combinations when there are many objects
+
+If the full product of hypotheses is larger than 12, the combinations are taken one at a time: the most probable
+combination, plus, for each uncertain thing, one combination per alternative hypothesis of that thing (the others at
+their most probable). Each is weighted by its product of marginals, then renormalized.
+
+## A new world, W4: walls and distractors (`arc_agent/claude/wall_world.py`)
+
+- **Mechanics:** push_block's, with random layouts.
+- **A wall:** a straight segment of 3–4 cells (colour 5) that blocks the player and the box.
+- **Two distractors:** single cells, passable for both, each level in fresh colours drawn from 6–13. So curiosity is
+  re-triggered every level by things irrelevant to winning.
+- **Every layout is checked solvable** by breadth-first search.
+
+## Arms
+
+| arm | drive weighting | action model |
+|---|---|---|
+| L | lexicographic | most frequent effect (version 2.1) |
+| LE | lexicographic | efference copy |
+| DW | deviation-weighted | most frequent effect |
+| DE | deviation-weighted | efference copy |
+
+- **Worlds:** W1–W3 for LE, DW and DE (L's results there are part 15b's, not rerun), and W4 for all four arms.
+- **Runs:** 3 seeds, 8 levels, 50 steps per attempt, a cap of 1,500 steps per run.
+
+## Predictions
+
+| # | prediction |
+|---|---|
+| Q1 | with the efference copy, every run ends with every body action's most probable displacement equal to the true one, at probability ≥ 0.98. (Without it: reported, no prediction) |
+| Q2 | in W4, with the efference copy, the wall's posterior is solid ≥ 0.9 by the end of the first level in every run where the body bumped it |
+| Q3 | LE and DE win every level of W1–W4 within the cap. From level 3 on, every level in its first attempt, ≤ 1 step over the optimum in W1–W3 and ≤ 2 in W4 |
+| Q4 | W4, levels 2–8: DW's and DE's mean steps per level are ≤ 0.8 × L's and LE's, and their contacts with distractors per level are ≤ 0.5 × theirs |
+| Q5 | the urgency signature, DE in W4: the share of exploratory decisions taken ≥ 20 steps after the last WIN is ≤ half the share taken before that |
+| Q6 | no regression: DE on W1–W3 wins every level, ≤ 1 step over the optimum from level 3 on |
+
+**Exploratory decision:** a chosen plan with P(WIN) < 0.5 and information gain ≥ θ.
+
+**Cost:** about 5 minutes. A build check projects it first. Beyond 8 minutes, the seeds stay but levels are cut to 5
+(to be recorded here).
+
+    python -m arc_agent.claude.homeostatic_agent --part16      (from experiments/symbolics)
+
+**Amendments from build checks, before the main part 16 run:**
+1. **Arm L is rerun on W1–W3, not reused.** The new rule for model combinations (one at a time when there are more
+   than 12) changes L's own code path too, so part 15b's numbers no longer describe it.
+2. **Understanding's deviation is relative to what is reachable:** δ_u = max(0, U₀ − EIG − θ) / U₀. The pre-registered
+   denominator, max(U₀, 1 bit), shrank curiosity whenever less than a bit was reachable. In a build check (DE, W4) the
+   agent then chased goal hypotheses at 0.4% probability for 100+ steps and never won within 120.
+3. **Cost.** On W4 the drive-weighted arms replan almost every step, since the drive prefers short "approach" plans
+   as hunger rises, at about 0.3 s per step. They took 225 steps to the first WIN in a build check, so the full run
+   projected to about 13 minutes.
+   - **Per the pre-registered rule,** W4 runs have 5 levels.
+   - **Also, applied to every arm alike:** a cap of 300 steps per W4 run.
+   - **Order and guard:** W1–W3 run first, then W4 in the order L, LE, DE, DW. The run is stopped at 9.5 minutes,
+     and whatever didn't finish is reported as cut.
+
+**A behaviour seen in the build checks, to be judged on the main run:** after each WIN, hunger resets, and the
+drive-weighted agent explores first. The lexicographic agent takes an available acceptable plan before anything else.
+Q4 (fewer distractor contacts for the drive-weighted arms) may therefore fail.
+
+# Part 17: commitment, decision points and an inverse model (pre-registered 2026-10-27, while part 16 runs, before the code was written)
+
+**Why (the user):** the drive-weighted agents replan almost every step, a problem met before (the rollout blowup).
+The clues:
+- **Biology:**
+  - commitment with switching costs (McFarland's time-sharing; the basal ganglia and subthalamic nucleus holding a
+    selection);
+  - deliberation only at choice points (vicarious trial and error, hippocampal sweeps; Johnson & Redish 2007);
+  - action chunking (Graybiel 1998);
+  - map read-outs instead of search (successor representation, grid-cell vector navigation, GCML's inverse model).
+- **AI:** options (Sutton, Precup & Singh 1999), incremental replanning (D* Lite), metareasoning (replan when it pays).
+
+**The root of the dithering, found while designing this: part 16's drive formula was myopic.** Hunger was evaluated
+at the end of each plan, (since + d)/25. A 1-step plan therefore always looks better: less time has passed when it
+ends. So the drive picked one step and replanned.
+
+## Changes (arms LE17 and DE17, both with the efference copy)
+
+1. **Every plan is judged at the same moment.**
+   - **Hunger:** h = (since + 30)/25 for all candidates, where 30 is the longest plan considered.
+   - **Effort becomes its own drive:** δ_e = d/50, the share of the budget the plan uses.
+   - **D = (δ_p³ + δ_u³ + δ_e³)^(1/2).** δ_p and δ_u are as in part 16, with its amendment.
+   - The lexicographic arm is unaffected.
+2. **Commitment: the agent keeps its plan and re-decides only at a decision point:**
+   - the plan has ended;
+   - a WIN, or a restart after GAME_OVER;
+   - a state surprise: an object the plan moves (its body, or what it pushes) isn't where the most probable model
+     predicted;
+   - a value change: re-scored cheaply under the updated beliefs (no search), the remaining plan's P(WIN) has fallen by
+     more than 0.1, or below 0.5 if it was acceptable.
+
+   Part 15–16's rule was that any mismatch between the predicted and observed frame cancels the plan. That is
+   replaced: a surprise elsewhere, such as the patroller, no longer matters.
+3. **An inverse model replaces the 30-step joint searches beyond the horizon.** Under the most probable model, for
+   each of the 8 most probable goal hypotheses:
+   - **If it concerns the body:** navigate there by breadth-first search over the body's own positions (at most 81),
+     using the efference copy's displacements, around solid things and objects it pushes.
+   - **If it concerns an object the body pushes:** invert the contact relation. To move the object by d, the body must
+     enter it from the cell at minus d. Search over the object's positions, with each push costing the navigation to
+     the pushing cell plus one step.
+   - **The plans found** are scored under the whole posterior, as before.
+   - **Fallback:** the joint search, when there is more than one body or object to push, or a multi-cell one.
+
+   The 10-step search over all model combinations stays, for information gain.
+
+## Arms, worlds and comparison
+
+- **Arms:** LE17 (lexicographic) and DE17 (drive-weighted), both with all three changes.
+- **Worlds and settings:** W1–W3 (8 levels, cap 1,500) and W4 (5 levels, cap 300), as in part 16, 3 seeds.
+- **Compared against:** part 16's LE and DE, reused, not rerun.
+
+| # | prediction |
+|---|---|
+| R1 | cost: on W4, DE17 makes ≤ 0.3 decisions per step, and its time per step is ≤ ⅓ of part 16's DE |
+| R2 | LE17 and DE17 win every level of W1–W4 within the caps. From level 3 on, every level in its first attempt, ≤ 1 step over the optimum in W1–W3 and ≤ 2 in W4 |
+| R3 | dithering cured: DE17's median plan length on W4 is ≥ 3 steps |
+| R4 | DE17's median first WIN on W4 is ≤ ½ of part 16's DE (or DE17 wins where part 16's DE didn't) |
+
+**Cost:** expected well under part 16's. A 9.5-minute guard.
+
+    python -m arc_agent.claude.homeostatic_agent --part17      (from experiments/symbolics)
+
+## Part 16 results (2026-10-27; `runs/homeostatic_agent_part16.txt`; stopped by the 9.5-minute guard)
+
+**Cut:** the guard stopped the run during W4's DE arm. DE and DW on W4 were not completed. Everything else was.
+
+| world | arm | first WIN | levels done | levels 2+ won in the first attempt | steps over the optimum, levels 3+ | exploratory share: before 20 steps since a WIN / after |
+|---|---|---|---|---|---|---|
+| W1 | L | 3, 53, 3 | 8, 8, 8 | 100% | 0.00 | 0.23 / 1.00 |
+| W1 | LE | 53, 53, 53 | 8, 8, 8 | 100% | 0.00 | 0.38 / 1.00 |
+| W1 | DW | 3, 9, 3 | 8, 8, 8 | 100% | 0.56 | 0.29 / — |
+| W1 | DE | 9, 9, 9 | 8, 8, 8 | 100% | 1.67 | 0.50 / — |
+| W2 | L | 57, 66, 29 | 8, 8, 8 | 100% | 0.00 | 0.31 / 1.00 |
+| W2 | LE | 57, 42, 65 | 8, 8, 8 | 100% | 0.00 | 0.43 / 0.91 |
+| W2 | DW | 57, 24, 65 | 8, 8, 8 | 100% | 0.00 | 0.50 / 0.11 |
+| W2 | DE | 57, 118, 135 | 8, 8, 8 | 100% | 0.00 | 0.53 / 0.07 |
+| W3 | L | 57, 114, 65 | 8, 8, 8 | 100% | 0.00 | 0.50 / 0.59 |
+| W3 | LE | 57, 34, 65 | 8, 8, 8 | 100% | 0.00 | 0.55 / 0.60 |
+| W3 | DW | 107, 24, 97 | 8, 8, 8 | 100% | 0.00 | 0.54 / 0.01 |
+| W3 | DE | 81, 114, 286 | 8, 8, 8 | 100% | 0.00 | 0.58 / 0.02 |
+| W4 | L | 65, 63, 73 | 5, 5, 4 | 73% | 17.5 | 0.64 / 0.29 |
+| W4 | LE | 65, 63, 73 | 5, 5, 4 | 73% | 17.5 | 0.66 / 0.27 |
+
+On W4 the agents made 2.3–2.4 distractor contacts per level, and the wall was judged solid (1.0) by the end of level 1
+in every run, having been bumped 1–3 times.
+
+**Verdicts:**
+- **Q1 confirmed:** with the efference copy, every run ended with every action's most probable displacement correct,
+  at ≥ 0.98. Without it, in two W1 runs, actions 0–2 were never tried: the agent won in 3 steps, before trying them.
+  No run without it ended with a wrong belief caused by a blocked move.
+- **Q2 confirmed:** the wall was judged solid in every W4 run.
+- **Q3 refuted:** on W4, LE left one run unfinished within 300 steps, won 73% of levels 2+ in the first attempt, and
+  was 17.5 steps over the optimum.
+- **Q4: not tested** (the W4 drive-weighted arms were cut).
+- **Q5: not tested on W4.** On W2 and W3, the urgency signature is strong: DE's exploratory share falls from
+  0.53–0.58 to 0.02–0.07 once 20 steps have passed without a WIN. L's doesn't fall: 0.31–0.50 before, 0.59–1.00
+  after.
+- **Q6 partly refuted:** DE is at the optimum on W2 and W3, but 1.67 steps over it on W1.
+
+**Reading:**
+- **The efference copy keeps action beliefs exact, but made little difference here.** The edge-blocked misbelief it
+  guards against didn't occur in these runs.
+- **The drive weighting behaves as biology predicts:**
+  - **Under need, curiosity yields.** Exploration falls to near zero once steps pile up without a WIN.
+  - **After each WIN hunger resets, and the agent explores first.** That is why DE takes extra steps on W1, and its
+    first WIN comes later on W2 and W3.
+  - **It is also expensive:** 60–150 s per arm, against 3–10 s for the lexicographic arms, because of the myopic
+    replanning that part 17 targets.
+- **W4 is hard even for the lexicographic agent.** In the lexicographic order, exploration comes before a satisficing
+  plan that lies beyond 10 steps. Fresh distractors in every level therefore pull the agent off the goal whenever the
+  goal is far.
+
+**Part 17's comparison points (R1, R4) referred to part 16's DE on W4, which was cut.** The reference is therefore
+the part 16 build check of DE on W4 (seed 0, cap 250): about 300 ms per step, first WIN at step 225.
+
+**Amendment from part 17's build checks, before its main run: new hypotheses are charged with past WINs** (part 17
+arms only).
+- **The symptom:** some W4 levels still took 70+ steps against optima of 17–22. At the start of level 2 the goal
+  posterior was flat: P(cell(box, red)) = 0.012, though it had 0 errors.
+- **The cause:** every kind or colour registered after a WIN arrives with fresh, unrefuted hypotheses. W4 brings two
+  new distractor colours every level, and their hypotheses swamped the true one.
+- **The rule:** under the existential semantics, a kind or colour that wasn't present at a past WIN predicted no WIN
+  there. So a hypothesis registered for the first time starts with one error per WIN observed so far. This extends
+  part 15's registry fix, and changes nothing in W1–W3, which get no new kinds after the first WIN.
+- **After the fix,** DE17 solved W4 levels 2–5 at exactly the optimum in seeds 0 and 1.
+
+The same gap affected part 16's W4 arms; it is part of why L and LE were 17.5 steps over the optimum there.
+
+## Part 17 results (2026-10-27; `runs/homeostatic_agent_part17.txt`, `.json`; 56 s)
+
+| world | arm | first WIN | levels done | levels 2+ won in the first attempt | steps over the optimum, levels 3+ | decisions per step | ms per step | median plan length |
+|---|---|---|---|---|---|---|---|---|
+| W1 | LE17 | 37, 36, 37 | 8, 8, 8 | 100% | 0.00 | 0.24 | 23 | 3 |
+| W1 | DE17 | 44, 43, 44 | 8, 8, 8 | 100% | 0.00 | 0.22 | 21 | 3 |
+| W2 | LE17 | 25, 46, 39 | 8, 8, 8 | 100% | 0.00 | 0.11 | 14 | 10 |
+| W2 | DE17 | 57, 40, 47 | 8, 8, 8 | 100% | 0.00 | 0.11 | 13 | 10 |
+| W3 | LE17 | 57, 46, 65 | 8, 8, 8 | 100% | 0.00 | 0.13 | 19 | 9 |
+| W3 | DE17 | 57, 40, 65 | 8, 8, 8 | 100% | 0.00 | 0.12 | 20 | 10 |
+| W4 | LE17 | 65, 125, 73 | 5, 5, 5 | 92% | 2.67 | 0.14 | 22 | 9 |
+| W4 | DE17 | 65, 125, 73 | 5, 5, 5 | 100% | **0.00** | 0.13 | 22 | 10 |
+
+Commitment triggers over all runs: 6 surprises, no value drops. The plans were kept to their end otherwise.
+
+**Verdicts:**
+- **R1 confirmed:** on W4, DE17 makes 0.13 decisions per step at 22 ms per step, against about 300 ms per step in
+  the part 16 build check: about 14 times cheaper.
+- **R2 confirmed for DE17, refuted for LE17 on W4:** 2.67 steps over the optimum, and 92% of levels won in the first
+  attempt.
+- **R3 confirmed:** median plan length 10.
+- **R4 confirmed:** median first WIN 73, against 225 in the build check.
+
+**Reading:**
+- **The replanning problem was mostly a myopic drive, not a lack of commitment.** Judging every plan at the same
+  moment removed the bias toward 1-step plans; plans now run 9–10 steps, and decisions fall to about one every 8
+  steps. Commitment then rarely had to intervene (6 surprises in 21 runs). The inverse model replaced the 30-step
+  joint searches, which is where most of the time went.
+- **With the myopia fixed, the biological weighting beats the lexicographic order where they differ.** On W4, DE17
+  is at the optimum in every level from level 3 on. LE17 isn't, because the lexicographic order explores fresh
+  distractors before taking a winning plan beyond 10 steps.
+
+  The drive weighting also no longer wastes steps after a WIN (W1: 0.00 over the optimum, against part 16's 1.67).
+  Hunger is judged at a common moment, so a winning plan's zero progress-drive outweighs early curiosity as soon as
+  one is in reach.
+- **The first WIN still costs 36–125 steps.** Before any WIN, the goal is unknown, and goal discovery dominates.
+  Gemini's agent took 3, with the goal written in.
