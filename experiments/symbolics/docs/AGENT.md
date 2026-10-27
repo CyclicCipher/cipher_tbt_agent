@@ -571,3 +571,109 @@ Commitment triggers over all runs: 6 surprises, no value drops. The plans were k
   one is in reach.
 - **The first WIN still costs 36–125 steps.** Before any WIN, the goal is unknown, and goal discovery dominates.
   Gemini's agent took 3, with the goal written in.
+
+# Part 18: learning sets, a goal prior learned across games (pre-registered 2026-10-27, before the code was written)
+
+**Why (the user):** run the learning-sets experiment.
+- **Biology:** goal discovery is fast mainly because goal types are known in advance, innately or from earlier tasks.
+  Harlow's (1949) monkeys went from many trials per new problem to one.
+- **The Bayesian form:** an overhypothesis, a prior over goal types learned across games (Kemp, Perfors & Tenenbaum
+  2007).
+- **Question:** does a learned goal-type prior make the first WIN in a new game fast, while everything else (the body,
+  what actions do, how objects respond, the colours) is relearned?
+
+**Games** (`arc_agent/claude/learning_sets.py`): 12 per run, 3 runs (seeds), each game a new random set of colours
+drawn from 1–13.
+- **Every game's board:** the body, a box (pushable), a single target cell and two single distractor cells
+  (passable). Random layouts, no walls.
+- **Two goal families, chosen at random (½ each) per game:**
+  - **push:** WIN when the box is on the target;
+  - **reach:** WIN when the body is on the target. The box is still present, and irrelevant.
+- **Levels:** 3 per game (a new layout each), 50 steps per attempt, a cap of 300 steps per game.
+
+**The agent:** DE17 (part 17), new for every game: frames, efference copy, affordances and goal evidence all start
+empty. Only the goal prior differs between arms.
+- **FLAT:** the description-length prior, as before.
+- **LS (learning sets):** a prior over goal *types*, learned from earlier games. A hypothesis's type is:
+  - for cell(kind, c): (cell, the kind's role, the colour's feature);
+  - for at(kind, x, y): (at, the kind's role).
+- **Roles:** "body" (a frame whose driver is action), "pushed" (driver contact, or an unmoved object whose most
+  probable response is pushable), or "other".
+- **Colour features:** "unique" (exactly one board cell has it), "background", or "other".
+- **P(type)** = (games so far whose goal had that type + the type's mass under the flat prior) / (games so far + 1).
+- **Within a type,** the flat prior's proportions are kept.
+- **After each game,** the most probable goal hypothesis's type is counted.
+
+| # | prediction |
+|---|---|
+| L1 | a Harlow curve: LS's mean first-WIN steps in games 7–12 is ≤ 0.6 × its mean in games 1–3. FLAT shows no such fall (games 7–12 ≥ 0.85 × games 1–3) |
+| L2 | in games 7–12, LS's mean first-WIN steps is ≤ 0.6 × FLAT's |
+| L3 | once the true goal's kind has its role (the box found pushable, or the body found), LS's prior probability on the true hypothesis is ≥ 0.2 (mean, games 7–12); FLAT's is ≤ 0.05 |
+| L4 | no regression: both arms win levels 2–3 of every game in their first attempt |
+| L5 | the breakdown: before the first WIN, ≥ 30% of FLAT's steps run exploratory plans. In games 7–12, LS's exploratory share is ≤ half of FLAT's |
+
+**Also logged:** the steps before each first WIN, by the kind of plan they ran (exploratory, approach, satisficing,
+random).
+
+**Cost:** about 2–3 minutes. A 9.5-minute guard.
+
+    python -m arc_agent.claude.learning_sets      (from experiments/symbolics)
+
+**Amendment from part 18's build check, before its main run: an uncertain action is worth the entropy of its
+predicted *outcome* at the current state.**
+- **The symptom:** in one game the body sat at the top edge and tried "up" 299 times. Each try was valued at 4.64
+  bits, the entropy of the action's displacement hypotheses.
+- **The cause:** at the edge, every upward displacement predicts the same outcome, "blocked", so trying it there
+  teaches nothing. The part 16 design had specified outcome entropy; the code used displacement entropy.
+- **What it is:** the noisy-TV failure that a learning-progress guard would also catch. The fix applies to the shared
+  agent from now on; parts 16–17's results stand as recorded.
+
+**Seen in the same build check (6 games per arm):** the learned prior raised P(true goal) to 0.13–0.19, against 0.02
+under the flat prior. But first-WIN steps barely changed: before the first WIN, most steps ran exploratory plans
+(learning actions, touching every object) that a goal prior doesn't shorten. L1, L2 and L5 may therefore fail.
+
+## Part 18 results (2026-10-27; `runs/learning_sets.txt`, `.json`; 88 s)
+
+3 seeds × 12 games; both arms play the identical games (same specs and layouts).
+
+| | FLAT | LS |
+|---|---|---|
+| mean first-WIN steps, games 1–3 | 29.2 | 28.9 |
+| mean first-WIN steps, games 7–12 | 81.1 | **62.4** (0.77 × FLAT) |
+| games not won within 300 steps | 1 of 36 | 0 of 36 |
+| prior P(true goal) once its kind's role is known, games 7–12 | 0.020 | **0.156** |
+| median rank of the true goal in the posterior then, games 7–12 | 7.5 | **2.5** |
+| goals correctly identified | 97% | 100% |
+| levels 2–3 won in the first attempt | 100% | 100% |
+| exploratory share of the steps before the first WIN (all / games 7–12) | 0.81 / 0.77 | 0.70 / 0.63 |
+| steps before the first WIN, by plan kind | explore 1,734, approach 339, random 64 | explore 1,294, approach 314, satisfice 189, random 42 |
+
+**Verdicts:**
+- **L1 refuted for both arms:** first-WIN steps *rose* from games 1–3 to 7–12 (× 2.2 for LS, × 2.8 for FLAT). This is
+  confounded by a design flaw: the random game sequences happened to put more cheap "reach" games early and more
+  expensive "push" games late. The paired comparison (L2) is the fair one.
+- **L2 refuted:** LS is 0.77 × FLAT in games 7–12, not ≤ 0.6. It also won the one game FLAT never did.
+- **L3 partly refuted:** LS's prior on the true goal is 0.156 (predicted ≥ 0.2); FLAT's is 0.02, as predicted.
+- **L4 confirmed.**
+- **L5:** FLAT's exploratory share is 0.81 (≥ 0.3, confirmed), but LS's is 0.63, not ≤ half of FLAT's (refuted).
+
+**Reading:**
+- **The goal prior transfers, as Harlow and the overhypothesis account predict.**
+  - P(true goal) rose 8-fold and its rank went from 7.5 to 2.5.
+  - P(true goal) is capped near 1/3: each game has three single-cell colours (the target and two distractors), so the
+    type alone can't tell them apart.
+- **But the first WIN is not mostly spent on finding the goal.** 63–81% of the steps before it ran exploratory plans:
+  - trying each action, since the body is new every game;
+  - touching every object to learn how it responds, since the colours are new every game.
+
+  Goal identification is a minority of the cost, so a better goal prior saved only 23%.
+- **Biology's speed needs overhypotheses at every level, not only for goals.** People entering a new game already
+  expect:
+  - "the arrow keys move my avatar by one cell";
+  - "single coloured cells are walked over";
+  - "boxes get pushed".
+
+  Our agent relearns all of these in every game. The same machinery (a prior over types, learned across games) applies
+  to action effects and to affordances.
+- **Curiosity should be weighted by relevance.** Touching both distractors in every game is information the goal
+  rarely needs.

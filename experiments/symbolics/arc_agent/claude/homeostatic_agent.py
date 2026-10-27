@@ -126,9 +126,10 @@ class GoalModel:
     so they predict no WIN, and a WIN refutes them. By the same rule, a hypothesis first registered now (a new kind or
     colour) was false at every WIN so far, since its kind or colour wasn't there: it starts charged with those WINs
     (part 17, from a build check)."""
-    def __init__(self, charge_new=False):
+    def __init__(self, charge_new=False, prior_fn=None):
         self.err, self.kinds, self.cols = Counter(), {}, set()
         self.charge_new, self.wins, self.known = charge_new, 0, set()
+        self.prior_fn = prior_fn                            # part 18: prior_fn(hypotheses, things, static) -> {h: p}
 
     def hypotheses(self, th, static):
         self.kinds.update(dict.fromkeys(t.shape for t in th))
@@ -156,6 +157,9 @@ class GoalModel:
 
     def posterior(self, th, static):
         hs = self.hypotheses(th, static)
+        if self.prior_fn is not None:
+            pri = self.prior_fn(hs, th, static)
+            return normalized({h: math.log(pri[h]) + LOG_R * self.err[h] for h in hs}, prune=0.0)
         n = Counter(h[0] for h in hs)
         return normalized({h: math.log(0.5 / n[h[0]]) + LOG_R * self.err[h] for h in hs}, prune=0.0)
 
@@ -193,8 +197,21 @@ def action_table(f, eff=None):
             table[a], bits[a] = (None if e is None or e[2] != 0 else (e[0], e[1])), UNKNOWN_BITS
         else:
             d, p, h = eff.intended(fkey(f), a)
-            table[a], bits[a] = (d if p >= 1 - PMIN else None), h
+            table[a], bits[a] = (d if p >= 1 - PMIN else None), eff.posterior(fkey(f), a)
     return table, bits
+
+
+def outcome_bits(post, thing, t, solid):
+    """Part 18 fix: the information in trying an uncertain action is the entropy of its predicted *outcome* here, not
+    of its displacement. At the edge, every outward displacement predicts the same outcome: blocked."""
+    if not isinstance(post, dict):
+        return post
+    out = Counter()
+    for d, p in post.items():
+        cells = thing.at((t[0] + d[0], t[1] + d[1]))
+        moved = d != (0, 0) and all(inb(x, y) for x, y in cells) and not solid & set(cells)
+        out[d if moved else (0, 0)] += p
+    return entropy(out.values())
 
 
 def time_table(f, n):
@@ -341,9 +358,14 @@ def search(agent, th, endo, combos, exo, post, depth):
             ubits = 0.0
             for i, (_, roles) in enumerate(combos):
                 s2 = sim(ths, roles, states[i], a, agent.t + d + 1)
-                if s2 is None:                              # an action whose effect is unknown: worth its entropy
+                if s2 is None:                              # an action whose effect is unknown: worth its outcome's entropy
                     unknown, s2 = True, states[i]
-                    ubits = max([ubits] + [r[2][a] for r in roles if r[0] == "body" and r[1].get(a) is None])
+                    solid = set()
+                    for j, r in enumerate(roles):
+                        if r[0] == "solid":
+                            solid |= set(ths[j].at(states[i][j]))
+                    ubits = max([ubits] + [outcome_bits(r[2][a], ths[j], states[i][j], solid)
+                                           for j, r in enumerate(roles) if r[0] == "body" and r[1].get(a) is None])
                 nxt.append(s2)
             canon, npart = {}, []
             for i in range(len(combos)):
@@ -541,19 +563,27 @@ def trajectory(info, path, t0):
     return out
 
 
-def run(kw, seed, epistemic=True, eff_on=False, drives_on=False, walls=False, commit=False, macro=False, common=False):
+def run(kw, seed, epistemic=True, eff_on=False, drives_on=False, walls=False, commit=False, macro=False, common=False,
+        world=None, goal_factory=None, levels=None, cap=None, probe=None):
     rng = np.random.default_rng(seed)
-    world = WallWorld(np.random.default_rng(100 + seed)) if walls else PushWorld(np.random.default_rng(100 + seed), **kw)
-    agent, goal, aff = FrameAgent(score_discovery=True), GoalModel(charge_new=commit), Affordances()
+    if world is None:
+        world = WallWorld(np.random.default_rng(100 + seed)) if walls else PushWorld(np.random.default_rng(100 + seed), **kw)
+    agent, aff = FrameAgent(score_discovery=True), Affordances()
+    goal = goal_factory(agent, aff) if goal_factory else GoalModel(charge_new=commit)
+    n_levels, n_cap = levels or LEVELS, cap or CAP
+    snapshot = getattr(world, "snapshot", lambda: (world.player, world.box, world.target))
+    restore = getattr(world, "restore", lambda lay: restart(world, lay))
+    best = getattr(world, "optimum", lambda: optimum(world))
     eff = Efference() if eff_on else None
     F = world.reset()
-    layout = (world.player, world.box, world.target)
+    layout = snapshot()
     agent.start(F)
     level, total, lsteps, attempts, path, kind, since = 0, 0, 0, 0, [], None, 0
-    first_win, levels, opt, decisions, gains, leads, pending = None, [], optimum(world), [], [], [], None
+    first_win, levels, opt, decisions, gains, leads, pending = None, [], best(), [], [], [], None
+    kinds_until_win = []
     deco_contacts, wall_bumps, wall_solid = 0, 0, None
     traj, pwin0, lengths, triggers, t_start = [], 0.0, [], Counter(), time.time()
-    while level < LEVELS and total < CAP:
+    while level < n_levels and total < n_cap:
         if not path:
             if pending is not None:
                 gains.append((pending[0], pending[1] - belief_entropy(agent, goal, aff)))
@@ -574,6 +604,8 @@ def run(kw, seed, epistemic=True, eff_on=False, drives_on=False, walls=False, co
             else:
                 traj = []
         a = path.pop(0)
+        if first_win is None:
+            kinds_until_win.append(kind)
         th_before, nframes, bodies = things(agent), len(agent.frames), bodies_before(agent, a, eff)
         if eff is not None:                                 # the efference copy: each body's state before the step
             occupied, static_before, before = set(), agent.static.copy(), []
@@ -601,10 +633,12 @@ def run(kw, seed, epistemic=True, eff_on=False, drives_on=False, walls=False, co
                     eff.observe(k, a, t0, e, cells, free)
         contact_update(agent, aff, th_before, nframes, bodies)
         goal.observe(things(agent), agent.static, win)
+        if probe is not None:
+            probe(agent, goal, aff, win)
         for f in agent.frames[nframes:]:                     # E3: the box's driver straight after its discovery
-            if 4 in f.content.tolist():
-                ev = f.evidence
-                leads.append(float(max(v for m, v in ev.items() if m.startswith("push")) - ev["static"]))
+            pushes = [v for m, v in f.evidence.items() if m.startswith("push")]
+            if 4 in f.content.tolist() and pushes:
+                leads.append(float(max(pushes) - f.evidence["static"]))
         if not commit:
             if pred is None or not np.array_equal(pred, F2):
                 path = []
@@ -629,11 +663,11 @@ def run(kw, seed, epistemic=True, eff_on=False, drives_on=False, walls=False, co
             levels.append(dict(level=level, steps=lsteps, optimum=opt, first_attempt=attempts == 0, deco=deco_contacts))
             level, lsteps, attempts, path, since, deco_contacts = level + 1, 0, 0, [], 0, 0
             F = world.reset()
-            layout, opt = (world.player, world.box, world.target), optimum(world)
+            layout, opt = snapshot(), best()
             agent.start(F)
         elif world.t >= EP_MAX:
             attempts, path = attempts + 1, []
-            F = restart(world, layout)
+            F = restore(layout)
             agent.start(F)
     wrong = []                                              # Q1: the body's belief about each action, at the end
     for i, f in enumerate(agent.frames):
@@ -645,7 +679,7 @@ def run(kw, seed, epistemic=True, eff_on=False, drives_on=False, walls=False, co
                 wrong += [a for a in range(4) if table[a] != DIRS[a]]
     return dict(first_win=first_win, levels=levels, total_steps=total, decisions=decisions, gains=gains,
                 box_discovery_leads=leads, wrong_actions=wrong, wall_bumps_level1=wall_bumps, wall_solid=wall_solid,
-                plan_lengths=lengths, triggers=dict(triggers), seconds=time.time() - t_start)
+                plan_lengths=lengths, triggers=dict(triggers), seconds=time.time() - t_start, kinds_until_win=kinds_until_win)
 
 
 def main():
