@@ -558,3 +558,194 @@ and 4 alike. The true hypothesis's code falls on T1–T3:
     local rules.
 - **A₅ still needs more undetermined entries (78–97) before its table is known.** Without commutativity there are
   fewer patterns to propagate through.
+
+# Parts 8 and 9: repeated labels (pre-registered 2026-10-27, before the code was written)
+
+**Why (the user):** run 3b, then 3a.
+
+**The setting.** Parts 5–6 identified each node by its label. Here many nodes share a colour, so a colour no longer
+says where the agent is. Actions still do what they say, except where part 9 adds slips.
+
+## Part 8 (3b): learning the structure from repeated colours
+
+**Environments:**
+- **E1:** the 6 × 10 torus, actions N, S, E, W (true structure inside the hypothesis family).
+- **E2:** the 60-cycle with actions ±1, ±7 (true structure outside the family: the control).
+
+**The walk:** every node gets a random colour from C colours, C ∈ {2, 3, 6, 60}. At C = 60 every colour is unique.
+A random walk of 3,000 steps is shared across the colour counts within each seed. 3 seeds.
+
+**Hypotheses** (675 tori, plus 2 structure-free models):
+- **Tori:** Z/h × Z/w with 1 ≤ h, w ≤ 15. Each pairs the 4 actions into two inverse pairs (3 pairings): the first
+  pair moves ±1 along the h-axis, the second ±1 along the w-axis. The pairings, orientations and periods are all
+  unknown. Each hypothesis appears once (no relabelled duplicates).
+- **Null:** every step lands on a new cell.
+- **Edge memory:** the next colour is the one last seen after the same (colour, action).
+
+**Score** (prequential, as in part 3, over the colour sequence):
+- **Tori:** path integration gives each step a cell. A cell visited before predicts its last colour:
+  P = (1 − ε)·[match] + ε/C. A new cell predicts 1/C. ε = 0.01.
+- **Null:** 1/C at every step.
+- **Edge memory:** predicts like a cell, keyed by (colour, action).
+- **Prior:** uniform over all 677 models.
+- **T\*** is the step after which the true hypothesis (pairing N/S with E/W, periods 6 × 10) leads every other model
+  for the rest of the walk.
+
+**The expected bottleneck.** 12 × 10 is the only multiple of 6 × 10 within range. It never contradicts the data, and
+loses only at a revisit whose vertical displacement is an odd multiple of 6, where it predicts a new cell. Smaller
+tori, and any wrong pairing, merge distinct nodes, and are refuted when the merged colours differ. So T\* should be
+set mostly by the walk, not by the number of colours.
+
+| # | prediction |
+|---|---|
+| B1 | on E1, the true hypothesis wins at step 3,000 for every colour count and seed |
+| B2 | on E1, T\* ≤ 500 for every colour count and seed |
+| B3 | on E1, within each seed, T\* at 2 colours exceeds T\* at 60 colours by at most 200 steps |
+| B4 | on E2, no torus wins: the winner at step 3,000 is the null or edge memory, for every colour count and seed |
+
+## Part 9 (3a): slips, with the structure known
+
+**The setting:**
+- The 6 × 10 torus. The structure is given, as transferred from an earlier episode: the actions' displacements and
+  the periods.
+- C ∈ {3, 6, 60} colours.
+- With probability p ∈ {0, 0.05, 0.2} an action does nothing (a slip), and the agent isn't told.
+- A 600-step walk; the memory starts empty; 3 seeds.
+
+**Predictors of the next colour,** each made before the colour is seen:
+- **Oracle:** the true position, plus a cell memory (position → last colour).
+- **Dead reckoning:** the position from the intended actions, plus a cell memory.
+- **Particle filter:** up to 128 slip histories, each with its own position and its own map. At every step each
+  history branches into "moved" and "slipped" (weights 1 − p and p) and is reweighted by how well it predicted the
+  observed colour. The 128 heaviest are kept.
+- **Soft filter** (the version proposed in my last message): one belief over the 60 cells.
+  - Each step shifts the belief by the action, blurred by the slip chance.
+  - The belief is reweighted by the colour.
+  - The colour is written into one shared map of colour counts, weighted by the belief.
+- **Edge memory:** (colour, action) → next colour.
+
+**Measures:**
+- next-colour accuracy (the most probable colour; ties split evenly);
+- log loss per step;
+- for the filters, how often the most probable position is the true one.
+
+| # | prediction |
+|---|---|
+| A1 | sanity: at p = 0, dead reckoning and the particle filter equal the oracle exactly |
+| A2 | dead reckoning collapses under slips: at p = 0.05 its accuracy is ≥ 0.3 below the oracle's for every C |
+| A3 | the particle filter stays close: within 0.05 of the oracle's accuracy at p = 0.05 for every C, and within 0.1 at p = 0.2 for C ≥ 6 |
+| A4 | the soft filter is ≥ 0.1 below the particle filter at C = 3, p = 0.2; at C = 60 it is within 0.05 of the oracle at both slip rates (a unique colour re-localizes in one look) |
+| A5 | edge memory is ≥ 0.2 below the particle filter at C ≤ 6, at every p |
+
+**Cost:** seconds for both parts, CPU only.
+
+    python -m structure.claude.structure_aliased      (part 8, from experiments/symbolics)
+    python -m structure.claude.structure_slip         (part 9)
+
+## Part 8 results (2026-10-27; `runs/structure_aliased.txt`, `.json`; 4.3 s)
+
+**E1 (6 × 10 torus):**
+
+| colours | winner at step 3,000 (all seeds) | margin over the runner-up (12 × 10) | T\* by seed |
+|---|---|---|---|
+| 2 | true: N/S with E/W, 6 × 10 | 41.3 | 89, 117, 105 |
+| 3 | true | 65.5 | 86, 90, 103 |
+| 6 | true | 107.0 | 86, 90, 103 |
+| 60 | true | 245.1 | 86, 90, 103 |
+
+The last rival before T\* was a wrong second period every time (6 × 8, 6 × 9 or 6 × 11), never 12 × 10.
+
+**E2 (60-cycle, ±1 ±7; outside the family):**
+
+| colours | seed 0 | seed 1 | seed 2 |
+|---|---|---|---|
+| 2 | null | torus 12 × 12, right pairing | null |
+| 3 | torus 15 × 15, right pairing | torus 15 × 15, right pairing | torus 15 × 15, right pairing |
+| 6 | torus 15 × 15, right pairing | torus 15 × 15, right pairing | torus 15 × 15, right pairing |
+| 60 | edge memory | edge memory | edge memory |
+
+**Verdicts:**
+- **B1 confirmed.**
+- **B2 confirmed:** T\* = 86–117.
+- **B3 confirmed:** 2 colours cost 2–27 more steps than 60 colours.
+- **B4 refuted:** a torus wins E2 in 7 of 12 runs.
+
+**Reading:**
+- **The structure is found from repeated colours almost as fast as from unique ones.** With 3 or more colours, T\*
+  is the same as with unique labels in every seed. What sets T\* is the walk: the first horizontal excursion long
+  enough to tell period 10 from 9 or 11. My expected bottleneck (12 × 10) was wrong. That rival falls behind as soon
+  as the walk wraps vertically.
+- **A consistent structure that is too big pays a bounded price.** At step 3,000 the margin over 12 × 10 is exactly
+  60 × [ln C + ln(1 − ε + ε/C)]: the cost of a new cell, once for each of its 60 extra cells. Once the walk has
+  visited all 120 cells, the gap stops growing. The data never refute 12 × 10; Occam's factor just keeps it e⁻⁴¹ to
+  e⁻²⁴⁵ behind.
+- **Why B4 failed: the family contains a good partial model of E2.** A large torus with the right pairing
+  approximates the plane Z², which is the unwrapped version of E2's true group (Z/60 = Z²/Λ).
+  - A return to the same point of the plane is always a true revisit. Wrong merges happen only at wrap-arounds
+    (displacements that are multiples of 15), which a random walk rarely makes.
+  - So the winning tori carry real structure: which actions are inverse pairs, and that they commute. Every E2 torus
+    win had the right pairing.
+  - With 2 colours, the wrap-around errors cost more than the gains, and the null wins. With unique colours,
+    memorizing the 240 transitions (edge memory) beats any wrong geometry.
+- **The fix, not run:** the family should hold every lattice Λ ⊂ Z² (Hermite normal form, with a shear), not just
+  rectangular ones. E2's lattice is spanned by (1, 17) and (0, 60): one step of +1 plus 17 steps of +7 returns to the
+  start.
+
+## Part 9 results (`runs/structure_slip.txt`, `.json`; 3.1 s)
+
+Next-colour accuracy, the mean of 3 seeds. "Located" is how often the filter's most probable position was the true
+one.
+
+| colours, slip | oracle (pre-registered) | dead reckoning | particle filter (128) | soft filter | edge memory |
+|---|---|---|---|---|---|
+| 3, 0 | 0.934 | 0.934 | 0.934 | 0.934 | 0.412 |
+| 3, 0.05 | 0.935 | 0.633 | 0.776 (located 0.36) | 0.812 (0.32) | 0.422 |
+| 3, 0.2 | 0.935 | 0.524 | 0.590 (0.15) | 0.524 (0.02) | 0.396 |
+| 6, 0 | 0.918 | 0.918 | 0.918 | 0.918 | 0.321 |
+| 6, 0.05 | 0.919 | 0.538 | 0.878 (0.92) | 0.746 (0.57) | 0.302 |
+| 6, 0.2 | 0.919 | 0.402 | 0.650 (0.55) | 0.478 (0.06) | 0.299 |
+| 60, 0 | 0.903 | 0.903 | 0.903 | 0.903 | 0.645 |
+| 60, 0.05 | 0.903 | 0.492 | 0.864 (0.96) | 0.862 (0.96) | 0.594 |
+| 60, 0.2 | 0.904 | 0.286 | 0.735 (0.81) | 0.727 (0.81) | 0.453 |
+
+**Verdicts:**
+- **A1 confirmed:** at p = 0, dead reckoning and the particle filter equal the oracle exactly.
+- **A2 confirmed:** dead reckoning falls 0.30 (borderline: 0.3015), 0.38 and 0.41 below the oracle at p = 0.05.
+- **A3 refuted.** It holds at p = 0.05 for 6 and 60 colours (gaps 0.040, 0.039), and fails at 3 colours (0.159) and
+  at p = 0.2 (0.27, 0.17).
+- **A4 refuted.** At 3 colours, p = 0.2, the soft filter is 0.066 below the particle filter, not ≥ 0.1. At 60
+  colours it is within 0.05 of the oracle at p = 0.05 (0.041), but not at p = 0.2 (0.177).
+- **A5 narrowly refuted:** 5 of 6 cells hold; at 3 colours, p = 0.2, the gap is 0.194.
+
+**Exploratory 1 (after the results): the pre-registered oracle was a bound no predictor can reach.** It predicts from
+the position after the step, so it knows whether this step slipped. The fair bound knows every past slip but must
+hedge on the current one: (1 − p)·(the target cell's colour) + p·(the current cell's colour). Adding it consumes no
+random draws, so every other number is unchanged.
+
+| colours, slip | fair bound | particle filter, 128 | particle filter, 1,024 | particle filter, 8,192 |
+|---|---|---|---|---|
+| 3, 0.05 | 0.909 | 0.776 | 0.892 | 0.892 |
+| 3, 0.2 | 0.829 | 0.590 | 0.649 | 0.637 |
+| 6, 0.05 | 0.887 | 0.878 | 0.878 | 0.878 |
+| 6, 0.2 | 0.778 | 0.650 | 0.743 | 0.743 |
+| 60, 0.05 | 0.864 | 0.864 | 0.864 | 0.864 |
+| 60, 0.2 | 0.735 | 0.735 | 0.735 | 0.735 |
+
+**Exploratory 2:** the number of particles (128, 1,024, 8,192), in the last three columns
+(`runs/structure_slip_k.txt`; 153 s).
+
+**Reading:**
+- **Dead reckoning collapses at the first slip.** Its memory is written in a drifting frame.
+- **With unique colours a slip is visible at once:** the agent sees the colour it just saw. The particle filter then
+  sits exactly on the fair bound, so its only loss is the slip itself, which nothing can predict.
+- **With repeated colours, a slip in unvisited territory can't be seen when it happens.** Both branches predict "a
+  new cell". The slip shows only at a later revisit, and by then the histories have multiplied.
+  - With 128 histories the true one gets pruned: at 3 colours and 5% slips, accuracy rises from 0.776 to 0.892 with
+    1,024. Beyond that, more histories change nothing.
+  - At 3 colours and 20% slips, a gap of about 0.19 to the fair bound remains even at 8,192. This run doesn't
+    separate how much of that is the data's limit (past slips the colours can't reveal) and how much is the beam's.
+- **The soft filter works only with unique colours.** With repeated colours and frequent slips it loses its position
+  almost entirely (located 2–6% of steps): blurred writes into one shared map reinforce their own errors.
+  Spotlight-style blurred writing, without a separate map per hypothesis, isn't enough. This is SLAM's
+  data-association problem. The established answer is a separate map per hypothesis, which is what the particle
+  filter is (FastSLAM), plus loop closure.
