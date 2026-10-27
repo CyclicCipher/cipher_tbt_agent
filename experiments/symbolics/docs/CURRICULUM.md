@@ -231,3 +231,83 @@ The textbook law fitted directly where one exists (H1, H4, H5).
   constraints, not inputs, so they stay primitives.
 - **A limitation found on the way, not fixed:** when the finder fits log y, a power law becomes a linear term
   (log y = −2.999·log h + …). Its exponent is then a linear coefficient, which templates cannot see or learn.
+- **2026-10-26, a bug found in the held-out evaluation, fixed to the specification.** The margin term was specified as
+  (sⱼ + b)^p with b > 0, its singularity behind the constraint boundary s = 0. The code measured b from the
+  smallest margin in the training domain instead. Extrapolated designs that are feasible but closer to a constraint
+  than any training design then got a negative base: non-finite predictions in 15 of 252 fits, all on the three
+  tasks with margins (H2, H3, H6). Fixed to the specification; every finder-v2 fit on those tasks (A1–A4, 72 fits) was
+  rerun; the first results are kept (`runs/curriculum/heldout_results_margin_bug.jsonl`). The curriculum was not
+  rerun: the library is frozen, and templates never contain margins.
+
+## Results (2026-10-26; `runs/curriculum_*.txt`, `runs/curriculum/heldout_results.jsonl`, `runs/curriculum/heldout_summary.json`)
+
+**What ran:**
+- The curriculum: 48 tasks, 3 wake–sleep cycles, about 20 CPU-minutes.
+- A frozen library of 22 templates. They include the bending law L³·h⁻³ (exponents 3.02, −2.98; twice, slots
+  swapped), L³, a log-space product law Σ cᵥ·log v, and a group template Σ cᵥ·v⁻³·²⁵. Most others are artifacts of
+  the finder's habits (exp(v, 1) and exp(v, 2) are untouched grid starts).
+- Training errors did not improve across cycles. Mean training NRMSE by cycle: stepped 0.015 / 0.018 / 0.015,
+  plate 0.027 / 0.033 / 0.035, holed beams 0.022 / 0.024 / 0.023.
+- The held-out evaluation: 6 tasks × (5 arms + GP) × 2 budgets × 3 seeds, plus the textbook laws on the 3 stepped
+  tasks. 7,200 simulations; finder-v2 fits took 5–66 s each.
+
+**n = 100, geometric mean over 3 seeds, NRMSE in range / extrapolation / far extrapolation:**
+
+| task | A0 (v1) | A1 (v2) | A2 (+ guide) | A4 (full) | GP (reference) | textbook law (7 terms) |
+|---|---|---|---|---|---|---|
+| H1 stepped, 6 segments | 0.26 / 0.75 / 3·10⁵ | 0.24 / 0.47 / 0.51 | 0.13 / 0.30 / 0.34 | **0.087** / 0.22 / 0.29 | **0.087** / 0.33 / 0.31 | 0.096 / **0.088** / **0.075** |
+| H2 beam, hole (xc, yc, r) | 0.25 / 0.38 / 0.64 | 0.20 / 8.1 / 4.9 | 0.20 / 8.1 / 4.9 | 0.34 / 3.4 / 6.0 | **0.079 / 0.33 / 0.60** | — |
+| H3 plate, hole (r, yc) | 0.0062 / **0.072 / 0.096** | 0.0080 / 0.16 / 0.23 | 0.0070 / 0.079 / 0.12 | 0.0077 / 0.21 / 0.29 | **0.0050** / 0.27 / 0.38 | — |
+| H4 stepped, uniform load | 0.077 / 0.24 / 0.18 | 0.059 / 0.30 / 0.68 | 0.046 / 0.18 / 0.78 | 0.058 / 0.26 / 0.60 | **0.032** / 0.19 / 0.18 | 0.048 / **0.070 / 0.058** |
+| H5 clamped, 3 segments | 0.094 / 0.21 / 0.21 | 0.11 / 0.59 / 2·10⁶ | 0.11 / 0.59 / 2·10⁶ | 0.087 / 0.46 / 0.64 | **0.019 / 0.19 / 0.10** | 0.38 / 0.77 / 0.78 |
+| H6 beam, hole, uniform load | 0.021 / **0.17** / 0.25 | 0.014 / 0.23 / 0.42 | 0.014 / 0.23 / 0.42 | 0.020 / 0.32 / 0.48 | **0.016** / 0.18 / **0.22** | — |
+
+A3 (library, no guide) ≈ A4 everywhere at n = 100. At n = 30 everything is worse, and several finder-v2 fits blow up
+in extrapolation (up to 10²¹).
+
+**Verdicts: 2 confirmed, 9 refuted, 1 untestable.**
+
+| # | verdict | evidence |
+|---|---|---|
+| P1 | refuted | A4 beats A1 by ≥ 2× in range on 1 of 6 (H1, 2.8×); elsewhere 0.58–1.27× |
+| P2 | refuted | H1: in range 0.087 (≤ 0.10, as predicted), but extrapolation 0.22 (predicted ≤ 0.15) |
+| P3 | refuted, narrowly | A2 / A4 on H1 = 1.54 (predicted ≤ 1.5) |
+| P4 | refuted | H4–H6: 1.02, 1.27, 0.70 |
+| P5 | confirmed | H2: every arm ≥ 0.20 in range |
+| P6 | refuted | the largest finder-v2 extrapolation or far NRMSE is 9.9·10²¹ |
+| P7 | refuted, partly works | 61% of failed extrapolations (NRMSE > 1) have spread > 0.1, against 34% of the others (predicted ≥ 80% / ≤ 30%) |
+| P8 | refuted, narrowly | curriculum ≈ 20 CPU-min (≤ 30, as predicted); n = 30 → 100 time ratio 1.1 (as predicted); but the slowest held-out fit took 66 s (predicted ≤ 60) |
+| P9 | refuted | A4 beats the GP in range on 1 of 6 (H1, by 0.0004) and in extrapolation on 2 of 6 (H1, H3) |
+| P10 | confirmed | exponent −2.98 in L³·h⁻³; three group templates |
+| P11 | refuted | no candidate law (≤ 6 terms, in ≤ 0.02, far ≤ 0.1) from A4 or A1 on any task. The only one in 90 symbolic fits is v1 on the plate (seed 2) |
+| P12 | untestable | no A4 candidate law. The v1 plate law's leading term 9.295·r² matches the dilute limit 3π r² = 9.42 r² (1.3%), but its constant puts y(0) at 0.997, so the limit check at r = 0.02 reads 0.10 instead of 1 |
+
+## Reading
+
+1. **The library worked exactly where the curriculum held the structure, and only there.** On the 6-segment beam, the
+   learned group template Σ cᵥ·v⁻³·²⁵ took the error from 0.24 to 0.087 (2.8×), level with the GP in range. That is
+   DreamCoder's mechanism doing what it should. But the exponent learned from messy curriculum formulas, −3.25, is
+   wrong. Extra terms ride along, so the formula extrapolates worse than the 7-term textbook law (0.22 against
+   0.088), and at the slender limit it is 83× off where the law is 4% off.
+2. **The central failure is overfitting below the simulator's noise.** The simulator is nearly noise-free, so BIC keeps
+   rewarding terms that fit its discretization. With version 2's rich vocabulary (continuous exponents, exp, shifts,
+   rationals), formulas grow to 8–16 terms, extrapolate badly, and sometimes blow up. Version 1's smaller vocabulary
+   extrapolates better on the plate and both holed beams. The library then learns from those bloated formulas, so
+   most of its templates are artifacts: garbage in, garbage out.
+3. **Compact laws exist and extrapolate; the finder doesn't find them.** On the stepped beams the textbook bending law,
+   with only its coefficients fitted, has the best extrapolation of anything (far 0.075 and 0.058) and passes the
+   slender limit (1.04, 1.03). Selection that chases accuracy below the noise floor walks past it.
+4. **Discovery of unknown formulas: not achieved.** No candidate law on the three tasks without a textbook formula,
+   except one from version 1 whose leading coefficient is right and whose constant is not.
+5. **The ensemble's spread is a weak but real failure signal:** 61% of failed extrapolations are flagged, against 34%
+   of good ones.
+
+**What it says to change** (not built):
+- **Fit to the noise, not below it.** Each task's simulator roughness is measured. Use it as the noise level in the
+  likelihood (BIC with known σ), or stop adding terms once the residual reaches it. This is the main lever: it should
+  cut the bloat, the artifact templates and the blow-ups together.
+- **Learn the library from parsimonious formulas only,** e.g. the smallest frontier formula within the noise.
+- **Pin known limits where the task states them.** A hole of radius 0 changes nothing, so the intercept is fixed by
+  the physics; v1's plate law failed only on that.
+- **Expose exponents that log-y fits hide in linear coefficients** to template learning.
+- **Check safety over an enlarged box,** or abstain where the ensemble disagrees.

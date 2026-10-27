@@ -57,7 +57,9 @@ def shift_offset(ctx, var, beta):
 
 
 def margin_offset(ctx, var, beta):
-    return -ctx.mlo[var] + ctx.mrange[var] * (1e-3 + softplus(beta))
+    # b > 0 from the constraint boundary s = 0, so every feasible design (s >= 0) has a positive base (fixed
+    # 2026-10-26: it was measured from the training domain's smallest margin, which extrapolation can undercut)
+    return ctx.mrange[var] * (1e-3 + softplus(beta))
 
 
 def factor_value(kind, var, params, X, M, ctx):
