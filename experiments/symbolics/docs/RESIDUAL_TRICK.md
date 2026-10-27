@@ -56,6 +56,62 @@ The underlying reason: composition is not commutative, f∘g ≠ g∘f, even amo
 coordinate system in which composition becomes addition globally. A sum has a residual for every part. A composition
 has one only for its outermost layer, and only if that layer is invertible.
 
+## 3b. Where exactly composition blocks the trick (added 2026-10-26)
+
+"Many-to-one" here means many inputs give the same output: J₀ hits each value at many arguments, |x| at both x and
+−x. Its inverse is then one-to-many, so the target for the inner function is a set, not a value.
+
+**Not every composition blocks the trick.** z = 2x(y + 7) looks like a product of two parts, but multiplication
+distributes over addition: z = 2xy + 14x, a sum of two terms. With x·y available as a term, the residual trick finds
+it in two steps. With only single-input terms, f(x) + g(y), it can't: no sum of such terms makes xy. So "the trick
+can't do products" is really "the vocabulary has no product terms". The trick decomposes the outer sum; what it
+reaches depends on the terms it is allowed.
+
+**Which outer functions let the trick through.** A composition f(g + h) stays decomposable when f(a + b) can be
+written with finitely many functions of a and of b. Weierstrass's theorem on algebraic addition theorems (established)
+says the functions with such a formula are exactly the rational functions, the rational functions of e^(kz) (which
+covers sin, cos and tanh), and the elliptic functions. Outside them, f(g + h) has no finite split. The trick still gets
+through if f is invertible over the data's range (the inversion route of §5).
+
+**J₀, the Bessel function of the first kind of order zero, as the worked example.** Physically it is the radial
+shape of a circular drum's fundamental vibration; it also appears in heat flow in cylinders, waves in round
+waveguides, and diffraction through round holes. Three equivalent definitions:
+- the solution of x²y″ + xy′ + x²y = 0 that is finite at 0;
+- the series Σₖ (−1)ᵏ (x/2)²ᵏ / (k!)²;
+- the integral (1/π) ∫₀^π cos(x sin θ) dθ.
+
+It behaves like a decaying cosine: J₀(0) = 1, and J₀(x) ≈ √(2/(πx)) cos(x − π/4) for large x. Its zeros (2.405,
+5.520, 8.654, …) are the drum's nodal circles. It blocks the trick in two ways:
+- **It is many-to-one.** It oscillates, so its inverse gives one candidate argument per oscillation.
+- **Its addition theorem is infinite.** Neumann's theorem, J₀(a + b) = J₀(a)J₀(b) + 2 Σ_{n≥1} (−1)ⁿ Jₙ(a)Jₙ(b), brings in
+  every order Jₙ. It truncates well only for small arguments, where Jₙ(x) ≈ (x/2)ⁿ/n!.
+
+Hardness also depends on the data's range. Up to its first minimum (argument 0 to 3.83), J₀ is monotone, so it is
+invertible there, and inversion works.
+
+**The hard cases, by what blocks the trick:**
+
+| kind | examples | what blocks the residual trick | cost of the way out |
+|---|---|---|---|
+| many-to-one, no finite addition formula | J₀(x + y) or the Airy function Ai(x + y) over several oscillations; Γ(x + y) around its minimum near 1.46 | inverting gives a set of targets per point; no finite expansion | branch choice per point; grows with the number of oscillations |
+| piecewise, with finitely many branches | \|x − y\|; max(x, y); (x + y) mod 1; compositions of ReLUs | the correct sum differs from region to region | region choice; doubles with each nested layer, so 2ᵏ for depth k: the "exponential with low N" case of `OPEN_PROBLEMS.md` |
+| a finite expansion, but exponentially long | (x + y + 1)²⁰ (231 terms); the logistic map iterated k times, xₖ₊₁ = r·xₖ(1 − xₖ), a polynomial of degree 2ᵏ | decomposable in principle, but the number of terms explodes with depth | linear in terms, exponential in depth; a compact composite atom like (a·x + b)²⁰, or inversion, avoids it |
+
+The mod-1 row is modular arithmetic: (a + b) mod 1 = (a mod 1 + b mod 1) mod 1 is an addition rule with a carry,
+so two branches. The ReLU row is the source of a deep network's exponentially many linear regions.
+
+**These look hard but are not:**
+- **A resonance curve**, A = 1/√((ω₀² − ω²)² + γ²ω²): inversion gives A⁻² = (ω₀² − ω²)² + γ²ω², a sum of terms.
+- **A Gaussian of a sum**, e^(−(x + y)²): its log is −x² − 2xy − y².
+- **sinc(x + y)**: multiplied through by (x + y) it is a finite sum of products, by angle addition.
+- **erf of anything**: erf is invertible.
+
+**The frontier, in three parts:**
+- **Decomposable:** the outer function distributes, has a finite addition formula, or is invertible over the
+  data's range.
+- **Exponential in depth:** finitely many branches or terms, multiplying with each nested layer.
+- **Genuinely coupled:** many-to-one with no finite expansion, over a range spanning many branches.
+
 ## 4. Composition is additive to first order, and gradient descent uses exactly that
 
 Take maps close to the identity: f = id + εF, g = id + εG. Then
