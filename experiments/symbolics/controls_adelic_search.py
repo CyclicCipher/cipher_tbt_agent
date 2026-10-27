@@ -10,8 +10,8 @@ unrelated random integer in 1..100 -- the same distribution of discounts, no rel
 """
 import random
 
-import test_adele_resnet as T
-from test_adele_resnet import AdeleSymbolicResNet
+from gemini_original import test_adele_resnet as T
+from gemini_original.test_adele_resnet import AdeleSymbolicResNet
 
 
 class ShuffledDistance(T.AdeleDistance):

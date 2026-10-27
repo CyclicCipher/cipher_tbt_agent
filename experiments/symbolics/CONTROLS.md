@@ -5,6 +5,10 @@ the adelic idea, check which component carries it. Each experiment gives the net
 input. Each control removes one piece and leaves everything else as written: model, optimizer, epochs, data and
 split. Script: `controls_transformers.py`. It imports the original files and does not change them.
 
+**Where the originals are:** Gemini's three adelic scripts (`test_adele_resnet.py`, `test_transformer_grokking.py`,
+`test_transformer_discrete_logic.py`) are frozen in `gemini_original/`, and the controls import them from there.
+The files of the same name in this folder are now the real versions (`REAL_ADELIC.md`).
+
 ## Pre-registration (2026-10-26, before any control was run)
 
 ### Grokking: addition mod 105, half of all pairs for training (`test_transformer_grokking.py`)
@@ -87,7 +91,7 @@ thing. My first version of this table said it was not, and that was wrong.
 |---|---|---|---|
 | grokking | the adelic embedding A_105 = R/105Z × F_3 × F_5 × F_7 | **genuine.** Z/105 = (1/105)Z/Z sits inside Q/Z = ⊕_p Q_p/Z_p. The p-adic parts of x/105 are nonzero only at p = 3, 5, 7, and there they are x mod p up to multiplication by a unit, which is irrelevant to an embedding table (this is the CRT). The circle (cos, sin)(2πx/105) is the Archimedean image of x/105 in R/Z. So for Z/N the adelic coordinates are the CRT factors plus a circle. Handing them over hands over N's factorization, by construction. The "Hasse principle" label is still empty: the CRT is an isomorphism, and no local-global problem is being solved | real |
 | grokking | the Tate global additive character penalty | wrong. A character identity should vanish on every correct answer. The script's phase x/105 − (r3/3 + r5/5 + r7/7) is zero for only 35 of the 105 residues, with mean 1.000 (a random phase). The real identity needs the CRT weights: x/105 ≡ x·(2/3 + 1/5 − 6/7) mod 1, which is zero for all 105. It is also built from argmax, so it has **no gradient**: it never affected training and only adds ≈ 0.5 to the printed loss | wrong and inert |
-| discrete logic | a 2-adic ultrametric over the tree | the tree path length d(u, v) = depth u + depth v − 2·depth LCA, squashed by 1 − 2^-d. That is not an ultrametric: 34.3% of node triples break the strong triangle inequality. The real 2-adic distance between branch sequences is 2^-(common prefix length). Under it, a node is equally far from every node of its subtree, so its children are not special. That would be a poor attention bias for evaluating the tree bottom-up. What the script uses is a tree-distance positional bias, a useful and known idea, under a misnomer | not 2-adic |
+| discrete logic | a 2-adic ultrametric over the tree | the tree path length d(u, v) = depth u + depth v − 2·depth LCA, squashed by 1 − 2^-d. **It is not an ultrametric** (34.3% of node triples break the strong triangle inequality), so the label is wrong. **But it is a genuine 2-adic object**, which my first version of this row denied. A finite branch sequence names a 2-adic ball (the 2-adic integers starting with those digits), not a point, and the nodes are the balls of Z_2. On this tree of balls (the Bruhat–Tits tree of Q_2) the natural metric is the path length. The ultrametric lives on the tree's infinite ends, and its trace on the nodes is depth(LCA), the Gromov product from the root (tested in `REAL_ADELIC.md`, part 3) | real, mislabelled |
 | subset sum | the adele distance \|x\|_∞ · Π_p \|x\|_p^α | by the product formula the real adelic absolute value of any nonzero rational is 1, and at α = 1 the script gives exactly 1 for every base-smooth difference, i.e. no information. At α = 0.5 it is, in closed form, √\|x\| when every prime of x is in the base, and \|x\| × (smooth part)^-½ otherwise: a **smoothness discount** | a heuristic |
 
 ### Results: adelic distance in greedy subset sum (`controls_adelic_search.py`, `runs/controls_adelic.txt`)

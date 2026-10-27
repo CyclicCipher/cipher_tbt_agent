@@ -24,12 +24,26 @@ and changes none of them.
   embedding is genuine; I first said otherwise, which was wrong (see `CONTROLS.md`, "The math"). For Z/N, the adelic
   coordinates are the Chinese-remainder factors plus a circle, so handing them over hands over the factorization by
   construction. The "Tate character" term is wrong, and it has no gradient. The "2-adic
-  ultrametric" is the ordinary tree path length, and it is not an ultrametric. The "adele distance" is a
+  ultrametric" is the tree path length. That is the genuine metric on the tree of 2-adic balls, but it is not an
+  ultrametric, as it is labelled. The "adele distance" is a
   smoothness discount; the real adelic absolute value is 1 for every nonzero rational.
 - **The other headline effects are smaller than reported, or come from the setup.** Adelic search: +6 points on
   random instances, not the clean wins of the four hand-built cases. Continual learning without replay: it works
   only because each task reads a different input, which makes the gate a task label. Attention residuals beating
   additive residuals: a gated model beats an ungated one on a piecewise target.
+
+## The real versions (`REAL_ADELIC.md`)
+
+The user asked for Gemini's proxies to be replaced with the genuine constructions (originals frozen in
+`gemini_original/`). Results:
+- **Search:** local-global counting. p-adic local densities lift greedy subset sum from 30% to 95% on small
+  instances, but fade as the numbers grow (25% for numbers up to 1,000, 0% up to 10^6). The real place hurts.
+- **Grokking:** the real adelic loss gives only 1.1–1.5×. The real adelic coordinates give about 6.7× wherever N
+  factors (N = 105, and N = 81 through its 3-adic digits) and nothing for the prime 97.
+- **Logic:** the 2-adic ultrametric bias doesn't rescue answer-only training (72.5%). On top of node targets it is
+  the fastest arm (95% by epoch 14, one seed).
+- Two corrections to this analysis came out of the pass. The grokking embedding is genuinely adelic. Gemini's tree
+  bias is a genuine 2-adic object (the path metric on the tree of 2-adic balls), mislabelled as an ultrametric.
 
 ## Claim by claim
 

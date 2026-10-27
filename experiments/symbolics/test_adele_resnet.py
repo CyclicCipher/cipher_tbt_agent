@@ -1,187 +1,110 @@
 """
-test_adele_resnet.py
-Benchmarking the Adele Metric ResNet against Euclidean ResNet.
+test_adele_resnet.py (the real version; Gemini's original is gemini_original/test_adele_resnet.py)
+Greedy subset sum guided by the local-global principle (REAL_ADELIC.md).
 
-Combines the Archimedean place (Euclidean magnitude) with non-Archimedean 
-places (p-adic divisibility) to expose combinatorial traps.
+The residual greedy picks one element per layer. Which one? The real adelic answer: the one that leaves the most
+ways to finish. The number of subsets of the remaining pool summing to the new residual r' is estimated as the
+product of its local densities over all places (Hardy-Littlewood / Siegel):
+    real place      the normal density of a random subset's sum at r', and the bound 0 <= r' <= sum(pool)
+    p-adic places   m * Pr[random subset's sum = r' mod m], for m = the largest power of each prime p <= 31 up to 64
+                    (exact, by a dynamic program over Z/m)
+A local density of zero proves that no completion exists (a local obstruction), so those moves are never taken.
+
+Arms: euclid (closest element, Gemini's baseline), smooth (Gemini's "adele distance", a smoothness discount),
+arch (the real place only), padic (the p-adic places only), adelic (both: the local-global estimate).
+    python test_adele_resnet.py
 """
-
-from typing import List, Tuple, Set
 import math
+import random
+import time
+
+import numpy as np
+
+import adelic as A
+from controls_adelic_search import planted
+from gemini_original.test_adele_resnet import AdeleSymbolicResNet
+
+MODULI = A.moduli(limit=64, primes_up_to=31)
 
 
-def get_prime_factors(n: int) -> Set[int]:
-    """Extract prime factors of an integer n."""
-    factors = set()
-    d = 2
-    temp = abs(n)
-    while d * d <= temp:
-        if temp % d == 0:
-            factors.add(d)
-            while temp % d == 0:
-                temp //= d
-        d += 1
-    if temp > 1:
-        factors.add(temp)
-    return factors
-
-
-def p_adic_valuation(n: int, p: int) -> int:
-    """Returns v_p(n), the highest power of prime p dividing n."""
-    if n == 0:
-        return 999  # Convention: 0 is divisible by infinite power of p
-    count = 0
-    temp = abs(n)
-    while temp % p == 0:
-        count += 1
-        temp //= p
-    return count
-
-
-class AdeleDistance:
-    """
-    Computes distance in the Ring of Adeles (A):
-        d_A(R, e) = |R - e|_inf * Prod_{p in P} p^(-alpha * v_p(|R - e|))
-    """
-    def __init__(self, target: int, candidate_pool: List[int], alpha: float = 0.5):
-        self.alpha = alpha
-        # Prime base: primes dividing the target or candidates
-        self.prime_base = set()
-        self.prime_base.update(get_prime_factors(target))
-        for x in candidate_pool:
-            self.prime_base.update(get_prime_factors(x))
-
-    def compute(self, residual: int, candidate: int) -> float:
-        diff = residual - candidate
-        if diff == 0:
-            return 0.0
-
-        # 1. Archimedean (Euclidean) magnitude
-        euclidean_mag = abs(diff)
-
-        # 2. Non-Archimedean (p-adic) valuation product
-        p_adic_factor = 1.0
-        for p in self.prime_base:
-            v = p_adic_valuation(euclidean_mag, p)
-            if v > 0:
-                p_adic_factor *= (p ** (-self.alpha * v))
-
-        # Adele Composite Distance
-        return euclidean_mag * p_adic_factor
-
-
-class AdeleSymbolicResNet:
-    """
-    Symbolic ResNet using the Adele Metric to route candidate selection.
-    Complexity: O(depth * N * |P|) -> Strictly Linear/Polynomial!
-    """
-    def __init__(self, use_adele: bool = True, alpha: float = 0.5):
-        self.use_adele = use_adele
-        self.alpha = alpha
-        self.eval_count = 0
-
-    def fit(self, candidate_set: List[int], target: int) -> Tuple[bool, int, List[int], List[str]]:
-        self.eval_count = 0
-        pool = list(candidate_set)
-        selected = []
-        running_sum = 0
-        logs = []
-
-        adele_metric = AdeleDistance(target, candidate_set, self.alpha)
-
-        for layer in range(len(candidate_set)):
-            residual = target - running_sum
-            if residual == 0:
-                return True, self.eval_count, selected, logs
-
-            best_elem = None
-            best_dist = float("inf")
-            best_idx = -1
-            layer_evals = []
-
-            for idx, elem in enumerate(pool):
-                self.eval_count += 1
-                if elem > residual:
-                    continue  # Overshoot constraint for non-negative subset sum
-
-                if self.use_adele:
-                    dist = adele_metric.compute(residual, elem)
-                else:
-                    dist = abs(residual - elem)  # Standard Euclidean
-
-                layer_evals.append((elem, dist))
-                if dist < best_dist:
-                    best_dist = dist
-                    best_elem = elem
-                    best_idx = idx
-
-            if best_elem is None:
+def local_global_greedy(pool, target, mode):
+    """mode: 'arch', 'padic' or 'adelic'. Returns (success, candidates scored, chosen elements)."""
+    pool, r, chosen, evals = list(pool), target, [], 0
+    while r != 0 and pool:
+        n = len(pool)
+        dens = [A.densities_without_each(pool, m) for m in MODULI] if mode != "arch" else None
+        total, total_sq = sum(pool), sum(c * c for c in pool)
+        best, best_score = None, -math.inf
+        for i, c in enumerate(pool):
+            rr = r - c
+            if rr < 0:
+                continue
+            evals += 1
+            if rr == 0:
+                best, best_score = i, math.inf
                 break
+            if n == 1:
+                continue
+            score = 0.0
+            if mode in ("arch", "adelic"):
+                rest, rest_sq = total - c, total_sq - c * c
+                score += -math.inf if rr > rest else A.log_real_density(rest, rest_sq, rr)
+            if mode in ("padic", "adelic"):
+                for m, d in zip(MODULI, dens):
+                    q = d[i, rr % m]
+                    score += math.log(m * q) if q > 0 else -math.inf
+            if score > best_score:
+                best, best_score = i, score
+        if best is None or best_score == -math.inf:
+            break
+        r -= pool[best]
+        chosen.append(pool.pop(best))
+    return r == 0, evals, chosen
 
-            layer_evals.sort(key=lambda x: x[1])
-            eval_summary = ", ".join([f"{e}(d={d:.2f})" for e, d in layer_evals[:4]])
-            logs.append(f"  Layer {layer+1} [Residual={residual:3d}]: Picked {best_elem:2d} | Ranked: [{eval_summary}]")
 
-            selected.append(best_elem)
-            running_sum += best_elem
-            pool.pop(best_idx)
-
-        return (running_sum == target), self.eval_count, selected, logs
+def uniform_planted(rng, n, top, k_lo, k_hi):
+    nums = [rng.randint(1, top) for _ in range(n)]
+    return nums, sum(rng.sample(nums, rng.randint(k_lo, k_hi)))
 
 
-def run_benchmark():
-    print("=" * 75)
-    print("THE ADELE METRIC RESNET BENCHMARK")
-    print("=" * 75)
+FAMILIES = {   # name: (instances, generator); "small" and "structured" are the CONTROLS.md instances exactly
+    "small": (2000, lambda rng: planted(rng, False)),
+    "structured": (2000, lambda rng: planted(rng, True)),
+    "dense": (500, lambda rng: uniform_planted(rng, 20, 1000, 5, 15)),
+    "hard": (500, lambda rng: uniform_planted(rng, 24, 10 ** 6, 6, 18)),
+}
+ARMS = ("euclid", "smooth", "arch", "padic", "adelic")
 
-    test_cases = [
-        {
-            "name": "TEST 1: Class P (Super-Increasing Powers of 2)",
-            "target": 42,
-            "set": [1, 2, 4, 8, 16, 32, 64, 128],
-            "solution": [32, 8, 2]
-        },
-        {
-            "name": "TEST 2: The Original Frustration Trap (Multiples of 10)",
-            "target": 100,
-            "set": [51, 50, 50, 20, 10],
-            "solution": [50, 50]
-        },
-        {
-            "name": "TEST 3: Multi-Intruder Decoy Trap",
-            "target": 100,
-            "set": [53, 51, 49, 50, 50, 20, 10],
-            "solution": [50, 50]
-        },
-        {
-            "name": "TEST 4: 3-adic / 5-adic Factor Trap",
-            "target": 90,
-            "set": [46, 30, 30, 30, 15],
-            "solution": [30, 30, 30]
-        }
-    ]
 
-    for tc in test_cases:
-        print(f"\n--- {tc['name']} ---")
-        print(f"Target: {tc['target']} | Candidate Set: {tc['set']}")
+def solve(arm, nums, target):
+    if arm in ("euclid", "smooth"):
+        ok, ev, _, _ = AdeleSymbolicResNet(use_adele=arm == "smooth", alpha=0.5).fit(nums, target)
+        return ok, ev
+    ok, ev, _ = local_global_greedy(nums, target, arm)
+    return ok, ev
 
-        # 1. Standard Euclidean ResNet
-        euc_model = AdeleSymbolicResNet(use_adele=False)
-        euc_ok, euc_evals, euc_res, _ = euc_model.fit(tc['set'], tc['target'])
 
-        # 2. Adele Metric ResNet
-        adele_model = AdeleSymbolicResNet(use_adele=True, alpha=0.5)
-        adele_ok, adele_evals, adele_res, adele_logs = adele_model.fit(tc['set'], tc['target'])
-
-        print(f"[*] Euclidean ResNet : Success={str(euc_ok):<5} | Evals={euc_evals:<2} | Solution={euc_res}")
-        print(f"[*] Adele ResNet     : Success={str(adele_ok):<5} | Evals={adele_evals:<2} | Solution={adele_res}")
-
-        if adele_ok and not euc_ok:
-            print("[+] RESULT: Adele Metric bypassed the local minima trap in linear time!")
-            print("    Layer-by-Layer Adele Distance Trace:")
-            for log in adele_logs:
-                print("  ", log)
+def main():
+    print("The four hand-built cases:")
+    for target, nums in ((42, [1, 2, 4, 8, 16, 32, 64, 128]), (100, [51, 50, 50, 20, 10]),
+                         (100, [53, 51, 49, 50, 50, 20, 10]), (90, [46, 30, 30, 30, 15])):
+        print(f"   target {target:3d}  set {nums}: " + "  ".join(
+            f"{arm} {'ok' if solve(arm, nums, target)[0] else '--'}" for arm in ARMS))
+    for family, (count, gen) in FAMILIES.items():
+        rng = random.Random(0)
+        wins, evals, secs = dict.fromkeys(ARMS, 0), dict.fromkeys(ARMS, 0), dict.fromkeys(ARMS, 0.0)
+        for _ in range(count):
+            nums, target = gen(rng)
+            for arm in ARMS:
+                t0 = time.time()
+                ok, ev = solve(arm, nums, target)
+                secs[arm] += time.time() - t0
+                wins[arm] += ok
+                evals[arm] += ev
+        print(f"\n{family} ({count} instances): success rate (candidates scored per instance, ms per instance)")
+        for arm in ARMS:
+            print(f"   {arm:7s} {wins[arm] / count:6.1%}   ({evals[arm] / count:5.0f}, {secs[arm] / count * 1e3:6.1f} ms)")
 
 
 if __name__ == "__main__":
-    run_benchmark()
+    main()

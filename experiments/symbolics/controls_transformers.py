@@ -25,8 +25,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
-import test_transformer_discrete_logic as L
-import test_transformer_grokking as G
+from gemini_original import test_transformer_discrete_logic as L
+from gemini_original import test_transformer_grokking as G
 
 OUT = "runs"
 

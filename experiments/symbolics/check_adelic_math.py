@@ -2,7 +2,9 @@
 1. test_transformer_grokking.py, the Tate term: does it vanish on CORRECT answers, as a character identity should?
    The real identity (CRT): x/105 = x*(2/3 + 1/5 - 6/7) mod 1, since 1 = 35*2 + 21*1 + 15*(-6).
 2. test_transformer_discrete_logic.py, the "2-adic ultrametric": is D2 = 1 - 2^-(tree path length) an ultrametric?
-   The real 2-adic distance between branch sequences read as 2-adic integers is 2^-(common prefix length).
+   (Correction, after this was run: a finite branch sequence names a 2-adic ball, not a point. On the tree of balls
+   the path length is the genuine metric (the Bruhat-Tits tree). The ultrametric lives on the infinite ends, and
+   its trace on nodes is 2^-(common prefix length), as printed below. See CONTROLS.md, "The math".)
 3. test_adele_resnet.py, the "adele distance" |x| * prod_p |x|_p^alpha: the real adelic absolute value of a nonzero
    rational is 1 (the product formula). What does alpha = 1 give, and what is alpha = 0.5 in closed form?
 """
@@ -10,8 +12,8 @@ import itertools
 import math
 import random
 
-import test_adele_resnet as A
-import test_transformer_discrete_logic as L
+from gemini_original import test_adele_resnet as A
+from gemini_original import test_transformer_discrete_logic as L
 
 # ---- 1. the Tate term -------------------------------------------------------------------------------------------------
 N = 105
