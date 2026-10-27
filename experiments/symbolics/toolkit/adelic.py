@@ -1,4 +1,4 @@
-"""The real adelic toolkit (REAL_ADELIC.md): places, local coordinates, local distances and local densities.
+"""The real adelic toolkit (docs/REAL_ADELIC.md): places, local coordinates, local distances and local densities.
 
 The facts it implements:
 - Z/N is (1/N)Z/Z inside Q/Z, and Q/Z splits into its p-adic parts Q_p/Z_p. The p-adic part of x/N is nonzero only

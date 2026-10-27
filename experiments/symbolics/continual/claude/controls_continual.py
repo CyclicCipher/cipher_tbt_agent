@@ -1,12 +1,12 @@
-"""Control for test_symbolic_thousand_brains.py (CONTROLS.md, T1): is "no forgetting" a property of the columns, or
+"""Control for continual/gemini/test_symbolic_thousand_brains.py (docs/CONTROLS.md, T1): is "no forgetting" a property of the columns, or
 of the three tasks reading three different input features (so the gating key is a task label)?
 Same network and procedure as the original; the tasks are the original three, then the same three functions all
 reading feature 0.
-    python controls_continual.py
+    python -m continual.claude.controls_continual      (from experiments/symbolics)
 """
 import random
 
-import test_symbolic_thousand_brains as T
+from continual.gemini import test_symbolic_thousand_brains as T
 
 XS = [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0]
 FUNCS = [("x^2", lambda x: x ** 2), ("relu(x)+2", lambda x: max(0.0, x) + 2.0), ("2x+3", lambda x: 2.0 * x + 3.0)]

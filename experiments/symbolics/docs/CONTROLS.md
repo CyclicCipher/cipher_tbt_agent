@@ -3,15 +3,15 @@
 **Why:** both experiments report near-perfect held-out accuracy almost at once. Before reading that as a property of
 the adelic idea, check which component carries it. Each experiment gives the network some structure of the task as
 input. Each control removes one piece and leaves everything else as written: model, optimizer, epochs, data and
-split. Script: `controls_transformers.py`. It imports the original files and does not change them.
+split. Script: `neural/claude/controls_transformers.py`. It imports the original files and does not change them.
 
-**Where the originals are:** Gemini's three adelic scripts (`test_adele_resnet.py`, `test_transformer_grokking.py`,
-`test_transformer_discrete_logic.py`) are frozen in `gemini_original/`, and the controls import them from there.
-The files of the same name in this folder are now the real versions (`REAL_ADELIC.md`).
+**Where things are:** each subject folder holds Gemini's originals in `gemini/` (frozen: the scripts these
+controls tested) and Claude's scripts in `claude/`. Paths below are relative to `experiments/symbolics`. The real
+adelic versions are described in `REAL_ADELIC.md`.
 
 ## Pre-registration (2026-10-26, before any control was run)
 
-### Grokking: addition mod 105, half of all pairs for training (`test_transformer_grokking.py`)
+### Grokking: addition mod 105, half of all pairs for training (`neural/gemini/test_transformer_grokking.py`)
 
 The adelic embedding gives each number as its residues mod 3, 5 and 7, plus its angle on the mod-105 circle. With
 residues, (a + b) mod 3 depends only on a mod 3 and b mod 3. That is a 3 × 3 table, and every cell of it appears
@@ -38,7 +38,7 @@ Separately, the Tate term in the loss uses argmax, so it has no gradient and doe
 | G3 | plain_ce stays < 50% at epoch 120 |
 | G4 | plain_heads: no prediction (exploratory). It tests the "circular/adelic loss" claim, i.e. whether the residue targets help without the embedding |
 
-### Discrete logic: Boolean expression trees (`test_transformer_discrete_logic.py`)
+### Discrete logic: Boolean expression trees (`neural/gemini/test_transformer_discrete_logic.py`)
 
 The network is given the parse tree: each token's path from the root as an embedding, and an attention bias by
 tree distance. It is also given every subtree's value as a training target, weighted 2^-depth. With both, each node
@@ -59,7 +59,7 @@ only needs one local step: apply its operator to its children's values. A 5-laye
 | L2 | plain_root_only is < 85% at epoch 120 |
 | L3 | the given structure matters more than the node targets: root_only > no_structure at epoch 120 |
 
-### Adelic distance in greedy subset sum (`test_adele_resnet.py`)
+### Adelic distance in greedy subset sum (`search/gemini/test_adele_resnet.py`)
 
 The four test cases were built by hand so that the solution's elements share prime factors with the target (50 + 50
 = 100, 30 + 30 + 30 = 90) and the decoys do not. Planted instances: 10 numbers in 1..100, and the target is the sum
@@ -75,13 +75,15 @@ of a random 2 to 5 of them. 2,000 instances per family.
 | S1 | random: the adelic greedy's success rate is within 5 points of the Euclidean greedy's (no general advantage) |
 | S2 | structured: the adelic greedy beats the Euclidean greedy by ≥ 20 points (it helps where the test was built that way) |
 
-**Commands** (from this folder, the repo venv):
+**Commands** (from `experiments/symbolics`, the repo venv):
 
-    ../../venv/Scripts/python.exe controls_transformers.py grok --seeds 0 1 2
-    ../../venv/Scripts/python.exe controls_transformers.py logic --seeds 0
-    ../../venv/Scripts/python.exe controls_adelic_search.py
+    ../../venv/Scripts/python.exe -m neural.claude.controls_transformers grok --seeds 0 1 2
+    ../../venv/Scripts/python.exe -m neural.claude.controls_transformers logic --seeds 0
+    ../../venv/Scripts/python.exe -m search.claude.controls_adelic_search
+    ../../venv/Scripts/python.exe -m continual.claude.controls_continual
+    ../../venv/Scripts/python.exe -m toolkit.check_gemini_math
 
-## The math: is it the real adelic / p-adic thing? (2026-10-26; `check_adelic_math.py`, `runs/check_adelic_math.txt`)
+## The math: is it the real adelic / p-adic thing? (2026-10-26; `toolkit/check_gemini_math.py`, `runs/check_adelic_math.txt`)
 
 The user suspected the "adelic" constructions were cheap proxies (they came from a Gemini session). Checked against
 the definitions they are named after, three of the four constructions are proxies. The embedding is the real
@@ -94,7 +96,7 @@ thing. My first version of this table said it was not, and that was wrong.
 | discrete logic | a 2-adic ultrametric over the tree | the tree path length d(u, v) = depth u + depth v − 2·depth LCA, squashed by 1 − 2^-d. **It is not an ultrametric** (34.3% of node triples break the strong triangle inequality), so the label is wrong. **But it is a genuine 2-adic object**, which my first version of this row denied. A finite branch sequence names a 2-adic ball (the 2-adic integers starting with those digits), not a point, and the nodes are the balls of Z_2. On this tree of balls (the Bruhat–Tits tree of Q_2) the natural metric is the path length. The ultrametric lives on the tree's infinite ends, and its trace on the nodes is depth(LCA), the Gromov product from the root (tested in `REAL_ADELIC.md`, part 3) | real, mislabelled |
 | subset sum | the adele distance \|x\|_∞ · Π_p \|x\|_p^α | by the product formula the real adelic absolute value of any nonzero rational is 1, and at α = 1 the script gives exactly 1 for every base-smooth difference, i.e. no information. At α = 0.5 it is, in closed form, √\|x\| when every prime of x is in the base, and \|x\| × (smooth part)^-½ otherwise: a **smoothness discount** | a heuristic |
 
-### Results: adelic distance in greedy subset sum (`controls_adelic_search.py`, `runs/controls_adelic.txt`)
+### Results: adelic distance in greedy subset sum (`search/claude/controls_adelic_search.py`, `runs/controls_adelic.txt`)
 
 | family | Euclidean greedy | adelic greedy | shuffled discount (exploratory) | exhaustive |
 |---|---|---|---|---|
@@ -136,7 +138,7 @@ Epoch at which held-out accuracy first reaches 99% (11 optimizer steps per epoch
   But the coordinates come from the experimenter, and the trick has nothing to factor for a prime modulus. The open
   question is whether a learner can find such a factorization itself.
 
-## Continual learning without replay (`test_symbolic_thousand_brains.py`; `controls_continual.py`, `runs/controls_continual.txt`)
+## Continual learning without replay (`continual/gemini/test_symbolic_thousand_brains.py`; `continual/claude/controls_continual.py`, `runs/controls_continual.txt`)
 
 **T1** (stated before the run; written here after): the original's three tasks read three different input features,
 and a column's gating key is the normalized profile of which features are nonzero. So the key is a task label read off

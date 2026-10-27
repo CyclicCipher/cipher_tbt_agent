@@ -1,6 +1,6 @@
 """
-test_transformer_grokking.py (the real version; Gemini's original is gemini_original/test_transformer_grokking.py)
-Addition mod N with real adelic structure (REAL_ADELIC.md, part 2).
+grokking_adelic.py: the real version of Gemini's neural/gemini/test_transformer_grokking.py
+Addition mod N with real adelic structure (docs/REAL_ADELIC.md, part 2).
 
 Embedding (the genuine adelic coordinates of x/N, any N): the circle (cos, sin)(2 pi x / N), its image at the real
 place, and for each p^k exactly dividing N the k base-p digits of its p-adic part (x * (N/p^k)^-1 mod p^k). For
@@ -13,7 +13,7 @@ The local predictions are marginals of P, so they agree with the global one by c
 
 Model, optimizer, split, epochs: Gemini's (one attention + one MLP sublayer with AttnRes depth routing, RoPE,
 AdamW 2e-3, weight decay 0.01, dropout 0.1, half the pairs for training, 120 epochs).
-    python test_transformer_grokking.py --moduli 105 81 97 --seeds 0 1 2
+    python -m neural.claude.grokking_adelic --moduli 105 81 97 --seeds 0 1 2      (from experiments/symbolics)
 """
 import argparse
 import json
@@ -26,7 +26,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
-import adelic as A
+from toolkit import adelic as A
 
 D_MODEL, N_HEADS, D_FF = 128, 4, 256
 BATCH_SIZE, LEARNING_RATE, WEIGHT_DECAY, DROPOUT, EPOCHS = 512, 2e-3, 0.01, 0.1, 120

@@ -1,4 +1,4 @@
-"""Control for test_adele_resnet.py (CONTROLS.md): does the adelic distance help greedy subset sum beyond the four
+"""Control for search/gemini/test_adele_resnet.py (docs/CONTROLS.md): does the adelic distance help greedy subset sum beyond the four
 hand-built cases? Planted instances: n numbers, a random subset's sum is the target. Two families:
     random     - all numbers uniform in 1..100
     structured - the solution elements are multiples of a factor f of the target, the decoys are not (the shape of the
@@ -6,12 +6,12 @@ hand-built cases? Planted instances: n numbers, a random subset's sum is the tar
 Success = the greedy residual search reaches the target exactly (any subset).
 Exploratory arm (added after S1/S2 were scored): "shuffled" discounts each distance by the p-adic factor of an
 unrelated random integer in 1..100 -- the same distribution of discounts, no relation to the residual.
-    python controls_adelic_search.py
+    python -m search.claude.controls_adelic_search      (from experiments/symbolics)
 """
 import random
 
-from gemini_original import test_adele_resnet as T
-from gemini_original.test_adele_resnet import AdeleSymbolicResNet
+from search.gemini import test_adele_resnet as T
+from search.gemini.test_adele_resnet import AdeleSymbolicResNet
 
 
 class ShuffledDistance(T.AdeleDistance):

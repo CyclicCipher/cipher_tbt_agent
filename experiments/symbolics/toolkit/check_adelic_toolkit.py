@@ -1,12 +1,12 @@
 """Brute-force checks of adelic.py: exact local densities against enumeration, the CRT character identity
 (x/N = sum over places of the local part, mod 1), and the strong triangle inequality of the p-adic distances.
-    python check_adelic_toolkit.py
+    python -m toolkit.check_adelic_toolkit      (from experiments/symbolics)
 """
 import itertools
 
 import numpy as np
 
-import adelic as A
+from toolkit import adelic as A
 
 rng = np.random.default_rng(0)
 for trial in range(20):

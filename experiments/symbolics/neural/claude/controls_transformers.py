@@ -1,19 +1,19 @@
-"""Controls for the two transformer experiments (CONTROLS.md): which component carries each result?
+"""Controls for the two transformer experiments (docs/CONTROLS.md): which component carries each result?
 
-grok:  test_transformer_grokking.py (addition mod 105, 50% of pairs for training). Arms:
+grok:  neural/gemini/test_transformer_grokking.py (addition mod 105, 50% of pairs for training). Arms:
        as_written  - the adelic embedding (circle + residues mod 3, 5, 7) and the residue heads + Tate term
        adelic_ce   - the adelic embedding, cross-entropy on the answer only
        plain_ce    - a learned token embedding, cross-entropy on the answer only (the standard grokking setup)
        plain_heads - a learned token embedding, with the residue heads (the loss without the embedding)
-logic: test_transformer_discrete_logic.py (Boolean expression trees). Arms:
+logic: neural/gemini/test_transformer_discrete_logic.py (Boolean expression trees). Arms:
        as_written      - tree-path embedding + tree-distance attention bias, every node's value supervised
        no_structure    - neither the path embedding nor the distance bias, every node supervised
        root_only       - the tree structure, only the answer supervised
        plain_root_only - neither, only the answer supervised (the plain baseline)
 
 Everything else (model, optimizer, epochs, data, split) is the original's. Full curves are logged, no early stop.
-    python controls_transformers.py grok --seeds 0 1 2
-    python controls_transformers.py logic --seeds 0
+    python -m neural.claude.controls_transformers grok --seeds 0 1 2      (from experiments/symbolics)
+    python -m neural.claude.controls_transformers logic --seeds 0
 """
 import argparse
 import json
@@ -25,8 +25,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
-from gemini_original import test_transformer_discrete_logic as L
-from gemini_original import test_transformer_grokking as G
+from neural.gemini import test_transformer_discrete_logic as L
+from neural.gemini import test_transformer_grokking as G
 
 OUT = "runs"
 

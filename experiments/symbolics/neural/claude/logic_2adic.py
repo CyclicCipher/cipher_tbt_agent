@@ -1,6 +1,6 @@
 """
-test_transformer_discrete_logic.py (the real version; Gemini's original is gemini_original/test_transformer_discrete_logic.py)
-Boolean expression trees with a real 2-adic attention bias (REAL_ADELIC.md, part 3).
+logic_2adic.py: the real version of Gemini's neural/gemini/test_transformer_discrete_logic.py
+Boolean expression trees with a real 2-adic attention bias (docs/REAL_ADELIC.md, part 3).
 
 A node's address (its branch sequence from the root) names a 2-adic ball: the 2-adic integers whose first digits are
 that sequence. The nodes below it are the smaller balls inside it. Two 2-adic structures live on this tree of balls:
@@ -13,7 +13,7 @@ The node-loss weights 2^-depth are the Haar measure of each node's ball, so they
 
 Arms: bias in {real, geo (Gemini's path-length bias), none} x supervision in {nodes (every subtree's value),
 root (the answer only)}. Model, data and training as Gemini's.
-    python test_transformer_discrete_logic.py --arms real_root none_root geo_root real_nodes
+    python -m neural.claude.logic_2adic --arms real_root none_root geo_root real_nodes      (from experiments/symbolics)
 """
 import argparse
 import json

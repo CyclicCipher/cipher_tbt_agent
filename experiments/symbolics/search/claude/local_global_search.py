@@ -1,5 +1,5 @@
 """
-test_adele_resnet.py (the real version; Gemini's original is gemini_original/test_adele_resnet.py)
+local_global_search.py: the real version of Gemini's search/gemini/test_adele_resnet.py
 Greedy subset sum guided by the local-global principle (REAL_ADELIC.md).
 
 The residual greedy picks one element per layer. Which one? The real adelic answer: the one that leaves the most
@@ -12,7 +12,7 @@ A local density of zero proves that no completion exists (a local obstruction), 
 
 Arms: euclid (closest element, Gemini's baseline), smooth (Gemini's "adele distance", a smoothness discount),
 arch (the real place only), padic (the p-adic places only), adelic (both: the local-global estimate).
-    python test_adele_resnet.py
+    python -m search.claude.local_global_search      (from experiments/symbolics)
 """
 import math
 import random
@@ -20,9 +20,9 @@ import time
 
 import numpy as np
 
-import adelic as A
-from controls_adelic_search import planted
-from gemini_original.test_adele_resnet import AdeleSymbolicResNet
+from search.claude.controls_adelic_search import planted
+from search.gemini.test_adele_resnet import AdeleSymbolicResNet
+from toolkit import adelic as A
 
 MODULI = A.moduli(limit=64, primes_up_to=31)
 

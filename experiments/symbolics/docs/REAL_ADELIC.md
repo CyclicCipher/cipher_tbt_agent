@@ -1,9 +1,9 @@
 # The real adelic versions
 
 **Why (the user, 2026-10-26):** the "adelic" math in Gemini's scripts was cargo-culted (`CONTROLS.md`, "The math").
-Replace it with the genuine constructions and run the experiments that were meant. The originals are frozen in
-`gemini_original/`. The live files keep their names. The shared math is in `adelic.py`, checked against brute force
-by `check_adelic_toolkit.py`.
+Replace it with the genuine constructions and run the experiments that were meant. Gemini's originals stay in each
+subject's `gemini/` folder; the real versions are in `claude/`. The shared math is in `toolkit/adelic.py`, checked
+against brute force by `toolkit/check_adelic_toolkit.py`. Commands run from `experiments/symbolics`.
 
 The three claims, and what the real version of each is:
 
@@ -27,7 +27,7 @@ Across the three, the real math helps when it exposes structure the task actuall
 modulus, local solvability of a sum, the subtree of a node. It does nothing where that structure is absent (a prime
 modulus) or when it only reshapes the loss.
 
-## 1. Search: local-global counting (`test_adele_resnet.py`)
+## 1. Search: local-global counting (`search/claude/local_global_search.py`)
 
 Greedy subset sum. One element per layer, overshoot never allowed (as in Gemini's version). Each arm scores a
 move c by the residual r' = r − c it leaves, with the pool R' it leaves:
@@ -59,7 +59,7 @@ Check: euclid and smooth must reproduce `CONTROLS.md` on small and structured (3
 | Q4 | the product beats each factor: adelic > arch and adelic > padic by ≥ 2 points, in at least 3 of the 4 families |
 | Q5 | structured: adelic ≥ smooth (the real thing at least matches the proxy on the proxy's home ground) |
 
-    python test_adele_resnet.py
+    python -m search.claude.local_global_search
 
 ### Results (2026-10-26; `runs/real_search.txt`; CPU, under a minute)
 
@@ -99,7 +99,7 @@ structured; the 35.8% there and 35.9% here are both 717/2,000, rounded different
 - **Not run (a next step):** the obstruction certificates are exact, so they prune soundly inside a backtracking or
   beam search. That is where local solvability should earn its cost on hard instances.
 
-## 2. Grokking: adelic metric losses (`test_transformer_grokking.py`)
+## 2. Grokking: adelic metric losses (`neural/claude/grokking_adelic.py`)
 
 Addition mod N with Gemini's model, optimizer, split (half of all pairs) and 120 epochs. Six arms, each on three
 moduli: N = 105 (squarefree, three places), N = 81 = 3^4 (one place with four p-adic digits, where the p-adic
@@ -130,9 +130,9 @@ mean (this understates any speed-up over a slow arm) and is reported as such.
 Sanity check (not a prediction): ce at N = 105 should land in the controls' plain-baseline range (76–107 epochs), and
 emb_ce at N = 105 in the adelic-embedding range (9–19).
 
-    python test_transformer_grokking.py --moduli 105 81 97 --seeds 0 1 2
+    python -m neural.claude.grokking_adelic --moduli 105 81 97 --seeds 0 1 2
 
-## 3. Boolean logic: the 2-adic ultrametric bias (`test_transformer_discrete_logic.py`)
+## 3. Boolean logic: the 2-adic ultrametric bias (`neural/claude/logic_2adic.py`)
 
 Gemini's data (checked identical: tokens, targets, depths, paths, path-length matrix), model and training. Padding
 is masked in every arm here; Gemini's version gave padding the strongest bias by accident.
@@ -154,7 +154,7 @@ answer-only arms were 72.2% (path-length bias, padding unmasked) and 66.5% (none
 | Lb | real_root ≤ geo_root + 3 points at epoch 120: the ultrametric singles out no child, so it helps bottom-up evaluation no more than the tree metric |
 | Lc | every answer-only arm < 85% at epoch 120: the node targets, not the geometry, carry the result |
 
-    python test_transformer_discrete_logic.py --arms real_root none_root geo_root real_nodes
+    python -m neural.claude.logic_2adic --arms real_root none_root geo_root real_nodes
 
 ### Results (2026-10-26; `runs/real_grok.jsonl`, `runs/real_grok.txt`; 54 runs, 8–15 s each)
 
