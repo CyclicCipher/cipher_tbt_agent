@@ -3,7 +3,8 @@ properly.
 
 The model is t(y) = P(x) / (1 + D(x)), with t = y or log y, P a sum of terms and D a sum of denominator terms. Fitting
 it as t = P - t * D is linear, so every term, numerator or denominator, is one column of a library:
-    powers          prod_i x_i^a_i, a_i in {-2, -1, -1/2, 0, 1/2, 1, 2, 3, 4}, sum |a_i| <= 4 (inputs must be positive)
+    powers          prod_i x_i^a_i, a_i in {-2, -1, -1/2, 0, 1/2, 1, 2, 3, 4}, sum |a_i| <= 4 (inputs must be positive);
+                    with 4 or more inputs, at most 2 inputs per term (the full set grows as 9^d: 19,188 terms at d = 6)
     logs            log x_i
     denominators    -t * prod_i x_i^b_i, b_i >= 0 integers, 1 <= sum b_i <= 2
 Selection grows the formula one term at a time on the residual (the residual stream), refitting every coefficient
@@ -27,7 +28,9 @@ class Library:
     def __init__(self, names):
         self.names = list(names)
         d = len(self.names)
-        self.pow = [a for a in itertools.product(EXPONENTS, repeat=d) if 0 < sum(map(abs, a)) <= 4]
+        max_vars = d if d <= 3 else 2
+        self.pow = [a for a in itertools.product(EXPONENTS, repeat=d)
+                    if 0 < sum(map(abs, a)) <= 4 and sum(x != 0 for x in a) <= max_vars]
         self.den = [b for b in itertools.product(range(3), repeat=d) if 1 <= sum(b) <= 2]
 
     def numerator(self, X):
@@ -140,6 +143,11 @@ class SymbolicRegressor:
 
     def predict(self, X):
         return self._predict(np.asarray(X, float), self.transform, self.support, self.coef)
+
+    def predict_t(self, X):
+        """The prediction in the fitted space (y or log y)."""
+        y = self.predict(X)
+        return np.log(np.maximum(y, 1e-300)) if self.transform == "log" else y
 
     def formula(self):
         num_labels, den_labels = self.lib.labels()

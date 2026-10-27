@@ -134,3 +134,27 @@ def _bracket_reference():
 def bracket(xc, yc, r):
     """Tip deflection of a clamped 4 x 1 cantilever with a hole at (xc, yc), relative to the solid cantilever."""
     return tip_deflection(holes=[(xc, yc, r)], **BRACKET) / _bracket_reference()
+
+
+STEPPED = dict(nelx=80, nely=20, lx=4.0, ly=1.0)
+
+
+def stepped_beam(*h):
+    """Tip deflection of a clamped 4 x 1 cantilever made of len(h) equal segments, segment i of height h[i] centred on
+    y = 0.5, under a unit tip shear spread over the tip segment's solid nodes."""
+    nelx, nely, lx, ly = STEPPED["nelx"], STEPPED["nely"], STEPPED["lx"], STEPPED["ly"]
+    seg, sub = lx / len(h), 16
+    a, b = lx / nelx, ly / nely
+    s = (np.arange(sub) + 0.5) / sub
+    X, Y = np.meshgrid((np.arange(nelx)[:, None] + s).reshape(-1) * a, (np.arange(nely)[:, None] + s).reshape(-1) * b,
+                       indexing="ij")
+    hh = np.asarray(h, float)[np.minimum((X / seg).astype(int), len(h) - 1)]
+    solid = (np.abs(Y - 0.5) <= hh / 2).reshape(nelx, sub, nely, sub).mean((1, 3))
+    tip = [j for j in range(nely + 1) if abs(j * b - 0.5) <= h[-1] / 2 + 1e-9]
+    f = np.zeros(2 * (nelx + 1) * (nely + 1))
+    w = np.ones(len(tip))
+    w[[0, -1]] /= 2
+    for j, wj in zip(tip, w / w.sum()):
+        f[2 * node(nelx, j, nely) + 1] -= wj
+    u = solve(nelx, nely, lx, ly, solid, clamped_left(nely), f)
+    return -np.mean([u[2 * node(nelx, j, nely) + 1] for j in tip])

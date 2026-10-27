@@ -1,10 +1,13 @@
 """Experiment A (docs/SURROGATES.md): can the function finder turn a few simulations into a compact, accurate formula?
 
-Three problems from fem2d.py, three training budgets (10, 30, 100 simulations; 3 random seeds each), three surrogates:
+Four problems from fem2d.py, three training budgets (10, 30, 100 simulations; 3 random seeds each), the surrogates:
     symreg      symreg.py: greedy residual term selection with refitting and a beam, size by cross-validation
     gp          Gaussian process (Matern 5/2, one length scale per input, noise term; scikit-learn), inputs scaled to
                 the box; y or log y chosen by 5-fold cross-validation, as for symreg
     quadratic   a full quadratic polynomial (the classical response surface), least squares
+  part 2 (docs/SURROGATES.md, "Part 2"):
+    symreg_margins, gp_margins   the same, given the design's constraint margins as extra inputs (plate, bracket)
+    hybrid      symreg's formula as the trend, plus a Gaussian process on its residuals (in symreg's y or log y)
 Measures: NRMSE = RMSE / standard deviation of y, on 500 random in-range designs and on 200 extrapolation designs;
 for the bracket, the regret of optimizing the surrogate instead of the simulator over a grid of hole positions.
     python -m regression.claude.surrogates simulate      (from experiments/symbolics; ~1 min, 8 processes)
@@ -27,13 +30,21 @@ OUT = "runs/surrogates"
 BUDGETS, SEEDS, POOL, N_TEST, N_EXTRAP = (10, 30, 100), (0, 1, 2), 100, 500, 200
 OPT_R, OPT_GRID = 0.15, (np.linspace(0.6, 3.4, 15), np.linspace(0.25, 0.65, 9))
 
-PROBLEMS = {   # name: (simulator, input names, box low, box high, extrapolation low, high, constraint)
+PROBLEMS = {   # name: (simulator, input names, box low, box high, extrapolation low, high, constraint[, extrap constraint])
     "beam": (fem2d.beam, ["L"], [2.0], [10.0], [10.0], [14.0], None),
     "plate": (fem2d.plate_hole, ["r", "yc"], [0.05, 0.5], [0.3, 0.7], [0.3, 0.5], [0.38, 0.52],
               lambda x: x[1] + x[0] <= 0.9),
     "bracket": (fem2d.bracket, ["xc", "yc", "r"], [0.6, 0.25, 0.05], [3.4, 0.65, 0.2], [0.6, 0.25, 0.2],
                 [3.4, 0.65, 0.26], lambda x: x[1] - x[2] >= 0.05 and x[1] + x[2] <= 0.95),
+    "stepped": (fem2d.stepped_beam, [f"h{i}" for i in range(1, 7)], [0.4] * 6, [1.0] * 6, [0.3] * 6, [1.0] * 6, None,
+                lambda x: x.min() < 0.4),
 }
+MARGINS = {    # the design's constraint margins: names, function of X, range low, high
+    "plate": (["s"], lambda X: (0.9 - X[:, 1] - X[:, 0])[:, None], [0.0], [0.35]),
+    "bracket": (["s1", "s2"], lambda X: np.stack([X[:, 1] - X[:, 2] - 0.05, 0.95 - X[:, 1] - X[:, 2]], 1),
+                [0.0, 0.1], [0.55, 0.65]),
+}
+METHODS = ("symreg", "gp", "quadratic", "symreg_margins", "gp_margins", "hybrid")
 
 
 def sample(rng, lo, hi, n, ok):
@@ -52,12 +63,14 @@ def run_sim(job):
 
 def simulate():
     os.makedirs(OUT, exist_ok=True)
-    for name, (_, names, lo, hi, elo, ehi, ok) in PROBLEMS.items():
+    for name, (_, names, lo, hi, elo, ehi, ok, *ok_ex) in PROBLEMS.items():
+        if os.path.exists(f"{OUT}/sims_{name}.npz"):
+            continue
         t0 = time.time()
         rng = np.random.default_rng([99, len(name)])
         sets = {f"train{s}": sample(np.random.default_rng([s, len(name)]), lo, hi, POOL, ok) for s in SEEDS}
         sets["test"] = sample(rng, lo, hi, N_TEST, ok)
-        sets["extrap"] = sample(rng, elo, ehi, N_EXTRAP, ok)
+        sets["extrap"] = sample(rng, elo, ehi, N_EXTRAP, ok_ex[0] if ok_ex else ok)
         if name == "bracket":
             sets["opt"] = np.array([[xc, yc, OPT_R] for xc in OPT_GRID[0] for yc in OPT_GRID[1]])
         mid = (np.array(lo) + np.array(hi)) / 2                         # roughness: 1-D sweeps through the centre
@@ -134,6 +147,55 @@ class Quadratic:
         return self._design(X) @ self.coef
 
 
+class Hybrid:
+    """symreg's formula as the trend, plus a Gaussian process on its residuals."""
+    def __init__(self, names, lo, hi):
+        self.sr, self.gp = SymbolicRegressor(names), GP(lo, hi)
+
+    def fit(self, X, y):
+        self.sr.fit(X, y)
+        t = np.log(y) if self.sr.transform == "log" else y
+        self.res = self.gp._fit_one(self.gp._u(X), t - self.sr.predict_t(X))
+        return self
+
+    def predict(self, X):
+        t = self.sr.predict_t(X) + self.res.predict(self.gp._u(X))
+        return np.exp(t) if self.sr.transform == "log" else t
+
+
+class Augmented:
+    """A surrogate given extra input columns computed from the inputs (the constraint margins)."""
+    def __init__(self, base, fn):
+        self.base, self.fn = base, fn
+
+    def _x(self, X):
+        return np.column_stack([X, self.fn(np.asarray(X, float))])
+
+    def fit(self, X, y):
+        self.base.fit(self._x(X), y)
+        return self
+
+    def predict(self, X):
+        return self.base.predict(self._x(X))
+
+    def formula(self):
+        return self.base.formula()
+
+    def n_terms(self):
+        return self.base.n_terms()
+
+
+def make(method, name):
+    _, names, lo, hi, *_rest = PROBLEMS[name]
+    if method == "symreg_margins":
+        return Augmented(SymbolicRegressor(names + MARGINS[name][0]), MARGINS[name][1])
+    if method == "gp_margins":
+        mnames, mfn, mlo, mhi = MARGINS[name]
+        return Augmented(GP(list(lo) + mlo, list(hi) + mhi), mfn)
+    return {"symreg": lambda: SymbolicRegressor(names), "gp": lambda: GP(lo, hi), "quadratic": lambda: Quadratic(lo, hi),
+            "hybrid": lambda: Hybrid(names, lo, hi)}[method]()
+
+
 def nrmse(pred, y):
     return float(np.sqrt(np.mean((pred - y) ** 2)) / y.std()) if np.all(np.isfinite(pred)) else float("inf")
 
@@ -146,12 +208,11 @@ def fit():
         for n in BUDGETS:
             for seed in SEEDS:
                 X, y = z[f"X_train{seed}"][:n], z[f"y_train{seed}"][:n]
-                for method in ("symreg", "gp", "quadratic"):
-                    if (name, n, seed, method) in have:
+                for method in METHODS:
+                    if (name, n, seed, method) in have or (method.endswith("_margins") and name not in MARGINS):
                         continue
                     t0 = time.time()
-                    m = {"symreg": lambda: SymbolicRegressor(names), "gp": lambda: GP(lo, hi),
-                         "quadratic": lambda: Quadratic(lo, hi)}[method]().fit(X, y)
+                    m = make(method, name).fit(X, y)
                     rec = dict(problem=name, n=n, seed=seed, method=method, seconds=time.time() - t0,
                                nrmse_in=nrmse(m.predict(z["X_test"]), z["y_test"]),
                                nrmse_ex=nrmse(m.predict(z["X_extrap"]), z["y_extrap"]),
@@ -160,7 +221,7 @@ def fit():
                         yo = z["y_opt"]
                         pick = int(np.argmin(m.predict(z["X_opt"])))
                         rec["regret"] = float((yo[pick] - yo.min()) / (yo.max() - yo.min()))
-                    if method == "symreg":
+                    if method in ("symreg", "symreg_margins"):
                         rec["formula"], rec["terms"] = m.formula(), m.n_terms()
                     with open(path, "a") as f:
                         f.write(json.dumps(rec) + "\n")
@@ -182,7 +243,7 @@ def report():
               f"{', '.join(f'{f:.1e}' for f in floor)}")
         print(f"   {'n':>4s} {'method':10s} {'NRMSE in':>10s} {'NRMSE ex':>10s} {'max in':>8s}" + ("  regret" if name == "bracket" else "") + "  terms")
         for n in BUDGETS:
-            for method in ("symreg", "gp", "quadratic"):
+            for method in METHODS:
                 R = [r for r in rs if r["problem"] == name and r["n"] == n and r["method"] == method]
                 if not R:
                     continue
@@ -190,11 +251,13 @@ def report():
                 line = f"   {n:4d} {method:10s} {mean('nrmse_in'):10.4f} {mean('nrmse_ex'):10.4f} {mean('max_in'):8.3f}"
                 if name == "bracket":
                     line += f"  {mean('regret'):6.3f}"
-                if method == "symreg":
+                if "terms" in R[0]:
                     line += f"  {[r['terms'] for r in R]}"
                 print(line)
-        best = [r for r in rs if r["problem"] == name and r["n"] == 100 and r["method"] == "symreg"]
-        print(f"   symreg formula at n = 100 (seed {best[0]['seed']}): {best[0]['formula']}")
+        for method in ("symreg", "symreg_margins"):
+            best = [r for r in rs if r["problem"] == name and r["n"] == 100 and r["method"] == method]
+            if best:
+                print(f"   {method} formula at n = 100 (seed {best[0]['seed']}): {best[0]['formula']}")
 
 
 def main():
