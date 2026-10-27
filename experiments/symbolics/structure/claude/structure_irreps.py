@@ -23,19 +23,27 @@ def bfs(TT):
     return parent, order
 
 
-def irreps(TT, rng):
-    n, A = TT.shape
+def multiplication(TT):
+    """The group's multiplication from the transition table alone: M[x, y] = x.y, following y's word from x."""
+    n = len(TT)
     parent, order = bfs(TT)
     words = {0: []}
     for y in order[1:]:
         x, a = parent[y]
         words[y] = words[x] + [a]
-    M = np.empty((n, n), int)                             # M[x, y] = x.y: follow y's word from x
+    M = np.empty((n, n), int)
     for y in range(n):
         col = np.arange(n)
         for a in words[y]:
             col = TT[col, a]
         M[:, y] = col
+    return M
+
+
+def irreps(TT, rng):
+    n, A = TT.shape
+    parent, order = bfs(TT)
+    M = multiplication(TT)
     Z = np.zeros((n, n))
     for h, z in enumerate(rng.normal(size=n)):            # left translations commute with the (right) actions
         L = np.zeros((n, n))

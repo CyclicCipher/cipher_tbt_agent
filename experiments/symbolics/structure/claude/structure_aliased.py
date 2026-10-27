@@ -23,28 +23,39 @@ def previous(code):
     return prev
 
 
-def cell_logp(code, col, C):
+def cell_pred(code, col):
+    """Each step's predicted colour: the last colour seen at the same code (-1 for a code not seen before)."""
     prev = previous(code)
-    hit = np.where(prev >= 0, col == col[np.maximum(prev, 0)], False)
-    return np.where(prev < 0, np.log(1 / C), np.log((1 - EPS) * hit + EPS / C))
+    return np.where(prev >= 0, col[np.maximum(prev, 0)], -1)
 
 
-def models(actions, col, C):
-    names, rows = [], []
+def cell_logp(code, col, C):
+    pred = cell_pred(code, col)
+    return np.where(pred < 0, np.log(1 / C), np.log((1 - EPS) * (pred == col) + EPS / C))
+
+
+def model_codes(actions, col):
+    """Every model as a code per step: same code, same predicted colour."""
+    names, codes = [], []
     for k, ((a1, a2), (a3, a4)) in enumerate(PAIRINGS):
         dx = np.concatenate([[0], np.cumsum((actions == a1).astype(int) - (actions == a2))])
         dy = np.concatenate([[0], np.cumsum((actions == a3).astype(int) - (actions == a4))])
         for h in range(1, PMAX + 1):
             for w in range(1, PMAX + 1):
                 names.append(f"torus {h}x{w}, pairs {PAIRINGS[k]}")
-                rows.append(cell_logp((dx % h) * w + dy % w, col, C))
+                codes.append((dx % h) * w + dy % w)
     names.append("null")
-    rows.append(np.full(len(col), np.log(1 / C)))
+    codes.append(np.arange(len(col)))                         # every step a new cell
     names.append("edge memory")
     key = np.concatenate([[-1], col[:-1] * 4 + actions])     # (previous colour, action) -> this colour
     key[0] = -1 - 10 ** 6                                     # the first observation has no key
-    rows.append(cell_logp(key, col, C))
-    return names, np.cumsum(np.array(rows), axis=1)
+    codes.append(key)
+    return names, codes
+
+
+def models(actions, col, C):
+    names, codes = model_codes(actions, col)
+    return names, np.cumsum(np.array([cell_logp(code, col, C) for code in codes]), axis=1)
 
 
 def main():

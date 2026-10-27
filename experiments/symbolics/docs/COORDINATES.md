@@ -749,3 +749,112 @@ random draws, so every other number is unchanged.
   Spotlight-style blurred writing, without a separate map per hypothesis, isn't enough. This is SLAM's
   data-association problem. The established answer is a separate map per hypothesis, which is what the particle
   filter is (FastSLAM), plus loop closure.
+
+# Part 10: the thesis in miniature (pre-registered 2026-10-27, before the code was written)
+
+**Why (the user):** run option 3, after the design note `arc_agent/claude/DESIGN.md`. This tests its predictions F1
+(transfer follows shared geometry) and F2 (content generalizes exactly when it is a function of a quotient of the
+geometry).
+
+**Environments:** both inside part 8's family, actions N, S, E, W:
+- **E1:** the 6 × 10 torus, Z/6 × Z/10, with 20 subgroups.
+- **E4:** the 4 × 15 torus, Z/4 × Z/15 ≅ Z/60, which is cyclic, with 12 subgroups.
+
+**Episode 1, learning the geometry:**
+- A random colouring with 6 colours and a 300-step walk. Part 8's 677 models compete; the one with the most
+  evidence is taken.
+- From the winner's transition table:
+  1. part 6's decomposition gives the addresses (the computed coordinates);
+  2. the group's multiplication gives its subgroups (the content hypotheses).
+
+**Transfer episodes:** 6 per run, each with a new start, a new 200-step walk and a new colouring:
+- **3 random:** 6 colours.
+- **3 striped:** the colour is constant on the cosets of a random subgroup H of the true group, with between 2 and
+  20 cosets. Each coset gets a random colour out of 6.
+
+**Predictors of the next colour:**
+1. **Carried geometry, cell memory:** path-integrate the computed address; address → last colour.
+2. **Carried geometry, content model:** a Bayesian mixture over the learned group's subgroups. Hypothesis H predicts
+   a cell's colour from the last colour seen anywhere in its coset. The trivial subgroup is cell memory; the whole
+   group is "one colour everywhere". Uniform prior.
+3. **Relearning:** no carried geometry. A Bayesian average over part 8's 677 models, started fresh in each episode.
+4. **Edge memory:** (colour, action) → next colour.
+
+**Measures:**
+- accuracy (the most probable colour; ties split);
+- first-visit accuracy (steps onto a cell not yet visited in this episode);
+- log loss.
+
+3 seeds per environment.
+
+| # | prediction |
+|---|---|
+| D1 | episode 1 recovers the true geometry in all 6 runs. Part 6's decomposition of the learned table gives distinct addresses for all 60 cells, and the learned groups have 20 (E1) and 12 (E4) subgroups |
+| D2 | random colourings: carried geometry with cell memory beats relearning by ≥ 0.03 accuracy over the 200 steps |
+| D3 | random colourings: the content model is within 0.01 of cell memory |
+| D4 | striped colourings: the content model's first-visit accuracy is ≥ 0.6, while cell memory's and relearning's are ≤ 0.25 (chance: 1/6) |
+| D5 | striped colourings: the content model's overall accuracy is ≥ cell memory's + 0.05 |
+| D6 | edge memory is ≥ 0.2 below cell memory on both kinds of colouring |
+
+**Cost:** seconds, CPU only.
+
+    python -m structure.claude.structure_miniature      (from experiments/symbolics)
+
+## Part 10 results (2026-10-27; `runs/structure_miniature.txt`, `.json`; 2.4 s)
+
+**Episode 1:** all 6 runs learned the true torus (6 × 10 or 4 × 15, pairing N/S with E/W). The learned groups have
+20 and 12 subgroups, the true counts. Part 6's decomposition gave distinct addresses for all 60 cells: blocks [1, 2]
+for 6 × 10 (Z/2 × Z/30) and [2] for 4 × 15 (a single rotation of order 60).
+
+**Transfer episodes,** the mean of 18 episodes per kind (2 environments × 3 seeds × 3). The striped episodes had 2 to
+20 cosets.
+
+| colouring | predictor | accuracy | first-visit accuracy | log loss |
+|---|---|---|---|---|
+| random | carried geometry, cell memory | 0.802 | 0.167 | 0.43 |
+| random | carried geometry, content model | 0.802 | 0.165 | 0.45 |
+| random | relearning | 0.799 | 0.162 | 0.46 |
+| random | edge memory | 0.344 | 0.166 | 3.78 |
+| striped | carried geometry, cell memory | 0.789 | 0.167 | 0.46 |
+| striped | carried geometry, content model | **0.969** | **0.872** | 0.09 |
+| striped | relearning | 0.966 | 0.860 | 0.11 |
+| striped | edge memory | 0.704 | 0.593 | 1.65 |
+
+**Exploratory (after D2 failed):** accuracy by window of steps.
+
+| colouring | predictor | steps 1–25 | 26–50 | 51–100 | 101–200 |
+|---|---|---|---|---|---|
+| random | cell memory | 0.535 | 0.637 | 0.839 | 0.891 |
+| random | relearning | 0.539 | 0.617 | 0.840 | 0.889 |
+| striped | content model | 0.829 | 0.955 | 0.985 | 0.999 |
+| striped | relearning | 0.804 | 0.957 | 0.983 | 0.999 |
+
+**Verdicts:**
+- **D1 confirmed.**
+- **D2 refuted:** carried geometry beats relearning by 0.003, not ≥ 0.03.
+- **D3 confirmed:** content model 0.802 against cell memory 0.802.
+- **D4 partly refuted:** the content model's first-visit accuracy is 0.872 (≥ 0.6) and cell memory's 0.167 (≤ 0.25),
+  but relearning's is 0.860.
+- **D5 confirmed:** +0.18.
+- **D6 partly refuted:** edge memory is 0.46 below cell memory on random colourings, but only 0.085 below on striped
+  ones.
+
+**Reading:**
+- **F2 holds.** Content that is a function of one of the geometry's quotients is predicted at cells never visited
+  (0.87; chance 0.17), and arbitrary content is not (0.165).
+- **But a learner with no carried geometry does as well, because its geometry hypotheses are quotient hypotheses.**
+  Any finite-index subgroup of the plane contains a rectangle aZ × bZ. So a striped colouring is always a function of
+  (x mod a, y mod b): it is a colouring of a smaller torus, which is in the relearner's family. Within one episode,
+  colours alone can't tell "the world is a 3 × 1 torus" from "the world is 6 × 10, with stripes of period 3". The
+  geometry of the world and the regularity of its content are the same kind of object, a quotient.
+- **What separates structure from content is what persists across episodes,** and what actions do. A relearner that
+  takes the 3 × 1 torus as the world would predict colours perfectly but plan badly: it would expect three steps
+  north to bring it home. Structure is the Tolman–Eichenbaum machine's operational notion: the part shared across
+  environments.
+- **F1, as measured here, is not supported.** Next-colour prediction rewards only revisits. On a torus, early
+  revisits are short loops (N then S) on which every hypothesis with the right pairing agrees. So relearning costs
+  about 0.02 accuracy in steps 26–50 and nothing after.
+- **F1 needs a test where geometry matters before any revisit:** a shortcut. Which actions reach a remembered place
+  fastest? Tolman's own test. Carried geometry knows from the first step that 6 steps north return home; a relearner
+  knows only after it has wrapped once. Edge memory does better on stripes (0.59 at first visits) because stripes
+  make (colour, action) → next colour partly predictable.
