@@ -1,7 +1,12 @@
 # Values as homeostasis: a satisficing active-inference agent
 
-**Status:** design, 2026-10-27. The first version, for push_block, is `homeostatic_agent.py`; its experiment is
-`../../docs/AGENT.md`, part 14.
+**Status:** design, version 2, 2026-10-27. The code is `homeostatic_agent.py`; its experiments are in
+`../../docs/AGENT.md`.
+- **Version 1 (part 14)** used a count-based novelty bonus for curiosity. The user caught that this isn't what animal
+  curiosity is: it is the same family as the Gemini agent's "epiplexity" bonus. That version is kept at commit
+  f173b08.
+- **Version 2 (part 15)** replaces it with exact expected information gain, and plans over the posterior instead of
+  the single most probable model.
 
 ## 1. Why (the user's)
 
@@ -15,72 +20,95 @@ instead of maximizing a scalar utility or minimizing a loss:
 ## 2. Definitions
 
 **A homeostatic variable** v_k is a quantity the agent can compute from its beliefs, with an acceptable set A_k.
+The preference is a prior belief that each v_k stays in A_k. This is active inference's reading of preferences:
+priors over outcomes, which acting then makes true (Friston et al. 2015). Inside A_k the drive is zero: a
+flat-topped preference gives no pressure to do better than good enough, which is satisficing (Simon 1955).
 
-**Prior prediction:** the agent's preference is a prior belief that each v_k stays inside A_k. This is active
-inference's reading of preferences: priors over outcomes, which acting then makes true (Friston et al. 2015).
+**Choosing a plan** (lexicographic for now):
+1. **Progress:** if some plan is acceptable, take the one with the fewest actions. This is the least-change choice.
+2. **Understanding:** otherwise, if understanding is out of range, take the plan with the most expected information
+   gain, minus a small cost per action.
+3. **Otherwise,** search deeper for an acceptable plan under the most probable model.
+4. **Otherwise,** take the plan most likely to reach WIN.
+5. **Otherwise,** act at random.
 
-**Drive:** the probability, under the agent's own model, that a plan leaves v_k outside A_k. Inside the set the drive
-is exactly zero. A flat-topped preference gives no gradient there, so there is no pressure to do better than "good
-enough". This is where satisficing comes from (Simon 1955).
+## 3. What the agent believes: explicit competing hypotheses
 
-**Choosing a plan:**
-1. A plan is acceptable if, for every variable, the model predicts it stays in range with probability ≥ α_k, the
-   aspiration.
-2. Among acceptable plans, take the one with the fewest actions. This is the least-change choice: no extra
-   optimization, and the smallest footprint.
-3. If no plan is acceptable, take the plan that best reduces uncertainty about how to get back in range (epistemic
-   value, below), minus a small cost per action.
-4. If nothing has epistemic value either, act at random.
-
-**The relation to expected free energy:** EFE is risk (divergence from preferred outcomes) plus ambiguity (expected
-uncertainty).
-- With flat-topped preferences, risk is zero for every acceptable plan, which gives step 2.
-- When nothing is acceptable, the ambiguity term supplies step 3's directed exploration.
-
-The rule is lexicographic for now: variables are satisfied in priority order. Weighing their deviations against each
-other comes later.
-
-## 3. The variables, version 1 (ARC)
-
-| variable | what it is | acceptable when |
+| about | hypotheses | weighed by |
 |---|---|---|
-| progress | "a WIN happens within this level's remaining budget" | some plan reaches, within the budget, a state with predicted P(WIN) ≥ α (α = 0.5) |
-| understanding | "my predictions come true, and nothing I can reach is untried" | no contact context reachable within the planning horizon is untried (see §5) |
+| each discovered frame's motion | static, action, time with a period n, contact with frame j (part 13's drivers) | its prequential evidence; prior: a quarter per family, split evenly inside it; the discovering transition counts as evidence |
+| each board object that hasn't moved yet | passable, solid, or pushed by the body | contact outcomes from any frame that moves into it, 1 − ε for the hypothesis that matches; prior 1/3 each. Keyed by shape and colour, so what is learned carries to the next level |
+| what causes WIN | about kinds of thing (shape and colours), existentially: cell(kind, c), some thing of the kind lies wholly on board colour c; at(kind, x, y), some thing of the kind has its first cell at (x, y) | the WIN signal at every step (ε = 0.01), over every kind seen so far, present or not (an absent kind makes no hypothesis hold); prior: half per family, split evenly (description length) |
 
-Viability (no GAME_OVER) is folded into progress for now: in push_block, GAME_OVER is just the step budget running
-out.
+The kind-based keys came from part 15's build checks. Instance keys made each level's target a "new" thing with
+fresh, untestable hypotheses, which diluted the true one.
 
-## 4. Goal discovery: the goal is the hidden cause of the WIN signal
+**Version 2 fixes a coordinate bug of version 1.** Version 1 enumerated pose translations from 0 to 8 only, while
+poses are relative to where a frame was discovered, and can be negative. "Box on red" was therefore unreachable in
+most random layouts. Positions are now absolute, and every in-grid translation is enumerated.
 
-The agent is never told what WIN requires. It holds hypotheses about the cause and weighs them by evidence at every
-step: each step either shows WIN or doesn't.
+## 4. The two variables
 
-**Version 1 has two families of single-frame conditions:**
-- cell(f, c): "WIN iff frame f lies on board cells of colour c";
-- pos(f, x, y): "WIN iff frame f is at (x, y)".
+| variable | the quantity | acceptable when |
+|---|---|---|
+| progress | the predicted probability that a plan reaches a WIN state somewhere along the way, averaged over the posterior | ≥ α = 0.5 for some plan |
+| understanding | the largest expected information gain of any plan within the horizon, minus 0.02 bits per action | < θ = 0.05 bits |
 
-**Prior: description length.** Each family gets half the mass, split evenly inside it. A hypothesis from the small
-family (frames × colours) is therefore more probable than one from the large family (frames × 81 positions).
+In words, understanding is out of range while "I can't yet predict what some reachable plan would show me".
+Curiosity therefore stops by itself once nothing reachable is informative. That is the homeostatic, satisficing form
+of curiosity.
 
-**Evidence:** a hypothesis predicts WIN exactly when its condition holds, with noise ε = 0.01. Every observed step
-that contradicts it multiplies its weight by ε/(1 − ε).
+## 5. Expected information gain: the exact quantity
 
-**Planning against it:** P(WIN | state) is the posterior mass of the hypotheses that hold in that state. Since every
-condition concerns one frame, it is a sum over frames, which is cheap.
+**Each joint hypothesis predicts deterministically.** A joint hypothesis is one hypothesis per thing, together with a
+goal hypothesis. Given one, a plan determines an observation sequence: the poses along the way, and the WIN signal at
+each step until the first WIN. So:
 
-## 5. Directed exploration: the epistemic value of a plan
+  EIG(plan) = I(hypotheses; observations) = H(observations)
 
-- **Goal information:** the binary entropy of P(WIN) at the state a plan reaches. It peaks at states where the
-  surviving hypotheses disagree, which is where a test is most informative.
-- **Contact novelty:** a step in which an action-driven frame (the agent's body) moves into a board colour or another
-  frame, in a (frame, action, contact) context tried n times before, is worth 1/(1 + n). This replaces the symbolic
-  agent's "epiplexity" bonus for unmapped contact colours. It counts only while the understanding variable is out of
-  range, so curiosity switches off once it is satisfied.
+**Computing it:**
+- Group the model combinations into classes that predict the same trajectory. Within a class, the goal hypotheses
+  differ only in the step at which WIN first occurs, or that it doesn't.
+- H(observations) = H(class) + Σ_class P(class) · H(first WIN step | class).
+- This is exact up to one truncation: a WIN ends the episode before later differences between trajectories can be
+  observed.
 
-## 6. Why this shape, for alignment, and its known holes
+**An action whose effect has never been seen** is worth log₂ 25 bits: its outcome is one of 25 displacements, and
+nothing predicts which.
+
+**What this replaces.** A count bonus values a situation by how rarely it was visited. Expected information gain
+values it by how much the agent's live hypotheses disagree about it. So:
+- it is zero for anything all hypotheses agree on, however rarely visited;
+- it is high for something seen before but still ambiguous;
+- it ignores outcome noise the model already treats as noise.
+
+**The animal evidence fits:**
+- monkeys pay for information, and dopamine neurons signal it (Bromberg-Martin & Hikosaka 2009);
+- human attention follows Bayesian surprise (Itti & Baldi 2009);
+- curiosity tracks learning progress (Gottlieb & Oudeyer 2018; Ten et al. 2021);
+- infants prefer intermediate predictability (Kidd, Piantadosi & Aslin 2012).
+
+**Not built: a learning-progress guard.** When the model class is wrong, noise can look like an unresolved
+hypothesis that never resolves. A learning-progress guard would let the drive decay when realized information gain
+stays near zero. push_block is deterministic, so it isn't needed here.
+
+## 6. Planning over the posterior
+
+**The model combinations are the product over things of their hypotheses.** Hypotheses below 0.02 are pruned, and at
+most 12 combinations are kept.
+
+**Exogenous frames are left out of the search.** These are frames whose motion is only static or time-driven, such as
+the patroller. Their positions at each future step come from their time driver.
+
+**Search is breadth-first over action sequences, up to 10 steps.** Each node carries:
+- one predicted state per combination;
+- the partition of combinations into trajectory classes;
+- per class, the goal hypotheses that have held so far, and the running entropy of the first-WIN step.
+
+## 7. Why this shape, for alignment, and its known holes
 
 - **Bounded drives.** A homeostatic variable inside its range exerts no pressure. Nothing gets maximized "just in
-  case".
+  case", curiosity included.
 - **Least action among acceptable plans** limits the footprint of what the agent does.
 - **Satisficers are not safe by default:**
   - A satisficer may take an extreme action that makes satisfaction certain.
@@ -89,14 +117,15 @@ condition concerns one frame, it is a sum over frames, which is cheap.
   - Choosing plans at random from the acceptable set instead of the cheapest, as quantilizers do (Taylor 2016), and
     impact penalties are the known mitigations.
 - **Homeostatic reinforcement learning** (Keramati & Gutkin 2014) shows reward-seeking and keeping variables stable
-  are compatible. Its variables are physiological; ours are epistemic and task-level.
+  are compatible.
 - **Not tested here: the alignment claims themselves.** The plan is to test them later in the Village moral-dilemma
   world (`experiments/mechint_alignment/`).
 
-## 7. Not in version 1
+## 8. Not in version 2
 
-- variables beyond progress and understanding;
+- weighing variables by their deviations, instead of a fixed priority order;
 - set-points that move with context (allostasis);
-- goal relations between frames (adjacency, alignment, counts);
+- goal relations between things (adjacency, alignment, counts);
 - hypotheses that a WIN depends on time;
+- the learning-progress guard;
 - the alignment measurements.

@@ -120,8 +120,9 @@ def mode(counter):
 class FrameAgent:
     ORDER = ["static", "action"] + [f"time{n}" for n in range(1, NMAX + 1)]
 
-    def __init__(self):
+    def __init__(self, score_discovery=False):
         self.static, self.frames, self.top, self.t, self.revisions = None, [], Counter(), 0, 0
+        self.score_discovery = score_discovery     # part 15: the discovering transition is evidence about the new frame
 
     # -- the vote: attention over drivers by accumulated evidence (hard maximum; simpler driver on ties) --
     def choice(self, i):
@@ -354,6 +355,21 @@ class FrameAgent:
                 f.evidence[f"push:{j}"] = f.evidence["static"]
                 new.evidence[f"push:{i}"] = 0.0
             self.frames.append(new)
+            if self.score_discovery:
+                # each driver's prediction for this transition, made before it: static says no move; contact with i
+                # says i's predicted move, if i's predicted cells overlap the new frame's; action and time had no data
+                srcset = set(map(tuple, src.tolist()))
+                for m in new.evidence:
+                    p = None
+                    if m == "static":
+                        p = IDENT
+                    elif m.startswith("push"):
+                        i = int(m.split(":")[1])
+                        if i in old and pred_poses.get(i) is not None:
+                            ei = compose(pred_poses[i], inverse(old[i]))
+                            hit = set(map(tuple, self.frames[i].cells(pred_poses[i]).tolist())) & srcset
+                            p = (ei[0], ei[1], 0) if ei != IDENT and hit else IDENT
+                    new.evidence[m] += np.log(1 / KEL) if p is None else (np.log(1 - EPS) if p == g else np.log(EPS / KEL))
             self.static[src[:, 1], src[:, 0]] = -1
             under = np.where(self.static >= 0, self.static, 0)
             Fb[src[:, 1], src[:, 0]] = get(under, src)
