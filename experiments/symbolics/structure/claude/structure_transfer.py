@@ -87,21 +87,32 @@ def structure(TT, rng):
 
 
 # ---- episode 2: coordinate memory against edge memory ---------------------------------------------------------------
-def episode2(T, TT, st, rng):
+def address_model(st, TT):
+    """Part 5's addresses: the characters' phase tuples if the actions commute and the phases separate the nodes;
+    otherwise the episode-1 node (the regular representation)."""
+    A = TT.shape[1]
+    if st["noncommuting_pairs"] == 0 and st["injective"]:
+        orders = np.array([o for o, _ in st["chosen"]])
+        steps = np.array([s for _, s in st["chosen"]]).reshape(len(orders), A)
+        return dict(start=tuple(np.zeros(len(orders), int)), key=lambda ad: ad, used="characters", size=int(steps.size),
+                    move=lambda ad, a: tuple((np.array(ad) + steps[:, a]) % orders))
+    return dict(start=0, key=lambda ad: ad, used="regular representation", size=int(TT.size),
+                move=lambda ad, a: int(TT[ad, a]))
+
+
+def episode2(T, model, rng):
+    """Coordinate memory (path-integrated address -> label, one cell per address) against edge memory."""
     n, A = T.shape
     labels = rng.choice(ALPHABET, n, replace=False)
-    use_chars = st["noncommuting_pairs"] == 0 and st["injective"]
-    orders = np.array([o for o, _ in st["chosen"]]) if use_chars else None
-    steps = np.array([s for _, s in st["chosen"]]).reshape(len(st["chosen"]), A) if use_chars else None
     x = int(rng.integers(n))
-    addr = tuple(np.zeros(len(orders), int)) if use_chars else 0
-    cells, edges, visited, traversed = {addr: labels[x]}, {}, {x}, set()
+    addr = model["start"]
+    cells, edges, visited, traversed = {model["key"](addr): labels[x]}, {}, {x}, set()
     rec = dict(coord=0, edge=0, predictable=0, coord_on_predictable=0, new_edge_old_node=0, edge_on_new_edge=0)
     for _ in range(STEPS2):
         a = int(rng.integers(A))
         y = T[x, a]
-        addr = tuple((np.array(addr) + steps[:, a]) % orders) if use_chars else int(TT[addr, a])
-        p_coord, p_edge = cells.get(addr), edges.get((labels[x], a))
+        addr = model["move"](addr, a)
+        p_coord, p_edge = cells.get(model["key"](addr)), edges.get((labels[x], a))
         rec["coord"] += p_coord == labels[y]
         rec["edge"] += p_edge == labels[y]
         if y in visited:
@@ -110,14 +121,14 @@ def episode2(T, TT, st, rng):
             if (x, a) not in traversed:
                 rec["new_edge_old_node"] += 1
                 rec["edge_on_new_edge"] += p_edge == labels[y]
-        cells[addr], edges[(labels[x], a)] = labels[y], labels[y]
+        cells[model["key"](addr)], edges[(labels[x], a)] = labels[y], labels[y]
         visited.add(y)
         traversed.add((x, a))
         x = y
     rec = {k: int(v) for k, v in rec.items()}
     rec.update(coord_accuracy=rec["coord"] / STEPS2, edge_accuracy=rec["edge"] / STEPS2,
                coord_accuracy_on_predictable=rec["coord_on_predictable"] / max(rec["predictable"], 1),
-               used="characters" if use_chars else "regular representation")
+               used=model["used"])
     return rec
 
 
@@ -130,8 +141,9 @@ def main():
             rng = np.random.default_rng(seed)
             TT, steps1 = episode1(T, rng)
             st = structure(TT, rng)
-            ep2 = episode2(T, TT, st, rng)
-            size = sum(len(s) for _, s in st["chosen"]) if ep2["used"] == "characters" else TT.size
+            model = address_model(st, TT)
+            ep2 = episode2(T, model, rng)
+            size = model["size"]
             out[name].append(dict(episode1_steps=steps1, structure={k: v for k, v in st.items()},
                                   transferred_integers=size, episode2=ep2))
             print(f"{name:22s} seed {seed}: ep1 {steps1:5d} steps | non-commuting (node, pair) {st['noncommuting_pairs']:4d} | "

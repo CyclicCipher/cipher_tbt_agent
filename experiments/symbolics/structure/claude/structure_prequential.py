@@ -51,13 +51,13 @@ def log_prob(full, axioms, r, c, v):
     return np.log((1 - EPS) * q + EPS / N)
 
 
-def prequential(T_obs, axioms, rng):
+def prequential(T_obs, axioms, rng, rules=()):
     obs = np.argwhere(T_obs >= 0)
     obs = obs[rng.permutation(len(obs))]
     fit, total = -np.ones_like(T_obs), 0.0
     cps = checkpoints(len(obs))
     for s, e in zip(cps[:-1], cps[1:]):
-        full, _ = complete(fit, axioms)
+        full, _ = complete(fit, axioms, rules)
         r, c = obs[s:e, 0], obs[s:e, 1]
         total += float(log_prob(full, axioms, r, c, T_obs[r, c]).sum())
         fit[r, c] = T_obs[r, c]

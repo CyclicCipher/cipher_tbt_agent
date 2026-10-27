@@ -373,3 +373,188 @@ the smallest margin over the orders is in brackets.
     lattice of cells.
   - Not like Spotlight: the addresses are computed and path-integrated, not learned by projecting a key. They are
     exact, so no 3 × 3 read is needed, and a cell holds one label, not a DeltaNet state.
+
+# Parts 6 and 7 (pre-registered 2026-10-27, before the code was written)
+
+**Why (the user):** do next steps 1 and 2:
+1. irreducible representations from data, so A₅ gets matrix coordinates instead of the fallback;
+2. a stronger completion engine, to close part of the gap to the information-theoretic minimum.
+
+## Part 6: irreducible representations from data: one method for commuting and non-commuting actions
+
+**Method** (`structure/claude/structure_irreps.py`). The episode-1 transition table from part 5 is the input, with
+the same seeds; part 5's episode-2 walks are reproduced exactly.
+1. **Words:** a breadth-first search from the start node gives each node a word, the actions that reach it. The start
+   node plays the identity.
+2. **The group's multiplication:** x·y is the node reached by following y's word from x. It is computed from the
+   transition table alone.
+3. **Left translations:** (L_h f)(y) = f(h·y). They commute with the actions, which act on the right.
+4. **The invariant subspaces:** Z = Σ_h z_h (L_h + L_hᵀ), with random z, is real symmetric and commutes with every
+   action. Its eigenspaces (eigenvalues grouped within 10⁻⁶) are invariant subspaces of the regular
+   representation, generically one copy of one irreducible representation each.
+5. **The matrices:** on each subspace U, every action s gets a matrix A_s = Uᵀ R_s U, where R_s is the action's
+   shift operator. A node's matrix is the product of its word's matrices. Its character is the trace. Irreducible
+   over the reals means character norm 1 (real type) or 2 (complex type: a rotation block that splits into two
+   complex characters).
+6. **Addresses:** irreducible representations, one per character class, are added greedily: smallest dimension
+   first, then most distinct addresses. Each is added as a block until every node's address is distinct.
+7. **Episode 2:** the address starts at the identity. Each action multiplies it on the right by that action's
+   matrices. Memory cells are keyed by the address rounded to 10⁻⁴.
+
+**This replaces part 5's switch.** Part 5 chose between characters and the fallback by the commutator test. Here,
+"abelian" is read off the decomposition: every real irreducible has dimension 1 with norm 1, or dimension 2 with
+norm 2. Equivalently, every complex irreducible is 1-dimensional.
+
+| # | prediction |
+|---|---|
+| R1 | A₅: 16 invariant subspaces, of dimensions 1, 3 (×3), 3 (×3), 4 (×4) and 5 (×5), forming 5 distinct irreducibles (by character), each of norm 1. Invariance residual < 10⁻⁹. Torus: 4 of dimension 1 and 28 of dimension 2 (norm 2). Cycle: 2 of dimension 1 and 29 of dimension 2 |
+| R2 | the smallest injective address: A₅ one 3-dimensional irreducible, whose matrices are rotations (determinant +1): a by 180°, b by 120°, and a·b (order 5) by 72° in one 3-dimensional irreducible and 144° in the other. These are the two icosahedral representations. Torus: two 2-dimensional blocks. Cycle: one 2-dimensional block of order 60 |
+| R3 | episode 2, with one method on all three environments: coordinate memory 100% correct on revisits; transferred numbers A₅ 27 (3 actions × 3 × 3), torus 32 (4 actions × two 2 × 2 blocks), cycle 16 |
+| R4 | the read-out "abelian" agrees with part 5's commutator test on all three environments |
+
+**Cost:** seconds.
+
+## Part 7: a stronger completion engine
+
+**A diagnostic of part 3's engine, run before this pre-registration** (scratch script; T1 and T3 at 25% observed,
+order seed 100):
+- **Batching:** re-completing at every 2% instead of every 15% lowers the code from 388 to 357 nats (T1) and from
+  852 to 764 (T3).
+- **Slow crystallization:** almost all the rest is entries coded while still undetermined.
+  - On T1 the completion knows 221 cells after 60 entries and 1,958 after 80.
+  - On T3 it knows 226 after 150 entries and 3,154 after 200.
+  - The minimum, 186 nats, is the equivalent of about 45 entries at full price.
+
+**New rules.** All are sound consequences of the axioms, and apply to any hypothesis that contains those axioms:
+- **Associativity in all four forms.** The four facts a ⊕ b = c, b ⊕ d = f, c ⊕ d = e and a ⊕ f = e are linked:
+  - any three of them give the fourth;
+  - the old rule used only one of the four patterns (the first three give the fourth);
+  - the reverse pattern needs associativity alone;
+  - the two patterns that recover a ⊕ b or b ⊕ d need cancellation, which the Latin axiom supplies.
+- **Latin propagation, as in Sudoku** (only under Latin):
+  - a naked single: a cell with one allowed value gets it;
+  - a hidden single: a value that fits in only one cell of a row or column goes there;
+  - a cell or value with no option left is a contradiction.
+
+**Arms:**
+- **Arm A (does anything break?):** the full engine, all 8 hypotheses, all tasks, both fractions, part 3's
+  checkpoints, order seed 100.
+- **Arm B (the gap):** the true hypothesis on T1, T2 and T3, both fractions, checkpoints every 2%, incremental
+  completion (exact for a hypothesis that is never contradicted).
+  - The full engine runs with orders 100–102.
+  - The ablation runs with order 100 only: the base rules (part 3's), base plus associativity, and base plus
+    Sudoku.
+
+| # | prediction |
+|---|---|
+| V1 | soundness: in arm B, the full engine never meets a contradiction under the true hypothesis, and every entry it determines is correct |
+| V2 | arm A: the winner is unchanged on all 12 task × fraction cells (part 3's verdicts), and chain still wins T4 (part 4) |
+| V3 | abelian group's code on T1 and T2 (full engine, every 2%, mean of 3 orders) is ≤ 330 nats at both fractions (part 3: 352–393) |
+| V4 | group's code on T3 is ≤ 650 nats at both fractions (part 3: 810–862) |
+| V5 | the limit: no run gets below 250 nats on T1 or T2, or below 400 on T3. Local propagation doesn't track which labels are already placed in the structure, an inference that needs global counting, so it stays well above the minimum (186 and 184) |
+
+**Cost:** a build check measures the engine's speed first. If the full run projects past 8 minutes, the ablation is
+cut to T1 and T3 (to be recorded here).
+
+    python -m structure.claude.structure_irreps        (part 6, from experiments/symbolics)
+    python -m structure.claude.structure_engine        (part 7)
+
+## Part 6 results (2026-10-27; `runs/structure_irreps.txt`, `.json`; 0.5 s)
+
+| | E1 torus 6 × 10 | E2 cycle 60 | E3 A₅ |
+|---|---|---|---|
+| invariant subspaces | 32: 4 of dim 1, 28 of dim 2 | 31: 2 of dim 1, 29 of dim 2 | 16: 1 + 3·3 + 3·3 + 4·4 + 5·5 |
+| distinct irreducibles (dim, character norm) | 32: (1, 1) ×4, (2, 2) ×28 | 31: (1, 1) ×2, (2, 2) ×29 | 5: (1, 1), (3, 1) ×2, (4, 1), (5, 1) |
+| invariance residual | ≤ 2·10⁻¹³ | ≤ 4·10⁻¹³ | ≤ 2·10⁻¹³ |
+| chosen blocks (dims) | 1, 1, 2 | 1, 2 | 3 |
+| transferred numbers | 24 | 20 | **27** (part 5's fallback: 180) |
+| "abelian" read-out = commutator test | yes = yes | yes = yes | no = no |
+| coordinate memory on revisits | 100% | 100% | 100% |
+
+**A₅'s two 3-dimensional irreducibles,** all seeds:
+- Every matrix has determinant +1, so every one is a rotation.
+- a rotates by 180.0° and b by 120.0°.
+- a·b rotates by 72.0° in one irreducible and 144.0° in the other.
+
+These are the rotation group of the icosahedron, in its two forms, which differ by √5 → −√5.
+
+**Verdicts:**
+- **R1 confirmed.**
+- **R2 confirmed for A₅, refuted for the torus and the cycle.** The rule takes the smallest dimension first, so it
+  picks 1-dimensional sign characters (values ±1) before any rotation block. The addresses are still distinct for
+  every node, but the blocks are not the predicted ones.
+- **R3 confirmed for accuracy, partly refuted for size.** Coordinate memory is 100% on revisits everywhere. Transferred
+  sizes: A₅ 27 as predicted; torus 24 (predicted 32); cycle 20 (predicted 16).
+- **R4 confirmed.**
+
+Episode-2 accuracies equal part 5's exactly, because the walks are the same by design.
+
+**Exploratory (after R2):** dropping any block whose removal keeps the addresses distinct gives:
+- torus: one sign character plus one rotation of order 30, which is Z/2 × Z/30 (20 numbers);
+- cycle: a single rotation of order 60 (16 numbers).
+
+**Reading:**
+- **One method now covers both cases.** The regular representation's decomposition, computed from the transition
+  table alone, gives:
+  - commuting actions: rotation blocks, which are part 5's characters written as 2 × 2 matrices;
+  - A₅: a 3 × 3 rotation address.
+- **The commutator switch becomes a read-out:** "abelian" means no irreducible is larger than a rotation block.
+- **For A₅, the structure that transfers shrinks from 180 integers to 27 numbers.** Path integration becomes
+  multiplying 3 × 3 rotation matrices, as on a sphere.
+- **For commuting actions, matrices are a redundant encoding:** a 2 × 2 rotation spends 4 numbers on 1 angle.
+
+## Part 7 results (`runs/structure_engine.txt`, `.json`; 91 s)
+
+**Arm A** (full engine, part 3's checkpoints, order 100): **the winner is unchanged on all 12 cells,** for parts 3
+and 4 alike. The true hypothesis's code falls on T1–T3:
+
+| | T1, 50% | T2, 50% | T3, 50% | T1, 25% | T2, 25% | T3, 25% |
+|---|---|---|---|---|---|---|
+| part 3 engine | 365 | 329 | 860 | 388 | 370 | 852 |
+| full engine | 271 | 257 | 367 | 266 | 249 | 359 |
+
+**Arm B** (true hypothesis, checkpoints every 2%), code in nats:
+
+| | T1, 50% | T2, 50% | T3, 50% | T1, 25% | T2, 25% | T3, 25% |
+|---|---|---|---|---|---|---|
+| full engine, mean of 3 orders | 252.7 | 254.1 | 381.8 | 256.3 | 246.8 | 338.7 |
+| range over orders | 247–259 | 250–256 | 369–406 | 248–264 | 242–255 | 323–348 |
+| entries until the table is fully known | 63–110 | 67–110 | 89–104 | 71–85 | 71–116 | 79–87 |
+| minimum (information-theoretic) | 186.1 | 186.1 | 183.8 | 186.1 | 186.1 | 183.8 |
+
+**Ablation** (order 100), code, and the entries until the table is fully known:
+
+| | T1, 50% | T2, 50% | T3, 50% | T1, 25% | T2, 25% | T3, 25% |
+|---|---|---|---|---|---|---|
+| base | 356.1 (168) | 311.4 (172) | 795.1 (249) | 356.9 (296) | 347.9 (176) | 764.4 (260) |
+| base + associativity | 258.7 (69) | 250.3 (104) | 370.5 (137) | 248.1 (85) | 242.2 (71) | 323.3 (79) |
+| base + Sudoku | 356.1 (168) | 306.7 (172) | 795.1 (249) | 356.9 (296) | 347.9 (176) | 764.4 (260) |
+| full | 258.7 (63) | 250.3 (77) | 370.5 (95) | 248.1 (85) | 242.2 (71) | 323.3 (79) |
+
+**Verdicts:**
+- **V1 confirmed:** 0 contradictions and 0 wrongly determined entries in all 18 full-engine runs.
+- **V2 confirmed.**
+- **V3 confirmed:** abelian group codes 247–264.
+- **V4 confirmed:** A₅ codes 323–406.
+- **V5 refuted:** the engine got closer than predicted. T1 and T2 went below 250 in 4 runs, and T3 below 400 in 5
+  of 6.
+
+**Reading:**
+- **The gap to the minimum closed from about 2× to about 1.35× for abelian groups, and from about 4.5× to about 2×
+  for A₅.**
+- **Nearly all the gain is associativity's other three patterns,** above all the two cancellation patterns. These
+  let one known product be solved for an unknown factor. The table now becomes fully known after 63–116 entries,
+  against 168–296 before.
+- **Sudoku propagation changes the code almost nowhere.** A naked single is an entry with one allowed value, and the
+  Latin coding already prices it at 0 nats. Sudoku makes the table fully known sooner, but on entries that were
+  never asked about.
+- **What remains (a rough decomposition, by arithmetic).** On T1 at 50%, the 60 entries coded while undetermined
+  cost (253 − about 17 for ε on determined entries) / 60 ≈ 3.9 nats each.
+  - **The ideal averages 3.14 nats per label,** ln(60!)/60. It knows the answer is one of the labels not yet placed
+    in the structure, and their number falls from 60 to 1.
+  - **Our coding is uniform over the values its row and column don't exclude.**
+  - **That difference,** about 0.8 nats × 60 ≈ 45 nats, plus the ε overhead, accounts for the rest.
+  - **Tracking which labels are placed** means tracking the labelling itself: coordinates, as in parts 5–6, not
+    local rules.
+- **A₅ still needs more undetermined entries (78–97) before its table is known.** Without commutativity there are
+  fewer patterns to propagate through.
