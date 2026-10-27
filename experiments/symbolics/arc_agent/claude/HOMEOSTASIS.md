@@ -1,6 +1,10 @@
 # Values as homeostasis: a satisficing active-inference agent
 
-**Status:** design, version 2, 2026-10-27. The code is `homeostatic_agent.py`; its experiments are in
+**Status:** design, version 2.1, 2026-10-27. Version 2.1 makes two changes:
+- sums are exactly rounded, so the agent is deterministic;
+- "approach" scores plans up to 30 steps under the posterior.
+
+It also fixes untried actions being discarded in search. Results: `../../docs/AGENT.md`, part 15b. The code is `homeostatic_agent.py`; its experiments are in
 `../../docs/AGENT.md`.
 - **Version 1 (part 14)** used a count-based novelty bonus for curiosity. The user caught that this isn't what animal
   curiosity is: it is the same family as the Gemini agent's "epiplexity" bonus. That version is kept at commit
