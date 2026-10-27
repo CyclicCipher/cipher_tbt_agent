@@ -1,0 +1,28 @@
+What Gemini and I did here:
+
+1. Applied the concept of Residuals from ResNets to symbolic function-finding. 
+It exponentially shrank the problem space and difficulty of credit assignment, making it drastically more efficient to find symbolic functions to fit data.
+
+2. Springboarded from that to an alternate way to make Thousand Brains Theory work, at a test scale.
+Important is the idea of symbolic ResNets as fast, cheap "wind tunnels" for future architectures. Makes testing fast.
+Previous experiments with TBT tried to replicate the literal wiring of the brain with apical, basal, proximal dendrites.
+But at a small scale, the attention mechanism proved perfectly workable as a simple alternative.
+The hypothesis was that a single network is always trying to learn a single dataset, hence the need for replay buffers to train AI.
+Thousand Brains Theory is not a single network, so it would IN THEORY not need a replay buffer.
+Hypothesis seems to be more or less proven.
+
+3. The next work was the creation of a very basic ARC-AGI 3 replica designed to force us to evolve the architecture into something more intelligent.
+The idea was: Combine DreamCoder's Bayesian approach, with symbolic ResNet, with the TBT approach above, to solve these games.
+Percepta's Spotlight architecture was used to build a hippocampus to solve memory.
+
+Next steps:
+-Figure out how to go from motor babbling to actually learning affordances. Need to look into how animals learn how to use things instrumentally. 
+
+Lessons:
+-Additive residual error fitting turns an exponential search (O(B^d)) into a linear one (O(d*B)).
+(Where B = the number of vocabulary items, and d = the number of layers/terms in the function.)
+-Replacing the residuals above with attention residuals not only vastly decreases the error, it results in learned functions much closer to the ground truth.
+-Adelic, rather than Euclidean distance, proved strangely powerful in solving some of the problems where symbolic attnRes's greediness caused it to
+fall into a local minima.
+-Therefore Adelic distance is likely extremely useful for search?
+-A circular/adelic loss function groks modular arithmetic almost instantly, practically no train/test gap. Promising results in boolean logic too.

@@ -46,3 +46,6 @@ experiments/.triton_cache/
 # Corpora fetched from upstream (rebuild with experiments/ziplearn/research/build_classical_latin.py)
 corpora/latin_library/
 corpora/latin_classical/
+
+# Symbolics experiment outputs (results are summarized in experiments/symbolics/CONTROLS.md)
+experiments/symbolics/runs/

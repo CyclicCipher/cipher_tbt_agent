@@ -1,0 +1,85 @@
+# ARCHITECTURE PLAN: THE NEURO-SYMBOLIC SLEEP PHASE
+**Framework:** Thousand Brains Theory + Spotlight Hippocampus + DreamCoder Bayesian Consolidation
+**Target:** ARC-AGI-3 Interactive Puzzles (Continual Learning Without Replay)
+
+---
+
+## 1. Objective of the Sleep Phase
+In biological neuroscience (Complementary Learning Systems) and program synthesis (DreamCoder), 
+the Wake phase gathers messy, empirical, per-action observations. 
+The Sleep phase operates between tasks to perform three critical functions:
+1. **Episodic-to-Neocortical Consolidation:** Replaying winning trajectories from the 
+   Spotlight Hippocampus to lock in permanent columnar representations.
+2. **DreamCoder-Style Concept Induction (Symbolic Compression):** Reading the AttnRes routing 
+   maps to compress fragmented rules into abstract, reusable primitives (e.g., discovering "Solid_Barrier").
+3. **Synaptic Homeostasis:** Pruning transient lattice memory so the agent does not suffer from 
+   unbounded memory bloat across dozens of sequential games.
+
+---
+
+## 2. Core Pillars of the Sleep Engine (`sleep.py`)
+
+### Pillar A: DreamCoder-Style Semantic Compression
+- **Input:** The AttnRes routing tables `alpha_i(Color)` across all committed columns.
+- **Mechanism:** Anti-unification / Minimum Description Length (MDL).
+  - The Sleep engine inspects the routing tables across columns.
+  - It detects invariant phase transitions:
+    - `Color 5` and `Color 1` both exhibit `Block: 100.0%`.
+    - It abstracts: `SOLID_OBSTACLE(c) := (c in {1, 5})`.
+    - `Color 0` exhibits `Free: 100.0%`.
+    - It abstracts: `PASSABLE(c) := (c == 0)`.
+- **Output:** Mints a new higher-level primitive into the Universal Shared Library:
+  `"is_solid(color)"` -> returns True/False.
+  This frees up Layer 2 capacity in the columns for higher-level task logic (like keys, doors, or pushing).
+
+### Pillar B: Hippocampal Replay & Consolidation
+- **Input:** The 2D memory lattice and high-reward trajectory from `SpotlightHippocampus`.
+- **Mechanism:**
+  - The Hippocampus replays the sequence of states that led to `WIN` (`state == WIN`).
+  - Uncommitted (plastic) columns observe this synthetic replay stream without interacting with the game.
+  - Columns that can explain steps of the winning trajectory with simple programs are committed.
+  - This turns "lucky exploratory discoveries" into permanent, repeatable skills.
+
+### Pillar C: Synaptic Homeostasis (Lattice Re-centering)
+- **Problem:** If the Spotlight 2D lattice keeps expanding, memory footprint grows unboundedly.
+- **Mechanism:**
+  - Tononi & Cirelli's Synaptic Homeostasis Hypothesis:
+  - Long-term invariants have been absorbed into the Cortical Columns.
+  - The transient episodic activation trace in `SpotlightHippocampus.lattice` is decayed / flushed.
+  - The agent starts the next ARC game with an empty episodic memory, but an expanded Neocortical vocabulary.
+
+---
+
+## 3. Structural Integration in the Agent Loop
+
+	   ┌────────────────────────────────────────────────────────┐
+           │                      WAKE PHASE                        │
+           │  - Self-supervised sensory-motor exploration           │
+           │  - Online AttnRes predictive error adaptation          │
+           │  - Spotlight 2D lattice logs episodic trajectory       │
+           │  - Achieves VICTORY (State == WIN)                     │
+           └───────────────────────────┬────────────────────────────┘
+                                       │
+                                       ▼
+           ┌────────────────────────────────────────────────────────┐
+           │                      SLEEP PHASE                       │
+           │  1. Replay winning path from Spotlight Hippocampus     │
+           │  2. Read AttnRes routing map & abstract concepts       │
+           │  3. Mint new primitives into Universal Shared Library  │
+           │  4. Homeostatic reset of episodic memory lattice       │
+           └───────────────────────────┬────────────────────────────┘
+                                       │
+                                       ▼
+           ┌────────────────────────────────────────────────────────┐
+           │                  NEXT WAKE PHASE                       │
+           │  Plays next game (e.g., 'push_block') using the        │
+           │  newly synthesized, sleep-discovered vocabulary!       │
+           └────────────────────────────────────────────────────────┘
+
+---
+
+## 4. Next Implementation Targets
+1. Create `sleep.py` containing the `SleepConsolidator` class.
+2. Hook `sleep.py` into `brain.py` between sequential world runs:
+   - Run `nav_simple` (Wake) -> Run `sleep.consolidate()` (Sleep) -> Run `push_block` (Wake).
+3. Test whether the sleep-minted `"is_solid"` primitive immediately transfers to `push_block` without exploratory retraining.
