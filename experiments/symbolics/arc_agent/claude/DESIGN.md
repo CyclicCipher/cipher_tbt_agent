@@ -17,15 +17,23 @@ how should an object be defined, learned and stored? The proposal is that the qu
 
 ## 2. Why: what failed, and what worked
 
-**What failed:** the object machinery. The rebuilt `src/tbt/` agent and the Gemini agent in `../gemini/` both
-spent most of their effort on objects:
-- segmentation;
-- recognizing a known object at a new pose;
-- occlusion;
-- duplicate objects;
-- when to mint a new object.
+**What failed:** the two agents made opposite mistakes about objects.
+- **The symbolic agent (`../gemini/`, Gemini's) dodged the question by making colour the object.**
+  - `brain.py` builds 16 columns, one per colour.
+  - Each column learns, for every colour its own colour touches, whether moving into it is free, blocked or shifted.
+  - All of this runs over a hand-written motor map (ACTION1 = up, and so on).
 
-Each answer raised the next question.
+  Its columns are keyed by content, and its geometry is given, not learned: the reverse of the thesis. A column for
+  "red" can't transfer to a game where the same role has another colour.
+- **The main-line TBT agent (`src/tbt/`, and its archived predecessor) took objects as primitive, and spent most of
+  its effort on them:**
+  - segmentation;
+  - recognizing a known object at a new pose;
+  - occlusion;
+  - duplicate objects;
+  - when to mint a new object.
+
+  Each answer raised the next question.
 
 **What worked, in this folder and earlier:**
 
