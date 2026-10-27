@@ -351,3 +351,70 @@ Everything else is unchanged:
     python -m regression.claude.curriculum --variant nf wake 1   (then sleep 1, wake 2, sleep 2, wake 3, sleep 3)
     python -m regression.claude.curriculum --variant nf evaluate
     python -m regression.claude.curriculum --variant nf report
+
+## B2 results (2026-10-26; `runs/curriculum_nf_*.txt`, `runs/curriculum_nf/heldout_results.jsonl`)
+
+**What ran:**
+- The curriculum was rerun with the noise level known: 3 cycles, about 40 s each, all 48 tasks solved.
+- The library has 13 templates (B: 22). They are mostly physical: pow(v, −2.97) (h⁻³), pow(v, 2.98) (L³),
+  pow(v, 3.97) (L⁴), and products carrying h^−2.98 or h^−3.01 alongside a fitted power of another input. A few
+  artifacts remain (three exp rates, two shifts).
+- On the held-out tasks, A1–A4 were refitted; A0, the GP and the textbook laws were reused from B.
+
+**n = 100, geometric mean over seeds, in range / extrapolation / far (B → B2):**
+
+| task | A4 in B | A4 in B2 | GP (B) | best B2 arm far |
+|---|---|---|---|---|
+| H1 stepped, 6 segments | 0.087 / 0.22 / 0.29 | **0.069** / 0.21 / 0.30 | 0.087 / 0.33 / 0.31 | A2 0.19 (textbook law 0.075) |
+| H2 beam, hole (xc, yc, r) | 0.34 / 3.4 / 6.0 | 0.63 / 1.0 / 24 | **0.079** / 0.33 / 0.60 | A4 24 (GP 0.60) |
+| H3 plate, hole (r, yc) | 0.0077 / 0.21 / 0.29 | 0.0051 / 0.16 / 0.29 | **0.0050** / 0.27 / 0.38 | A4 0.29 (v1 0.096) |
+| H4 stepped, uniform load | 0.058 / 0.26 / 0.60 | **0.029** / 0.11 / 0.21 | 0.032 / 0.19 / 0.18 | A1 0.14 (textbook law 0.058) |
+| H5 clamped, 3 segments | 0.087 / 0.46 / 0.64 | 0.050 / 0.53 / 0.91 | **0.019** / 0.19 / 0.10 | A2 0.50 |
+| H6 beam, hole, uniform load | 0.020 / 0.32 / 0.48 | **0.015** / 0.12 / **0.17** | 0.016 / 0.18 / 0.22 | A3/A4 0.17 |
+
+Formula sizes at n = 100 (median terms): H3 9 → 5. Every other task stays at 8–9 (B: 8–14).
+
+**Verdicts: 2 confirmed, 6 refuted.**
+
+| # | verdict | evidence |
+|---|---|---|
+| Q1 | refuted | median A4 size 9 at n = 100 (predicted ≤ 6); only the plate shrank (9 → 5) |
+| Q2 | refuted | the largest finder-v2 extrapolation NRMSE at n = 100 is 9·10¹⁹ (A1 on H5); at n = 30, some predictions are non-finite |
+| Q3 | refuted | A4's far NRMSE, geometric mean over tasks, 0.67 → 0.64 (1.05×; predicted ≥ 1.5×) |
+| Q4 | **confirmed, and better than predicted** | A4's in-range error is lower than B's on 5 of 6 tasks (×0.50–0.79); H2 is worse (×1.86) |
+| Q5 | refuted | no candidate law |
+| Q6 | refuted | H1 far 0.30 (predicted ≤ 0.15) |
+| Q7 | refuted as worded | 13 templates (< 22), but no template fixes both L³ and h⁻³; each bending template keeps one exponent free |
+| Q8 | **confirmed** | A4 beats the GP in far extrapolation on 3 of 6 (H1, H3, H6), and in range on 3 of 6 (H1, H4, H6). B: 2 and 1 |
+
+**Reading:**
+1. **Fitting to the noise helped accuracy, not parsimony.** In-range errors fell on 5 of 6 tasks, by 1.3–2×, and
+   the full system now beats the GP on half the tasks, in range and in far extrapolation, which B never did.
+2. **Held-out formulas stayed large because the structure is real.** The held-out responses carry effects well above
+   their noise (the stepped beams' interactions at the steps). The vocabulary can express them only as many awkward
+   product terms, so formula size is now limited by representation, not by fitting noise.
+3. **Catastrophic extrapolation remains.** It comes from terms like h^4.55 or r^6 inside products: tame in the box,
+   explosive outside it. The safety check covers the design domain only, so it cannot see this. Growth outside the
+   box has to be controlled directly: an enlarged check region, bounded exponent magnitudes, or abstaining where the
+   frontier disagrees.
+4. **The cleaner library is used little on the held-out tasks** (A3 ≈ A4 ≈ A1 on several).
+5. **Still no candidate law.** The textbook bending law is still the best extrapolator on the stepped beams.
+
+## Exploratory: estimating the noise from the dataset alone (the user, 2026-10-26: "Do we have a good way to discover the noise in a dataset? Maybe something like fluctuations where no progress can be made on learning their structure, related to epiplexity?")
+
+The noise floors above came from sweeping the simulator along lines (active probing). Two estimators that use only the
+training data were tested against those sweeps, on 54 tasks (`regression/claude/gamma_test.py`):
+- **The Gamma test** (nearest-neighbour differences, extrapolated to zero distance; model-free) fails at these sizes.
+  It overestimates by a median 8.6× on the noisy tasks, and reads 0.1 on noise-free ones. With 50–100 points in 1–6
+  inputs, neighbours are far apart and the responses are strongly curved, so the extrapolation to zero distance is
+  not linear.
+- **A GP's fitted white-noise level** (model-based) works about half the time. It reads ~0 on the noise-free tasks;
+  on noisy tasks the median ratio to the sweep value is 0.66, within a factor 2 on 50%. It matches closely on most
+  stepped beams, and collapses to 0 on a few tasks by absorbing the noise into a wiggly fit.
+
+**The conceptual point:** from a fixed, finite dataset, noise is defined only relative to a learner. Whatever no
+learner within reach can compress looks like noise. That is the epiplexity split: structure is what a bounded learner
+can extract; time-bounded entropy is the rest, so learning progress goes to 0 on noise and on structure out of reach
+alike. A learning curve's plateau measures noise plus out-of-reach structure, and only access to the data source can
+separate the two: replicates, or probes at small scales, where smooth structure vanishes but noise doesn't. A
+simulator allows that; a passive dataset does not.

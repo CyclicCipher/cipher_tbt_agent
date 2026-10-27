@@ -20,7 +20,9 @@ refit of every free parameter, under the same budget.
 Safety: every block is evaluated on the task's domain sample (feasible designs, with boundary points) and rejected
 if non-finite or if its largest magnitude exceeds 1e4 x its median; a denominator must stay above 0.05 there.
 Selection: BIC on the y scale, n log(RSS/n) + parameters * log n (+ 2 sum log y for a log-y formula)
-- 2 sum log P(block template). Frontier: every formula within 6 BIC of the best, at most 8, weighted exp(-BIC/2).
+- 2 sum log P(block template); or, given the noise level sigma (experiment B2), BIC with sigma known:
+sum (y_hat - y)^2 / sigma^2 + parameters * log n - 2 sum log P, residuals on the y scale for both transforms.
+Frontier: every formula within 6 BIC of the best, at most 8, weighted exp(-BIC/2).
 """
 import itertools
 import math
@@ -320,13 +322,15 @@ class Finder:
         return bool(np.min(1 + D) > 0.05)
 
     # ---- the search ---------------------------------------------------------------------------------------------------
-    def fit(self, X, y, margins=None, domain=None, hints=None, start=None, start_transform=None, transforms=None):
+    def fit(self, X, y, margins=None, domain=None, hints=None, start=None, start_transform=None, transforms=None,
+            noise=None):
         """The plain search from an empty formula, for each transform (default y and, if positive, log y); and, if a
         start formula is given, a further search from it in start_transform, adding at most K_CONTINUE blocks. Every
         formula met goes into one pool, from which BIC picks the frontier."""
         X, y = np.asarray(X, float), np.asarray(y, float)
         n, d = X.shape
         M = np.zeros((n, 0)) if margins is None else np.asarray(margins, float)
+        self.noise, self._train = noise, (X, M)
         domain = domain or {"X": X, "M": M}
         ctx = Context(X, M, domain)
         hints = hints or {}
@@ -402,8 +406,18 @@ class Finder:
     def _record(self, state, coef, rss, transform, y, n, ctx):
         if coef is None or not self.pole_free(state, coef, ctx):
             return
-        self.records.append(dict(state=state.copy(), coef=coef, rss=rss, transform=transform,
-                                 bic=self.bic(state, rss, n, transform, y), ctx=ctx))
+        rec = dict(state=state.copy(), coef=coef, rss=rss, transform=transform, ctx=ctx)
+        if self.noise is None:
+            rec["bic"] = self.bic(state, rss, n, transform, y)
+        else:
+            pred = self.predict_one(rec, *self._train)
+            rss_y = float(np.sum((pred - y) ** 2)) if np.all(np.isfinite(pred)) else np.inf
+            p = 1 + sum(len(b.bindings) + b.n_free() for b in state.blocks) + len(state.dens)
+            prior = sum(math.log(self.prior_prob(b.template)) for b in state.blocks) + \
+                len(state.dens) * math.log(self.prior_prob("den"))
+            rec["bic"] = rss_y / self.noise ** 2 + p * math.log(n) - 2 * prior
+        if np.isfinite(rec["bic"]):
+            self.records.append(rec)
 
     def _finish(self, n):
         recs = sorted(self.records, key=lambda r: r["bic"])

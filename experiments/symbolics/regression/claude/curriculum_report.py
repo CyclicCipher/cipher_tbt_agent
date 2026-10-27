@@ -17,7 +17,9 @@ def gmean(v):
     return float(np.exp(np.mean(np.log(np.maximum(v, 1e-12))))) if np.all(np.isfinite(v)) else float("inf")
 
 
-def report():
+def report(out_dir=OUT):
+    if out_dir != OUT:
+        return report_b2(out_dir)
     rs = [json.loads(l) for l in open(f"{OUT}/heldout_results.jsonl")]
     by = defaultdict(list)
     for r in rs:
@@ -89,3 +91,54 @@ def report():
 
 if __name__ == "__main__":
     report()
+
+
+def summarize(rs):
+    by = defaultdict(list)
+    for r in rs:
+        by[(r["task"], r["arm"], r["n"])].append(r)
+    return {k: dict(nin=gmean([r["nrmse_test"] for r in v]), nex=gmean([r["nrmse_extrap"] for r in v]),
+                    nfar=gmean([r["nrmse_far"] for r in v]), terms=[r.get("terms") for r in v],
+                    seconds=float(np.mean([r["seconds"] for r in v])), rows=v,
+                    formula=sorted(v, key=lambda r: r["seed"])[0].get("formula")) for k, v in by.items()}
+
+
+def report_b2(out_dir):
+    """Experiment B2 beside B: A1-A4 refitted with the noise level known; A0, the GP and the textbook laws from B."""
+    rb = [json.loads(l) for l in open(f"{OUT}/heldout_results.jsonl")]
+    r2 = [json.loads(l) for l in open(f"{out_dir}/heldout_results.jsonl")]
+    B, B2 = summarize(rb), summarize(r2)
+    for n in (100, 30):
+        print(f"\nn = {n}: NRMSE in / ex / far, geometric mean over 3 seeds (B -> B2 for A1-A4)")
+        for task in TASKS:
+            print(f"   {task}")
+            for arm in ("A0", "GP", "law_bending"):
+                if (task, arm, n) in B:
+                    v = B[(task, arm, n)]
+                    print(f"      {arm:12s} {v['nin']:.4f} / {v['nex']:.4f} / {v['nfar']:.4f}")
+            for arm in ("A1", "A2", "A3", "A4"):
+                b, v = B[(task, arm, n)], B2[(task, arm, n)]
+                print(f"      {arm:12s} B {b['nin']:.4f} / {b['nex']:.4f} / {b['nfar']:.4g}  ->  B2 {v['nin']:.4f} / {v['nex']:.4f} / {v['nfar']:.4g}"
+                      f"   terms B {np.median([t for t in b['terms'] if t]):.0f} -> B2 {np.median([t for t in v['terms'] if t]):.0f}")
+    for task in TASKS:
+        print(f"   {task} A4 formula (B2, n = 100, seed 0): {B2[(task, 'A4', 100)]['formula'][:220]}")
+    v2 = [r for r in r2 if r["arm"] in ("A1", "A2", "A3", "A4")]
+    a4 = [r for r in r2 if r["arm"] == "A4" and r["n"] == 100]
+    print("\nQ1 median A4 formula size at n = 100:", np.median([r["terms"] for r in a4]))
+    w100 = max(max(r["nrmse_extrap"], r["nrmse_far"]) for r in v2 if r["n"] == 100)
+    w30 = max(max(r["nrmse_extrap"], r["nrmse_far"]) for r in v2 if r["n"] == 30)
+    print(f"Q2 largest extrapolation or far NRMSE, finder v2: n = 100 {w100:.3g}; n = 30 {w30:.3g}")
+    gb = gmean([B[(t, "A4", 100)]["nfar"] for t in TASKS])
+    g2 = gmean([B2[(t, "A4", 100)]["nfar"] for t in TASKS])
+    print(f"Q3 A4 far NRMSE, geometric mean over tasks at n = 100: B {gb:.3f} -> B2 {g2:.3f} (ratio {gb / g2:.2f})")
+    print("Q4 A4 in range, B2 over B, n = 100:", {t[:2]: round(B2[(t, 'A4', 100)]['nin'] / B[(t, 'A4', 100)]['nin'], 2) for t in TASKS})
+    print("Q5 candidate laws (<= 6 terms, in <= 0.02, far <= 0.1), B2, n = 100:")
+    for r in sorted(v2, key=lambda r: (r["task"], r["arm"], r["seed"])):
+        if r["n"] == 100 and r["terms"] <= 6 and r["nrmse_test"] <= 0.02 and r["nrmse_far"] <= 0.1:
+            print(f"   {r['task']} {r['arm']} seed {r['seed']}: in {r['nrmse_test']:.4f} far {r['nrmse_far']:.4f} limit {r['limit']}  {r['formula'][:170]}")
+    print(f"Q6 H1 A4 far NRMSE at n = 100: {B2[(TASKS[0], 'A4', 100)]['nfar']:.4f}")
+    print("Q8 A4 (B2) against the GP, far, n = 100:", {t[:2]: ('A4' if B2[(t, 'A4', 100)]['nfar'] < B[(t, 'GP', 100)]['nfar'] else 'GP') for t in TASKS})
+    print("   and in range:", {t[:2]: ('A4' if B2[(t, 'A4', 100)]['nin'] < B[(t, 'GP', 100)]['nin'] else 'GP') for t in TASKS})
+    print("Limit checks, B2 A4 at n = 100 (stepped: 1 ideal; plate: 1 ideal; holes: 0 ideal):",
+          {t[:2]: round(float(np.mean([r['limit'] for r in B2[(t, 'A4', 100)]['rows'] if r['limit'] is not None])), 3)
+           for t in TASKS if any(r['limit'] is not None for r in B2[(t, 'A4', 100)]['rows'])})

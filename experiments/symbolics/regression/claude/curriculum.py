@@ -8,6 +8,8 @@ Every stage is resumable and each run stays under 10 minutes; tasks are fitted i
     python -m regression.claude.curriculum heldout          simulate the held-out tasks (only after the freeze)
     python -m regression.claude.curriculum evaluate         arms A0-A4 and the references, resumable
     python -m regression.claude.curriculum report
+Experiment B2 (selection with the noise level known): --variant nf, after `roughness_heldout`; its cycles, library and
+results go to runs/curriculum_nf; the simulations are shared with B.
 """
 import argparse
 import json
@@ -26,8 +28,21 @@ from regression.claude.guide import CaseMemory, Guide
 from regression.claude.symreg2 import GRID, EXP_GRID, Finder, PRIMITIVES
 from regression.claude.tasks import curriculum, heldout
 
-OUT = "runs/curriculum"
+DATA = "runs/curriculum"                          # simulations and roughness, shared by every variant
 N_TRAIN, SOLVED, N_FANTASY = 50, 0.02, 100
+NOISE_FLOOR = 0.002                                 # B2: sigma = max(roughness, NOISE_FLOOR) * std(training y)
+
+
+def variant():
+    return os.environ.get("CURRICULUM_VARIANT", "")
+
+
+def out():
+    return DATA + (f"_{variant()}" if variant() else "")
+
+
+def noise_for(rough, y):
+    return max(rough, NOISE_FLOOR) * float(np.std(y)) if variant() == "nf" else None
 
 
 def save(obj, path):
@@ -44,11 +59,11 @@ def load(path):
 def roughness():
     """Per task: 61-point sweeps through the box centre along each input (feasible points only); roughness = std of
     the residual of a degree-8 polynomial fit, over the std of the task's training y; the task's floor = the largest."""
-    path = f"{OUT}/roughness.json"
+    path = f"{DATA}/roughness.json"
     if os.path.exists(path):
         print("roughness exists")
         return
-    tasks, data = curriculum(), load(f"{OUT}/curriculum_data.pkl")
+    tasks, data = curriculum(), load(f"{DATA}/curriculum_data.pkl")
     sweeps, jobs = {}, []
     for k, t in enumerate(tasks):
         mid = (t.lo + t.hi) / 2
@@ -84,7 +99,7 @@ def run_sim(job):
 
 # ---- curriculum data --------------------------------------------------------------------------------------------------
 def simulate():
-    path = f"{OUT}/curriculum_data.pkl"
+    path = f"{DATA}/curriculum_data.pkl"
     if os.path.exists(path):
         print("curriculum data exist")
         return
@@ -106,7 +121,7 @@ def simulate():
 
 
 # ---- fitting one task, any arm ----------------------------------------------------------------------------------------
-def fit_one(names, mnames, lo, hi, X, y, M, domain, use_guide, lib_specs, prior, memory):
+def fit_one(names, mnames, lo, hi, X, y, M, domain, use_guide, lib_specs, prior, memory, noise=None):
     """Returns (finder, guide or None). use_guide: G1 + G2 (+ G3 when a memory is given)."""
     prior = dict(prior or {})
     g = None
@@ -122,7 +137,7 @@ def fit_one(names, mnames, lo, hi, X, y, M, domain, use_guide, lib_specs, prior,
             start_tr = g.transform
         hints = g.hints()
     f = Finder(names, mnames, library=lib_specs, prior=prior).fit(X, y, M, domain, hints=hints, start=start,
-                                                                   start_transform=start_tr)
+                                                                   start_transform=start_tr, noise=noise)
     return f, g
 
 
@@ -134,28 +149,29 @@ def wake_task(args):
     k, cycle = args
     warnings.simplefilter("ignore")
     task = curriculum()[k]
-    path = f"{OUT}/cycle{cycle}/{task.name}.pkl"
+    path = f"{out()}/cycle{cycle}/{task.name}.pkl"
     if os.path.exists(path):
         return task.name, "cached"
-    data = load(f"{OUT}/curriculum_data.pkl")[task.name]
-    lib, prior, memory = ([], {}, None) if cycle == 1 else load(f"{OUT}/sleep{cycle - 1}.pkl")[:3]
+    data = load(f"{DATA}/curriculum_data.pkl")[task.name]
+    lib, prior, memory = ([], {}, None) if cycle == 1 else load(f"{out()}/sleep{cycle - 1}.pkl")[:3]
     t0 = time.time()
+    rough = json.load(open(f"{DATA}/roughness.json"))[task.name]
     f, g = fit_one(task.names, task.mnames, task.lo, task.hi, data["X"], data["y"], data["M"], data["domain"], True,
-                   [t.spec() for t in lib], prior, memory)
+                   [t.spec() for t in lib], prior, memory, noise_for(rough, data["y"]))
     pred = f.predict_one(f.best, data["X"], data["M"])
     nrmse = float(np.sqrt(np.mean((pred - data["y"]) ** 2)) / data["y"].std())
     rec = f.best
-    out = dict(name=task.name, nrmse_train=nrmse, formula=f.formula(), terms=f.n_terms(), seconds=time.time() - t0,
-               used=templates_used(rec), signature=g.signature(len(task.names)),
-               record=dict(state=rec["state"], transform=rec["transform"]))
-    save(out, path)
+    result = dict(name=task.name, nrmse_train=nrmse, formula=f.formula(), terms=f.n_terms(), seconds=time.time() - t0,
+                  used=templates_used(rec), signature=g.signature(len(task.names)),
+                  record=dict(state=rec["state"], transform=rec["transform"]))
+    save(result, path)
     return task.name, f"NRMSE(train) {nrmse:.4f} terms {f.n_terms()} {time.time() - t0:.0f}s  {f.formula()[:110]}"
 
 
 def wake(cycle, budget=540):
     t0 = time.time()
     tasks = curriculum()
-    todo = [(k, cycle) for k, t in enumerate(tasks) if not os.path.exists(f"{OUT}/cycle{cycle}/{t.name}.pkl")]
+    todo = [(k, cycle) for k, t in enumerate(tasks) if not os.path.exists(f"{out()}/cycle{cycle}/{t.name}.pkl")]
     with Pool(8) as pool:
         for name, msg in pool.imap_unordered(wake_task, todo):
             print(f"cycle {cycle} {name:34s} {msg}", flush=True)
@@ -163,7 +179,7 @@ def wake(cycle, budget=540):
                 pool.terminate()
                 print("budget reached; run again to continue", flush=True)
                 return
-    done = sum(os.path.exists(f"{OUT}/cycle{cycle}/{t.name}.pkl") for t in tasks)
+    done = sum(os.path.exists(f"{out()}/cycle{cycle}/{t.name}.pkl") for t in tasks)
     print(f"cycle {cycle}: {done}/{len(tasks)} tasks done, {time.time() - t0:.0f}s")
 
 
@@ -209,10 +225,10 @@ def fantasies(lib, rng, n=N_FANTASY):
 
 def sleep(cycle):
     tasks = curriculum()
-    results = {t.name: load(f"{OUT}/cycle{cycle}/{t.name}.pkl") for t in tasks}
-    prev_lib = [] if cycle == 1 else load(f"{OUT}/sleep{cycle - 1}.pkl")[0]
+    results = {t.name: load(f"{out()}/cycle{cycle}/{t.name}.pkl") for t in tasks}
+    prev_lib = [] if cycle == 1 else load(f"{out()}/sleep{cycle - 1}.pkl")[0]
     corpus = LIB.Corpus()
-    floor = json.load(open(f"{OUT}/roughness.json"))
+    floor = json.load(open(f"{DATA}/roughness.json"))
     solved = [r for r in results.values() if r["nrmse_train"] <= max(SOLVED, 2 * floor[r["name"]])]
     for r in solved:
         corpus.add(r["record"], N_TRAIN)
@@ -224,7 +240,7 @@ def sleep(cycle):
         memory.add(r["signature"], r["used"])
     for sig, used in fantasies(lib, np.random.default_rng([cycle, 99])):
         memory.add(sig, used)
-    save((lib, prior, memory, dict(log=log, solved=len(solved), n_tasks=len(tasks))), f"{OUT}/sleep{cycle}.pkl")
+    save((lib, prior, memory, dict(log=log, solved=len(solved), n_tasks=len(tasks))), f"{out()}/sleep{cycle}.pkl")
     print(f"sleep {cycle}: {len(solved)}/{len(tasks)} tasks solved (train NRMSE <= max({SOLVED}, 2 x roughness)); "
           f"library learning {time.time() - t0:.0f}s")
     for entry in log:
@@ -241,8 +257,8 @@ def outside(t, lo, hi):
 
 
 def simulate_heldout():
-    assert os.path.exists(f"{OUT}/sleep3.pkl"), "the library must be frozen (sleep 3) before the held-out tasks exist"
-    path = f"{OUT}/heldout_data.pkl"
+    assert os.path.exists(f"{out()}/sleep3.pkl"), "the library must be frozen (sleep 3) before the held-out tasks exist"
+    path = f"{DATA}/heldout_data.pkl"
     if os.path.exists(path):
         print("held-out data exist")
         return
@@ -297,8 +313,8 @@ def evaluate_one(args):
     from regression.claude.symreg import SymbolicRegressor
     from regression.claude.surrogates import GP
     task = heldout()[k]
-    data = load(f"{OUT}/heldout_data.pkl")[task.name]
-    lib, prior, memory = load(f"{OUT}/sleep3.pkl")[:3]
+    data = load(f"{DATA}/heldout_data.pkl")[task.name]
+    lib, prior, memory = load(f"{out()}/sleep3.pkl")[:3]
     S = data["sets"]
     X, y = S[f"train{seed}"][:n], data[f"y_train{seed}"][:n]
     M = task.margins(X)
@@ -319,8 +335,9 @@ def evaluate_one(args):
     else:
         use_guide = arm in ("A2", "A4")
         specs = [t.spec() for t in lib] if arm in ("A3", "A4") else None
+        rough = json.load(open(f"{DATA}/roughness_heldout.json"))[task.name] if variant() == "nf" else 0.0
         f, _ = fit_one(task.names, task.mnames, task.lo, task.hi, X, y, M, data["domain"], use_guide, specs,
-                       prior if specs else None, memory if arm == "A4" else None)
+                       prior if specs else None, memory if arm == "A4" else None, noise_for(rough, y))
         pred = lambda Z: f.predict(Z, task.margins(Z))
         rec.update(formula=f.formula(), terms=f.n_terms(), frontier=len(f.frontier),
                    spread_ex=f.spread(S["extrap"], task.margins(S["extrap"]), y.std()),
@@ -337,14 +354,53 @@ def evaluate_one(args):
 ARMS = ("A0", "A1", "A2", "A3", "A4", "GP")
 
 
+def arms():
+    return ("A1", "A2", "A3", "A4") if variant() == "nf" else ARMS
+
+
+def roughness_heldout():
+    """As `roughness`, for the held-out tasks (B2): sweeps through the box centre, over the std of the seed-0 pool's y."""
+    path = f"{DATA}/roughness_heldout.json"
+    if os.path.exists(path):
+        print("held-out roughness exists")
+        return
+    tasks, data = heldout(), load(f"{DATA}/heldout_data.pkl")
+    sweeps, jobs = {}, []
+    for k, t in enumerate(tasks):
+        mid = (t.lo + t.hi) / 2
+        for i in range(len(t.names)):
+            X = np.repeat(mid[None], 61, 0)
+            X[:, i] = np.linspace(t.lo[i], t.hi[i], 61)
+            X = X[t.feasible(X)]
+            sweeps[(t.name, i)] = X
+            jobs += [("h", k, x) for x in X]
+    with Pool(8) as pool:
+        ys = pool.map(run_sim, jobs, chunksize=8)
+    res, at = {}, 0
+    for t in tasks:
+        floors = []
+        for i in range(len(t.names)):
+            X = sweeps[(t.name, i)]
+            y = np.array(ys[at:at + len(X)])
+            at += len(X)
+            if len(X) >= 15:
+                u = (X[:, i] - X[:, i].mean()) / X[:, i].std()
+                floors.append(float(np.std(y - np.polyval(np.polyfit(u, y, 8), u)) / data[t.name]["y_train0"].std()))
+        res[t.name] = max(floors) if floors else 0.0
+    json.dump(res, open(path, "w"), indent=1)
+    for name, v in res.items():
+        print(f"   {name:26s} roughness {v:.4f}")
+
+
 def evaluate(budget=540):
-    path = f"{OUT}/heldout_results.jsonl"
+    path = f"{out()}/heldout_results.jsonl"
     have = {(r["task"], r["arm"], r["n"], r["seed"]) for r in map(json.loads, open(path))} if os.path.exists(path) else set()
     tasks = heldout()
-    jobs = [(k, arm, n, s) for k, t in enumerate(tasks) for n in BUDGETS for s in SEEDS for arm in ARMS
+    jobs = [(k, arm, n, s) for k, t in enumerate(tasks) for n in BUDGETS for s in SEEDS for arm in arms()
             if (t.name, arm, n, s) not in have]
-    jobs += [(k, arm, n, s) for k, t in enumerate(tasks) if t.family == "stepped" for n in BUDGETS for s in SEEDS
-             for arm in ("law_bending", "law_bending_shear") if (t.name, arm, n, s) not in have]
+    if not variant():
+        jobs += [(k, arm, n, s) for k, t in enumerate(tasks) if t.family == "stepped" for n in BUDGETS for s in SEEDS
+                 for arm in ("law_bending", "law_bending_shear") if (t.name, arm, n, s) not in have]
     t0 = time.time()
     with Pool(8) as pool:
         for rec in pool.imap_unordered(evaluate_one, jobs):
@@ -361,13 +417,18 @@ def evaluate(budget=540):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("stage", choices=("simulate", "roughness", "wake", "sleep", "heldout", "evaluate", "report"))
+    p.add_argument("stage", choices=("simulate", "roughness", "roughness_heldout", "wake", "sleep", "heldout",
+                                      "evaluate", "report"))
     p.add_argument("cycle", nargs="?", type=int, default=1)
+    p.add_argument("--variant", default="")
     a = p.parse_args()
+    os.environ["CURRICULUM_VARIANT"] = a.variant          # read by the worker processes too
     if a.stage == "simulate":
         simulate()
     elif a.stage == "roughness":
         roughness()
+    elif a.stage == "roughness_heldout":
+        roughness_heldout()
     elif a.stage == "wake":
         wake(a.cycle)
     elif a.stage == "sleep":
@@ -378,7 +439,7 @@ def main():
         evaluate()
     else:
         from regression.claude.curriculum_report import report
-        report()
+        report(out())
 
 
 if __name__ == "__main__":
