@@ -214,9 +214,14 @@ def fantasies(lib, rng, n=N_FANTASY):
         y, used = np.full(50, rng.uniform(0, 2)), []
         for _ in range(int(rng.integers(1, 5))):
             s = pool[int(rng.integers(len(pool)))]
-            if s["group"] and d < 2 or s["slots"] > d:
+            if s["group"] and d < 2 or s["slots"] > d or (s["group"] and s["slots"] == 2 and d < 3):
                 continue
-            bind = [(v,) for v in range(d)] if s["group"] else [tuple(rng.choice(d, s["slots"], replace=False))]
+            if s["group"] and s["slots"] == 2:                   # a relational template: all input pairs
+                bind = [tuple(p) for p in __import__("itertools").combinations(range(d), 2)]
+            elif s["group"]:
+                bind = [(v,) for v in range(d)]
+            else:
+                bind = [tuple(rng.choice(d, s["slots"], replace=False))]
             theta = np.array(s["theta"], float).copy()
             for j in np.nonzero(s["free"])[0]:
                 theta[j] = rng.choice(GRID)

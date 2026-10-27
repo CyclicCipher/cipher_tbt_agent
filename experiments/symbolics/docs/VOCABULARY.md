@@ -84,3 +84,23 @@ inner searches. All are compared by BIC on the y scale.
     python -m regression.claude.curriculum --variant v3 wake 1   (then sleep 1, wake 2, sleep 2, wake 3, sleep 3)
     python -m regression.claude.curriculum --variant v3 evaluate
     python -m regression.claude.curriculum --variant v3 report
+
+## Amendments (during the build, before any curriculum or held-out run)
+
+- **2026-10-26, how outer functions are scored.** As specified (first-order sensitivity fit R²), the score failed two
+  build checks:
+  - In one dimension every transform scores about 0.999, so it can't discriminate: for 1/(1 + 4x²) the right
+    transform, 1/y, ranked 5th and wasn't searched.
+  - It penalizes products: for √(1 + x²y) the right transform, y², whose target is the single term 1 + x²y, ranked 10th
+    of 11.
+
+  Amended to what the inner search can use: a 3-term greedy screen of the target (grid starts, no refinement),
+  measured by the squared error on the y scale. After the change, √(1 + x²y) is found exactly as y² = 1 + 0.9992·x²y.
+  A limitation seen on the way: the family's outer powers are fixed, so (2 + ab²)^−1.5, whose inverse power −2/3 is
+  missing, gets only the nearest member, y^−½.
+- **Build checks of the other two extensions** (recorded, not amendments):
+  - Combined-input atoms recover (1.2 − a − b)^−1.5 and 3 log(1 + 2a + b) exactly, with the right directions.
+  - Pair detection on the 3-segment curriculum beams finds only adjacent pairs, but sometimes only one of the two (the
+    ¼-of-the-largest rule).
+  - On a 4-input test function with neighbour interactions, detection failed (all shares ≈ 10⁻⁴). The all-pairs
+    relational group still put coefficients ≈ 4.5 on the adjacent pairs and ≈ 0 on the others.
