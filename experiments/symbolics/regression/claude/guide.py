@@ -8,6 +8,10 @@ G2 statistics      additivity: a first-order functional-ANOVA fit (a degree-4 po
                    2026-10-26 before any held-out run: comparing the 1-D fits' term syntax missed equivalent forms,
                    e.g. x^-3 and (x + 0.0004)^-3).
                    Separability: the size of the cross terms of a full quadratic fit of log y, relative to the rest.
+G2 pairs (B3)      a second-order sensitivity fit in the chosen transform: t = b0 + sum_i P4(z_i) + sum_{i<j}
+                   (c1 z_i z_j + c2 z_i^2 z_j + c3 z_i z_j^2), least squares with a 1e-6 ridge; a pair's share is the
+                   variance of its fitted interaction part over the variance of t; detected: share >= 1/4 of the largest
+                   and >= 1e-4. Input names are never used.
 G3 case memory     signature = (inputs, the two additivity R^2, sorted exponent estimates, separability); the 3 nearest
                    solved tasks (training tasks and fantasies) multiply the prior of the templates they used by 3.
 """
@@ -57,6 +61,32 @@ def exponent_estimates(B, lo, hi, total_var):
     return out
 
 
+def pair_shares(X, t, lo, hi):
+    """{(i, j): share of the variance of t in the pair's fitted interaction part}."""
+    Z = scaled(np.asarray(X, float), lo, hi)
+    n, d = Z.shape
+    pairs = list(itertools.combinations(range(d), 2))
+    if not pairs:
+        return {}
+    first = [np.ones(n)] + [Z[:, i] ** k for i in range(d) for k in range(1, 5)]
+    blocks = [np.column_stack([Z[:, i] * Z[:, j], Z[:, i] ** 2 * Z[:, j], Z[:, i] * Z[:, j] ** 2]) for i, j in pairs]
+    A = np.column_stack(first + blocks)
+    G = A.T @ A
+    coef = np.linalg.solve(G + 1e-6 * np.mean(np.diag(G)) * np.eye(len(G)), A.T @ t)
+    at, var, out = len(first), max(np.var(t), 1e-300), {}
+    for (i, j), B in zip(pairs, blocks):
+        out[(i, j)] = float(np.var(B @ coef[at:at + 3]) / var)
+        at += 3
+    return out
+
+
+def detect_pairs(shares):
+    if not shares:
+        return []
+    top = max(shares.values())
+    return sorted(p for p, v in shares.items() if v >= 0.25 * top and v >= 1e-4)
+
+
 def separability(X, y, lo, hi):
     """Cross-term share of a full quadratic fit of log y: near 0 for y = g(x_1) h(x_2) ..., larger otherwise."""
     if X.shape[1] < 2 or np.any(y <= 0):
@@ -87,13 +117,16 @@ class Guide:
         self.sep = separability(X, y, self.lo, self.hi)
         self.additive = self.r2[self.transform] >= ADDITIVE
         self.groups = exchangeable(self.exponents)
+        self.shares = pair_shares(X, t, self.lo, self.hi)
+        self.pairs = detect_pairs(self.shares)
 
     def signature(self, d):
         e = sorted(self.exponents.values()) + [0.0] * MAX_D
         return np.array([d, self.r2.get("identity", 0.0), self.r2.get("log", 0.0)] + e[:MAX_D] + [self.sep])
 
     def hints(self):
-        return {"exponents": {i: [p] for i, p in self.exponents.items()}, "groups": [list(g) for g in self.groups]}
+        return {"exponents": {i: [p] for i, p in self.exponents.items()}, "groups": [list(g) for g in self.groups],
+                "pairs": [tuple(p) for p in self.pairs]}
 
     def decompose(self, X, y, make_finder, margins=None, domain=None):
         """Fit each input's component with a 1-D finder on its partial residual (backfitting), and return the

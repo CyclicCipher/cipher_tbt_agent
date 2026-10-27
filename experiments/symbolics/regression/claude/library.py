@@ -80,6 +80,9 @@ class Corpus:
     def add(self, finder_record, n):
         terms = []
         for b in finder_record["state"].blocks:
+            if getattr(b, "kind", None) in ("affine", "alog"):        # combined-input atoms: task-specific directions
+                terms.append(dict(struct=((b.kind,), (0,)), theta=np.asarray(b.theta, float), prim=b.kind))
+                continue
             for bind in b.bindings:                                   # a group block contributes one term per input
                 single = type(b)(b.factors, [bind], b.theta, b.free, b.template)
                 st, th = structure(single)
@@ -135,7 +138,8 @@ def candidates(corpus, existing):
 
     def offer(struct, theta, fixed, group):
         # margins index a task's own constraints, not inputs: they stay primitives, never part of a template
-        if len(struct[0]) > MAX_FACTORS or (not fixed.any() and not group) or "margin" in struct[0]:
+        if len(struct[0]) > MAX_FACTORS or (not fixed.any() and not group) or \
+                {"margin", "affine", "alog"} & set(struct[0]):
             return
         key = (struct, group, tuple(np.round(np.where(fixed, theta, np.nan), 2)))
         if key not in seen:
@@ -144,15 +148,25 @@ def candidates(corpus, existing):
 
     by_struct = {}
     for term in terms:
-        by_struct.setdefault(term["struct"], []).append(term)
+        if not {"affine", "alog"} & set(term["struct"][0]):
+            by_struct.setdefault(term["struct"], []).append(term)
     for struct, group in by_struct.items():
         for a in range(len(group)):
             for b in range(a + 1, len(group)):
                 ta, tb = group[a]["theta"], group[b]["theta"]
                 fixed = np.abs(ta - tb) <= TOL
                 offer(struct, np.where(fixed, (ta + tb) / 2, ta), fixed, False)
+    for task in corpus.tasks:                                          # relational folding: two-input terms
+        twos = [t for t in task["terms"] if t["struct"][1] == (0, 1)]
+        for a in range(len(twos)):
+            same = [twos[a]] + [s for s in twos[a + 1:] if s["struct"] == twos[a]["struct"]
+                                and np.all(np.abs(s["theta"] - twos[a]["theta"]) <= TOL)]
+            if len(same) >= 2:
+                theta = np.mean([s["theta"] for s in same], 0)
+                offer(twos[a]["struct"], theta, np.ones(len(theta), bool), True)
     for task in corpus.tasks:
-        singles = [t for t in task["terms"] if len(set(t["struct"][1])) == 1]
+        singles = [t for t in task["terms"] if len(set(t["struct"][1])) == 1 and
+                   not {"affine", "alog"} & set(t["struct"][0])]
         for a in range(len(singles)):
             same = [singles[a]] + [s for s in singles[a + 1:] if s["struct"] == singles[a]["struct"]
                                    and np.all(np.abs(s["theta"] - singles[a]["theta"]) <= TOL)]

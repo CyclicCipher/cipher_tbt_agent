@@ -42,7 +42,17 @@ def out():
 
 
 def noise_for(rough, y):
-    return max(rough, NOISE_FLOOR) * float(np.std(y)) if variant() == "nf" else None
+    return max(rough, NOISE_FLOOR) * float(np.std(y)) if variant() in ("nf", "v3") else None
+
+
+def finder_opts(arm="A4"):
+    """B3 (variant v3): finder version 3, minus one extension in the ablation arms."""
+    if variant() != "v3":
+        return {}
+    opts = dict(outer=True, affine=True, relational=True)
+    if arm.startswith("A2-"):
+        opts[{"inv": "outer", "aff": "affine", "rel": "relational"}[arm[3:]]] = False
+    return opts
 
 
 def save(obj, path):
@@ -121,7 +131,7 @@ def simulate():
 
 
 # ---- fitting one task, any arm ----------------------------------------------------------------------------------------
-def fit_one(names, mnames, lo, hi, X, y, M, domain, use_guide, lib_specs, prior, memory, noise=None):
+def fit_one(names, mnames, lo, hi, X, y, M, domain, use_guide, lib_specs, prior, memory, noise=None, opts=None):
     """Returns (finder, guide or None). use_guide: G1 + G2 (+ G3 when a memory is given)."""
     prior = dict(prior or {})
     g = None
@@ -136,8 +146,8 @@ def fit_one(names, mnames, lo, hi, X, y, M, domain, use_guide, lib_specs, prior,
                                    domain=domain)
             start_tr = g.transform
         hints = g.hints()
-    f = Finder(names, mnames, library=lib_specs, prior=prior).fit(X, y, M, domain, hints=hints, start=start,
-                                                                   start_transform=start_tr, noise=noise)
+    f = Finder(names, mnames, library=lib_specs, prior=prior, **(opts or {})).fit(
+        X, y, M, domain, hints=hints, start=start, start_transform=start_tr, noise=noise)
     return f, g
 
 
@@ -157,13 +167,14 @@ def wake_task(args):
     t0 = time.time()
     rough = json.load(open(f"{DATA}/roughness.json"))[task.name]
     f, g = fit_one(task.names, task.mnames, task.lo, task.hi, data["X"], data["y"], data["M"], data["domain"], True,
-                   [t.spec() for t in lib], prior, memory, noise_for(rough, data["y"]))
+                   [t.spec() for t in lib], prior, memory, noise_for(rough, data["y"]), finder_opts())
     pred = f.predict_one(f.best, data["X"], data["M"])
     nrmse = float(np.sqrt(np.mean((pred - data["y"]) ** 2)) / data["y"].std())
     rec = f.best
     result = dict(name=task.name, nrmse_train=nrmse, formula=f.formula(), terms=f.n_terms(), seconds=time.time() - t0,
                   used=templates_used(rec), signature=g.signature(len(task.names)),
-                  record=dict(state=rec["state"], transform=rec["transform"]))
+                  record=dict(state=rec["state"], transform=rec["transform"]), pairs=list(getattr(g, "pairs", [])),
+                  outer=str(rec["transform"]))
     save(result, path)
     return task.name, f"NRMSE(train) {nrmse:.4f} terms {f.n_terms()} {time.time() - t0:.0f}s  {f.formula()[:110]}"
 
@@ -333,11 +344,12 @@ def evaluate_one(args):
         c = np.linalg.lstsq(cols(X), y, rcond=None)[0]
         pred = lambda Z: cols(Z) @ c
     else:
-        use_guide = arm in ("A2", "A4")
+        use_guide = arm in ("A2", "A4") or arm.startswith("A2-")
         specs = [t.spec() for t in lib] if arm in ("A3", "A4") else None
-        rough = json.load(open(f"{DATA}/roughness_heldout.json"))[task.name] if variant() == "nf" else 0.0
-        f, _ = fit_one(task.names, task.mnames, task.lo, task.hi, X, y, M, data["domain"], use_guide, specs,
-                       prior if specs else None, memory if arm == "A4" else None, noise_for(rough, y))
+        rough = json.load(open(f"{DATA}/roughness_heldout.json"))[task.name] if variant() in ("nf", "v3") else 0.0
+        f, g = fit_one(task.names, task.mnames, task.lo, task.hi, X, y, M, data["domain"], use_guide, specs,
+                       prior if specs else None, memory if arm == "A4" else None, noise_for(rough, y), finder_opts(arm))
+        rec.update(outer=str(f.best["transform"]), pairs=[list(p) for p in getattr(g, "pairs", [])] if g else [])
         pred = lambda Z: f.predict(Z, task.margins(Z))
         rec.update(formula=f.formula(), terms=f.n_terms(), frontier=len(f.frontier),
                    spread_ex=f.spread(S["extrap"], task.margins(S["extrap"]), y.std()),
@@ -355,6 +367,8 @@ ARMS = ("A0", "A1", "A2", "A3", "A4", "GP")
 
 
 def arms():
+    if variant() == "v3":
+        return ("A1", "A2", "A3", "A4", "A2-inv", "A2-aff", "A2-rel")
     return ("A1", "A2", "A3", "A4") if variant() == "nf" else ARMS
 
 

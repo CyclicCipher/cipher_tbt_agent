@@ -18,6 +18,8 @@ def gmean(v):
 
 
 def report(out_dir=OUT):
+    if out_dir.endswith("_v3"):
+        return report_v3(out_dir)
     if out_dir != OUT:
         return report_b2(out_dir)
     rs = [json.loads(l) for l in open(f"{OUT}/heldout_results.jsonl")]
@@ -142,3 +144,67 @@ def report_b2(out_dir):
     print("Limit checks, B2 A4 at n = 100 (stepped: 1 ideal; plate: 1 ideal; holes: 0 ideal):",
           {t[:2]: round(float(np.mean([r['limit'] for r in B2[(t, 'A4', 100)]['rows'] if r['limit'] is not None])), 3)
            for t in TASKS if any(r['limit'] is not None for r in B2[(t, 'A4', 100)]['rows'])})
+
+
+def adjacent(task, nseg):
+    return {(i, i + 1) for i in range(nseg - 1)}
+
+
+def report_v3(out_dir):
+    """Experiment B3 beside B2: finder version 3 (outer functions, combined-input atoms, relational groups), arms A1-A4
+    and the three A2 ablations; A0, the GP and the textbook law from B. Inputs to R1-R9 (docs/VOCABULARY.md)."""
+    import pickle
+    from regression.claude.tasks import curriculum
+    rb = [json.loads(l) for l in open(f"{OUT}/heldout_results.jsonl")]
+    r2 = [json.loads(l) for l in open(f"{OUT}_nf/heldout_results.jsonl")]
+    r3 = [json.loads(l) for l in open(f"{out_dir}/heldout_results.jsonl")]
+    B, B2, B3 = summarize(rb), summarize(r2), summarize(r3)
+    for n in (100, 30):
+        print(f"\nn = {n}: NRMSE in / ex / far, geometric mean over 3 seeds")
+        for task in TASKS:
+            print(f"   {task}")
+            for arm in ("A0", "GP", "law_bending"):
+                if (task, arm, n) in B:
+                    v = B[(task, arm, n)]
+                    print(f"      {arm:14s} {v['nin']:.4f} / {v['nex']:.4f} / {v['nfar']:.4g}")
+            v = B2[(task, "A4", n)]
+            print(f"      {'A4 (B2)':14s} {v['nin']:.4f} / {v['nex']:.4f} / {v['nfar']:.4g}   terms {np.median([t for t in v['terms'] if t]):.0f}")
+            for arm in ("A1", "A2", "A3", "A4", "A2-inv", "A2-aff", "A2-rel"):
+                v = B3.get((task, arm, n))
+                if v:
+                    print(f"      {arm + ' (B3)':14s} {v['nin']:.4f} / {v['nex']:.4f} / {v['nfar']:.4g}   terms "
+                          f"{np.median([t for t in v['terms'] if t]):.0f}  {v['seconds']:.0f}s")
+    for task in TASKS:
+        print(f"   {task} A4 formula (B3, n = 100, seed 0): {B3[(task, 'A4', 100)]['formula'][:240]}")
+    S = lambda t, a: B3[(t, a, 100)]
+    # R1: pair detection on stepped tasks with >= 3 segments, curriculum (cycle 3) and held-out (A2 and A4 fits)
+    tp = fp = fn = 0
+    for t in curriculum():
+        if t.family == "stepped" and t.names[-1] != "L" and len(t.names) >= 3:
+            res = pickle.load(open(f"{out_dir}/cycle3/{t.name}.pkl", "rb"))
+            adj, det = adjacent(t, len(t.names)), {tuple(p) for p in res.get("pairs", [])}
+            tp, fp, fn = tp + len(adj & det), fp + len(det - adj), fn + len(adj - det)
+    for r in r3:
+        if r["task"] in ("H1_stepped6_tip", "H4_stepped4_uniform", "H5_clamped3_mid") and r["arm"] in ("A2", "A4"):
+            nseg = {"H1_stepped6_tip": 6, "H4_stepped4_uniform": 4, "H5_clamped3_mid": 3}[r["task"]]
+            adj, det = adjacent(r["task"], nseg), {tuple(p) for p in r.get("pairs", [])}
+            tp, fp, fn = tp + len(adj & det), fp + len(det - adj), fn + len(adj - det)
+    print(f"\nR1 pair detection on stepped tasks (>= 3 segments): recall {tp / max(tp + fn, 1):.0%} of adjacent pairs, "
+          f"precision {tp / max(tp + fp, 1):.0%} (tp {tp}, fp {fp}, fn {fn})")
+    print(f"R2 H1 A4 at n = 100: in {S(TASKS[0], 'A4')['nin']:.4f}, far {S(TASKS[0], 'A4')['nfar']:.4f}")
+    v3 = [r for r in r3 if r["arm"] in ("A1", "A2", "A3", "A4", "A2-inv", "A2-aff", "A2-rel")]
+    laws = [r for r in v3 if r["n"] == 100 and r["terms"] <= 6 and r["nrmse_test"] <= 0.02 and r["nrmse_far"] <= 0.1]
+    print(f"R3 / R7 candidate laws at n = 100: {len(laws)}")
+    for r in laws:
+        print(f"   {r['task']} {r['arm']} seed {r['seed']}: in {r['nrmse_test']:.4f} far {r['nrmse_far']:.4f} limit {r['limit']}  {r['formula'][:170]}")
+    full = gmean([S(t, "A2")["nin"] for t in TASKS])
+    print("R4 ablations, in-range geometric mean over tasks at n = 100, relative to full A2:",
+          {a: round(gmean([S(t, a)["nin"] for t in TASKS]) / full, 3) for a in ("A2-inv", "A2-aff", "A2-rel")})
+    print(f"R5 largest finder-v3 far NRMSE at n = 100: {max(r['nrmse_far'] for r in v3 if r['n'] == 100):.3g}")
+    print("R6 A4 against the GP at n = 100, in:", {t[:2]: ('A4' if S(t, 'A4')['nin'] < B[(t, 'GP', 100)]['nin'] else 'GP') for t in TASKS},
+          " far:", {t[:2]: ('A4' if S(t, 'A4')['nfar'] < B[(t, 'GP', 100)]['nfar'] else 'GP') for t in TASKS})
+    print(f"R8 slowest held-out fit at n = 100: {max(r['seconds'] for r in v3 if r['n'] == 100):.0f}s")
+    a4 = [r for r in r3 if r["arm"] == "A4" and r["n"] == 100]
+    other = [r for r in a4 if r.get("outer") not in ("('identity',)", "('log', 0.0)")]
+    print(f"R9 A4 fits at n = 100 whose outer function is neither y nor log y: {len(other)}/{len(a4)}",
+          sorted({r['outer'] for r in other}))
