@@ -59,6 +59,7 @@ class ArcAgent:
             self.level = fd.levels_completed
             self.brain.start(grid, new_level=True)
             self.executive.plan, self.prev, self.acted = [], None, 0
+            self.executive.start_grid = grid.copy()
         elif self.prev is None:                         # the level restarted
             self.brain.start(grid, new_level=False)
             self.executive.plan = []
@@ -71,12 +72,17 @@ class ArcAgent:
             else:
                 self.executive.surprise(self.expected)
             self.notes["recruited"] += len(report["recruited"])
+        self.executive.can_reset = self.acted > 0         # the engine restarts the whole game otherwise
         choice = self.executive.decide(list(fd.available_actions))
+        if choice is not None and choice[0][0] == RESET:  # a plan that uses RESET (its effect is in the model)
+            self.prev, self.acted, self.executive.plan = None, 0, []
+            self.notes["reset (planned)"] += 1
+            return RESET, None
         if choice is None:
-            if self.acted:
-                self.prev, self.acted, self.executive.plan = None, 0, []
-                self.notes["reset (no plan)"] += 1
-                return RESET, None
+            choice = self.executive.fallback(list(fd.available_actions))
+            if choice is not None:
+                self.notes["fallback"] += 1
+        if choice is None:
             avail = [a for a in fd.available_actions if a not in (RESET, CLICK)]
             if avail:
                 action = (self.rng.choice(avail), None, None)

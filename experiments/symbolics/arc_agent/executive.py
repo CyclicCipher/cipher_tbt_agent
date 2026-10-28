@@ -3,12 +3,16 @@ and the choice of plan. Part 15b's lexicographic satisficing agent with part 17'
 
 Goal hypotheses are about kinds (a column's content signature), so evidence carries across levels:
 - ("on", kind, c): some column of this kind lies wholly on scene colour c;
-- ("at", kind, state): some column of this kind is in this state.
-Prior: half per family; "on" split evenly over (kind, colour) pairs; "at" split evenly over kinds, each kind's share
-spread over AT_STATES states. A hypothesis that holds without a WIN gains an error; at a WIN, every hypothesis that
+- ("at", kind, state): some column of this kind is in this state;
+- ("joint", states): the columns are in this joint state, a conjunction over columns (part 21: a level's WIN usually
+  needs several columns in particular states at once, so visiting one column's state with the others wrong must not
+  refute it).
+Prior: a third per family; "on" split evenly over (kind, colour) pairs; "at" split evenly over kinds, each kind's
+share spread over AT_STATES states; "joint" spread over JOINT_STATES joint states. A hypothesis that holds without a WIN gains an error; at a WIN, every hypothesis that
 didn't hold gains one. Hypotheses first registered after WINs start charged with them (part 17).
 """
 import math
+import time
 from collections import deque
 
 import numpy as np
@@ -16,7 +20,8 @@ import numpy as np
 from arc_agent.frames import H, W
 
 ALPHA, THETA, STEP_BITS = 0.5, 0.05, 0.02
-DEPTH, MAX_NODES, AT_STATES = 12, 3000, 4096
+DEPTH, MAX_NODES, AT_STATES, JOINT_STATES = 60, 3000, 4096, 10 ** 6   # the node cap bounds the search
+BUDGET = 0.3                                            # seconds per search: an anytime search, the best so far
 LOG_EPS = math.log(0.01)
 
 
@@ -29,6 +34,7 @@ class Goals:
         self.on = {}                                    # (kind, colour) -> errors
         self.at = {}                                    # kind -> {state: errors}
         self.at_rest = {}                               # kind -> errors shared by every state never named
+        self.joint, self.joint_rest = {}, 0             # joint state -> errors; errors of every joint state never named
         self.wins = 0
 
     def register(self, kinds, colours):
@@ -42,15 +48,23 @@ class Goals:
     def _weights(self):
         n_on = max(len(self.on), 1)
         n_k = max(len(self.at), 1)
-        w_on = {key: math.log(0.5 / n_on) + LOG_EPS * e for key, e in self.on.items()}
-        base = {k: math.log(0.5 / n_k / AT_STATES) for k in self.at}
+        w_on = {key: math.log(1 / 3 / n_on) + LOG_EPS * e for key, e in self.on.items()}
+        base = {k: math.log(1 / 3 / n_k / AT_STATES) for k in self.at}
         return w_on, base
 
     def mass(self, held):
         """Posterior probability that the WIN is caused by one of the hypotheses in `held`."""
         w_on, base = self._weights()
-        m = max(list(w_on.values()) + [b + LOG_EPS * self.at_rest[k] for k, b in base.items()] + [-1e9])
+        bj = math.log(1 / 3 / JOINT_STATES)
+        m = max(list(w_on.values()) + [b + LOG_EPS * self.at_rest[k] for k, b in base.items()] +
+                [bj + LOG_EPS * self.joint_rest])
         z, num = 0.0, 0.0
+        z += (JOINT_STATES - len(self.joint)) * math.exp(bj + LOG_EPS * self.joint_rest - m)
+        for s, e in self.joint.items():
+            z += math.exp(bj + LOG_EPS * e - m)
+        for h in held:
+            if h[0] == "joint":
+                num += math.exp(bj + LOG_EPS * self.joint.get(h[1], self.joint_rest) - m)
         for key, w in w_on.items():
             v = math.exp(w - m)
             z += v
@@ -74,6 +88,8 @@ class Goals:
                 self.on[(h[1], h[2])] += 1
             elif h[0] == "at" and h[1] in self.at:
                 self.at[h[1]][h[2]] = self.at[h[1]].get(h[2], self.at_rest[h[1]]) + 1
+            elif h[0] == "joint":
+                self.joint[h[1]] = self.joint.get(h[1], self.joint_rest) + 1
 
     def win(self, held):
         for key in self.on:
@@ -87,6 +103,13 @@ class Goals:
             for s in keep:
                 self.at[k].setdefault(s, self.at_rest[k])
             self.at_rest[k] += 1
+        keep = {h[1] for h in held if h[0] == "joint"}
+        for s in list(self.joint):
+            if s not in keep:
+                self.joint[s] += 1
+        for s in keep:
+            self.joint.setdefault(s, self.joint_rest)
+        self.joint_rest += 1
         self.wins += 1
 
 
@@ -96,10 +119,12 @@ class Executive:
         self.goals = Goals()
         self.plan = []                                  # [(action, expected joint state after it)]
         self.kind_of_plan = None
+        self.start_grid = None                          # the level's first screen: where RESET returns
+        self.can_reset = False
 
     # ---- what holds in a joint state -----------------------------------------------------------------------------
     def held(self, states, static):
-        out = set()
+        out = {("joint", tuple(sorted(states.items())))}
         cols = {c.cid: c for c in self.brain.planning()}
         for cid, s in states.items():
             c = cols[cid]
@@ -147,6 +172,19 @@ class Executive:
                     clicks.append((6, x, y, kind))
         return keys, clicks
 
+    def reset_states(self):
+        """Where each planning column is on the level's first screen (RESET's known effect)."""
+        out = {}
+        for c in self.brain.planning():
+            s = c.state
+            if c.frame.kind == "translation" and self.start_grid is not None:
+                hits = c.frame.find_all(self.start_grid)
+                s = min(hits, key=lambda h: abs(h[0]) + abs(h[1])) if hits else s
+            elif c.frame.kind == "recolour" and self.start_grid is not None:
+                s = c.frame.read(self.start_grid)
+            out[c.cid] = s
+        return out
+
     def search(self, available):
         brain = self.brain
         brain.cache.clear()                             # the model has changed since the last search
@@ -155,19 +193,25 @@ class Executive:
         keys, clicks = self.actions(available)
         root = [(a, ("key", a[0])) for a in keys] + [((6, x, y), k) for _, x, y, k in clicks]
         deep = [(a, k) for a, k in root if k[0] == "key" or k[0] == "click-col" or brain.m1.effect.get(k, (0, 0))[0] > 0]
+        if self.can_reset and self.start_grid is not None:   # RESET: a known effect, so plans may use it
+            restart = self.reset_states()
+            root, deep = root + [((0, None, None), ("reset",))], deep + [((0, None, None), ("reset",))]
         held0 = self.held(start, static)
         out = []                                        # (path, pwin, info); a path is [(action, expected state)]
         q = deque([(start, [], held0, 0.0, 0.0)])
         seen = {tuple(sorted(start.items()))}
-        n = 0
-        while q and n < MAX_NODES:
+        n, t0 = 0, time.time()
+        while q and n < MAX_NODES and time.time() - t0 < BUDGET:
             states, path, held, pwin, info = q.popleft()
             n += 1
             if len(path) >= DEPTH:
                 continue
             for action, kind in (root if not path else deep):
-                new, bits = brain.model_step(states, action, static)
-                if new == states and bits == 0.0 and not path and kind[0] != "click-col" and                         not brain.m1.tried(action) and not brain.modelled(action):
+                if action[0] == 0:
+                    new, bits = {cid: restart.get(cid, s) for cid, s in states.items()}, 0.0
+                else:
+                    new, bits = brain.model_step(states, action, static)
+                if new == states and bits == 0.0 and not path and kind[0] not in ("click-col", "reset") and not brain.m1.tried(action) and not brain.modelled(action):
                     bits = h2(brain.m1.p_effect(kind))  # no column has a model of it, and never tried here
                 if bits >= THETA:                       # an uncertain outcome: a leaf worth its bits
                     out.append((path + [(action, None)], pwin, info + bits))
@@ -202,7 +246,7 @@ class Executive:
             if best[2] - STEP_BITS * len(best[0]) >= THETA:
                 path, kind = best[0], "explore"
             else:
-                appr = [c for c in cands if c[1] > 1e-6]
+                appr = [c for c in cands if c[1] > 0]
                 if not appr:
                     return None
                 path, kind = max(appr, key=lambda c: (c[1], -len(c[0])))[0], "approach"
@@ -211,6 +255,21 @@ class Executive:
         self.last_choice = dict(kind=kind, length=len(path), pwin=round(chosen[1], 4), info=round(chosen[2], 3),
                                 candidates=len(cands), leaf=path[-1][1] is None)
         return self.plan.pop(0)
+
+    def fallback(self, available):
+        """No plan of any kind: the action whose outcome is most uncertain here, else an untried click, else None."""
+        brain = self.brain
+        static = brain.static_scene()
+        start = dict(brain.joint())
+        keys, clicks = self.actions(available)
+        best = None
+        for a in keys + [(6, x, y) for _, x, y, _ in clicks]:
+            _, bits = brain.model_step(start, a, static)
+            if a[0] == 6 and not brain.m1.tried(a):
+                bits = max(bits, 1e-3)
+            if bits > 0 and (best is None or bits > best[0]):
+                best = (bits, a)
+        return None if best is None else (best[1], None)
 
     def surprise(self, expected):
         """Drop the plan if the brain is not where the plan expected it to be."""

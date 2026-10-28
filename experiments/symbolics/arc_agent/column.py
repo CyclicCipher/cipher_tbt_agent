@@ -23,19 +23,27 @@ from arc_agent.spotlight import Spotlight
 A = 0.02                          # pseudo-count: one consistent observation makes a deterministic outcome ~0.98
 PMIN = 0.02
 TOP = 8                           # experts used for a prediction (the most attended)
+CASES = 4                         # conjunction cases per (action, column)
 P_IDENTITY = {"key": 0.5, "self": 0.5, "at": 0.99}  # innate: a click elsewhere rarely changes me (locality)
 
 
 class ConditionalOps:
     """What one action does to one column: attention over experts by track record (accumulated log predictive
-    probability). Unseen values of a feature back off to the unconditional expert."""
+    probability). Unseen values of a feature back off to the unconditional expert.
+
+    Conjunctions (part 21): when the most-attended expert's prediction for a value v is refuted (its table cell has
+    seen two different operators), the case (feature = v) gains one conjunction expert per other feature g, present
+    only when the feature equals v, holding a table from g's value to the operator. Their unseen values back off to
+    the parent expert, and they compete in the same attention."""
 
     def __init__(self, K, identity, p0, conditional=True):
         self.K, self.identity, self.p0, self.conditional = K, identity, p0, conditional
         self.n0 = Counter()                             # the unconditional expert's counts
         self.tables = {}                                # feature -> {value: Counter(op)}
         self.ev = {None: 0.0}                           # expert -> log evidence (None = unconditional)
+        self.cases = []                                 # [(feature, value)] refuted cases with conjunction experts
         self.n = 0
+        self._order = None                              # experts by evidence, cached until the next observation
 
     def _base(self, op):
         return self.p0 if op == self.identity else (1 - self.p0) / (self.K - 1)
@@ -48,9 +56,23 @@ class ConditionalOps:
         rest = A * (1 - self.p0) / (self.K - 1) / (N + A)
         return p, rest
 
+    def _augment(self, ctx):
+        """The context plus the conjunction features of every refuted case that holds here."""
+        if not self.cases:
+            return ctx
+        out = dict(ctx)
+        for f, v in self.cases:
+            if ctx.get(f) == v:
+                for g, gv in ctx.items():
+                    if g != f:
+                        out[("and", f, v, g)] = gv
+        return out
+
     def _expert(self, f, v, p0, rest):
         if f is None:
             return p0, rest
+        if f[0] == "and":                               # a conjunction backs off to its parent expert's case
+            p0, rest = self._expert(f[1], f[2], p0, rest)
         cnt = self.tables.get(f, {}).get(v)
         if not cnt:
             return p0, rest
@@ -59,15 +81,23 @@ class ConditionalOps:
         return p, A * rest / (N + A)
 
     def _weights(self, ctx):
-        feats = [None] + ([f for f in ctx if f in self.ev] if self.conditional else [])
-        top = sorted(feats, key=lambda f: -self.ev[f])[:TOP]
+        if self._order is None:
+            self._order = sorted(self.ev, key=lambda f: -self.ev[f])
+        top = []
+        for f in self._order:                           # the most attended experts that this context can feed
+            if f is None or (self.conditional and f in ctx):
+                top.append(f)
+                if len(top) == TOP:
+                    break
         m = max(self.ev[f] for f in top)
         w = {f: math.exp(self.ev[f] - m) for f in top}
         z = sum(w.values())
         return {f: x / z for f, x in w.items()}
 
     def dist(self, ctx):
-        """The attention-weighted prediction: ({operator: p}, probability of each operator never seen)."""
+        """The attention-weighted prediction: ({operator: p}, probability of each operator never seen). ctx is a dict
+        of every feature, or a lazy context (brain.LazyContext) that computes only the features asked for."""
+        ctx = self._augment(ctx) if self.conditional and isinstance(ctx, dict) else ctx
         p0, rest = self._p0()
         out, r = Counter(), 0.0
         for f, w in self._weights(ctx).items():
@@ -90,18 +120,26 @@ class ConditionalOps:
         """Each expert is scored on its prediction of this outcome, then every expert learns it."""
         p0, rest = self._p0()
         if self.conditional:
+            ctx = self._augment(ctx)
             for f in ctx:
-                if f not in self.ev:                    # a new feature: no track record, starts level with the prior
-                    self.ev[f] = self.ev[None]
+                if f not in self.ev:                    # a new feature: no track record; a conjunction starts with
+                    self.ev[f] = self.ev[f[1]] if f[0] == "and" else self.ev[None]   # its parent's, others the prior's
         for f in list(self.ev):
             if f is not None and f not in ctx:
                 continue
             p, pr = self._expert(f, ctx.get(f), p0, rest)
             self.ev[f] += math.log(max(p.get(op, pr), 1e-12))
         self.n0[op] += 1
+        self._order = None
         if self.conditional:
             for f, v in ctx.items():
                 self.tables.setdefault(f, {}).setdefault(v, Counter())[op] += 1
+            base = [f for f in ctx if f[0] != "and"]
+            if base and len(self.cases) < CASES:      # refutation: the most-attended expert's cell is mixed
+                top = max(base, key=lambda f: self.ev[f])
+                case = (top, ctx[top])
+                if case not in self.cases and len(self.tables[top][ctx[top]]) >= 2:
+                    self.cases.append(case)
         self.n += 1
 
     def attended(self):
@@ -132,10 +170,10 @@ class Column:
         aid, x, y = action
         if aid != 6:
             return ("key", aid)
-        cells = self.frame.place(self.state if state is None else state)
-        if any(cx == x and cy == y for cx, cy in cells.tolist()):
-            return ("self",)
-        return ("at", x, y)
+        s = self.state if state is None else state
+        if getattr(self, "_cellset", (None,))[0] != s:  # cached per state: the click test runs inside the search
+            self._cellset = (s, set(map(tuple, self.frame.place(s).tolist())))
+        return ("self",) if (x, y) in self._cellset[1] else ("at", x, y)
 
     def belief(self, akey):
         if akey not in self.keys:

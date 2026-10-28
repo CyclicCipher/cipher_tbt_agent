@@ -21,6 +21,7 @@ from arc_agent.frames import H, W, Bar, Recolour, Translation
 from arc_agent.spotlight import Spotlight
 
 RADIUS = 16                       # the largest displacement looked for in one step
+FRAC = 0.75                       # a column is still itself when this share of its cells match (structure persists)
 MAX_SITES = 24                    # more change sites than this in one step is a scene change, not motion
 
 
@@ -68,6 +69,53 @@ def regions(grid):
 
 def size_bucket(n):
     return 0 if n <= 2 else 1 if n <= 9 else 2 if n <= 36 else 3 if n <= 144 else 4
+
+
+class LazyContext:
+    """A column's context computed on demand (for planning): the same features as Brain.context, but each is read only
+    when an expert asks for it. Conjunction features ("and", f, v, g) are present when f's value is v."""
+
+    def __init__(self, brain, col, state, scene, others, under):
+        self.col, self.state, self.scene, self.others, self.under = col, state, scene, others, under
+        self.window = brain.window_set(col)
+        self.cells = col.frame.place(state)
+        self.anchor = self.cells[0]
+        self.own, self.vals = None, {}
+
+    def __contains__(self, f):
+        if f[0] == "at":
+            return (f[1], f[2]) in self.window
+        if f[0] == "self":
+            return True
+        if f[0] == "col":
+            return f[1] in self.others and f[1] != self.col.cid
+        if f[0] == "and":
+            return f[1] in self and f[3] in self and self.get(f[1]) == f[2]
+        return False
+
+    def get(self, f, default=None):
+        if f is None:                                   # the unconditional expert reads nothing
+            return default
+        if f in self.vals:
+            return self.vals[f]
+        if f[0] == "at":
+            x, y = int(self.anchor[0]) + f[1], int(self.anchor[1]) + f[2]
+            if not (0 <= x < W and 0 <= y < H):
+                v = -1
+            else:
+                if self.own is None:
+                    self.own = set(map(tuple, self.cells.tolist()))
+                v = self.under(x, y) if (x, y) in self.own else int(self.scene[y, x])
+        elif f[0] == "self":
+            v = self.state
+        elif f[0] == "col":
+            v = self.others.get(f[1], default)
+        elif f[0] == "and":
+            v = self.get(f[3], default)
+        else:
+            v = default
+        self.vals[f] = v
+        return v
 
 
 class V1:
@@ -167,6 +215,12 @@ class Brain:
             col._window = (key, np.array([(x, y) for y in ys for x in xs], int))
         return col._window[1]
 
+    def window_set(self, col):
+        offs = self.window(col)
+        if getattr(col, "_window_set", (None,))[0] is not col._window:
+            col._window_set = (col._window, set(map(tuple, offs.tolist())))
+        return col._window_set[1]
+
     def context(self, col, state, scene, others, under):
         """The column's features: ("at", dx, dy) the content at that position relative to its anchor (beneath the
         column: what lies under it; off the screen: -1); ("self",) its own state; ("col", cid) another column's
@@ -224,6 +278,14 @@ class Brain:
                 p, _ = c.dist(akey, ctx)
                 guess = f.apply(old, max(p, key=p.get))
                 new = guess if f.matches(after, guess) else f.find(after, old, RADIUS)
+                if new is None:                         # part of its content changed: the best partial match nearby
+                    new = guess if f.score(after, guess) >= FRAC else f.find_near(after, old, RADIUS, FRAC)
+                    if new is not None:                 # rewrite the changed cells in its content memory
+                        p = f.place(new)
+                        seen = after[p[:, 1], p[:, 0]]
+                        for i in np.nonzero(seen != f.colours)[0]:
+                            f.colours[i] = seen[i]
+                            c.content.write(int(i), "colour", int(seen[i]))
                 if new is None:                         # not nearby: anywhere on the screen
                     hits = f.find_all(after)
                     new = min(hits, key=lambda h: abs(h[0] - old[0]) + abs(h[1] - old[1])) if hits else None
@@ -450,13 +512,22 @@ class Brain:
             scene = static.copy()
             for cid, st in states.items():
                 cols[cid].frame.draw(scene, st)
-            self.cache[key] = {cid: self.context(cols[cid], st, scene, states, lambda x, y: int(static[y, x]))
+            self.cache[key] = {cid: LazyContext(self, cols[cid], st, scene, states, lambda x, y: int(static[y, x]))
                                for cid, st in states.items()}
         ctxs = self.cache[key]
         new, bits = dict(states), 0.0
         for cid, s in states.items():
             c = cols[cid]
-            p, _ = c.dist(c.akey(action, s), ctxs[cid])
+            akey = c.akey(action, s)
+            if akey[0] == "at":                         # a click elsewhere: unconditional, so cached per search
+                ukey = ("u", cid, akey)
+                if ukey not in self.cache:
+                    self.cache[ukey] = c.dist(akey, {})[0]
+                p = self.cache[ukey]
+                if p.get(c.frame.identity, 0.0) >= 1 - PMIN:
+                    continue
+            else:
+                p, _ = c.dist(akey, ctxs[cid])
             outcomes = {}
             for op, q in p.items():
                 ns = c.frame.apply(s, op)

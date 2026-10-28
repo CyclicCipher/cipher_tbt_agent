@@ -56,6 +56,24 @@ class Translation:
                 return best
         return None
 
+    def score(self, grid, state):
+        """The fraction of the column's cells whose colour is seen at this state (0 if any cell is off the screen)."""
+        if not self.inside(state):
+            return 0.0
+        p = self.place(state)
+        return float(np.mean(grid[p[:, 1], p[:, 0]] == self.colours))
+
+    def find_near(self, grid, near, radius, frac):
+        """The best-matching state within radius (at least frac of the cells seen), nearest on ties, or None."""
+        best = None
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                s = (near[0] + dx, near[1] + dy)
+                sc = self.score(grid, s)
+                if sc >= frac and (best is None or (sc, -abs(dx) - abs(dy)) > best[0]):
+                    best = ((sc, -abs(dx) - abs(dy)), s)
+        return None if best is None else best[1]
+
     def find_all(self, grid):
         """Every state at which the content is seen exactly (for a new level)."""
         x0, y0 = self.cells0[0]

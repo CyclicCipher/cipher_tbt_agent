@@ -960,3 +960,100 @@ Accuracy of the next-position prediction, actions 101–300, mean of 3 seeds:
   - rare conditions that a random walk seldom tests (W3);
   - the real games: a smoke test on ls20, vc33 and tu93 runs (16 s) but solves nothing. Planning and the RESET logic
     are the next work, not the condition model.
+
+# Part 21: conjunctions, and the planning and RESET loops (pre-registered 2026-10-27, before the code was written)
+
+**Why (the user):** fix the planning and RESET loops, and do conjunctions.
+
+**Diagnosis, from traces of ls20 and tu93 on part 20's code:**
+- **The dead zone (seen before, in `src/tbt/` on 2026-06-30):** once the reachable neighbourhood is explored and no WIN
+  has been seen, no plan in the 12-step search has value. The executive returns no plan, and the agent alternates
+  RESET with a random action.
+- **Losing the avatar (tu93):** the avatar's facing pixel changes when it turns. Its column needs an exact match of its
+  content, so every turn loses it and a new column is recruited with no history. Every step then looks like an
+  uncertain outcome worth exploring.
+
+**Changes:**
+1. **Conjunctions: a second layer of attention, created on refutation.** When the most-attended expert's table cell
+   for a value v has seen two different operators (its prediction was refuted), the context gains conjunction
+   features for that case: (that feature = v, every other feature g), each holding a table from g's value to the
+   operator, only present when the first feature equals v. Their unseen values back off to the parent expert. At most
+   4 such cases per action and column. They compete in the same attention as every other expert.
+2. **Structure persists while content changes:** a translation column is found where most of its cells (≥ 75%) match,
+   preferring an exact match. The cells that changed are rewritten in its content memory (the Spotlight lattice of its
+   template).
+3. **RESET is an action in the model:** its effect is known (back to the level's start state), so plans may include
+   it. The agent no longer sends RESET because no plan was found. If there is truly no plan, it takes the action whose
+   outcome is most uncertain, or an untried one.
+4. **No depth cap:** the search runs to its node cap (3000), not to depth 12, so the nearest unvisited state is found
+   however far away it is.
+
+| # | prediction |
+|---|---|
+| K1 | W7 switch door with conjunctions: accuracy ≥ 0.97 on actions 101–300 (3 seeds; part 20: 0.942) |
+| K2 | no regression: W1–W6 each within 0.01 of part 20's accuracy |
+| K3 | on the 25 public games, ARCHITECTURE.md's B1–B6 are scored as pre-registered there (brain arm against the control's 5 of 183 levels and mean 0.0012) |
+| K4 | no RESET is sent without a plan that includes it, and no single key takes more than 50% of level-1 actions in ar25, cn04 and dc22 (B2's second half) |
+
+**Cost:** the conditions test in about 20 s; the 25-game run in ≤ 10 minutes.
+
+## Part 21 results (2026-10-27)
+
+**Conjunctions (`runs/test_conditions_part21.txt`; 14 s):**
+- **K1 refuted as pre-registered:** W7's accuracy is unchanged at 0.942 over actions 101–300.
+  - The cases do form, and the right conjunction is attended for "down": (door below AND the switch's state).
+  - But cases form only after a door has been seen both passable and blocking, mostly after step 100.
+  - With ~250 candidate partners and few door events, spurious pixels fit as well as the switch for a while: a
+    multiple-comparisons problem.
+- **Exploratory (not pre-registered), a 1500-action walk scored on actions 501–1500:** with conjunctions 0.996
+  (0.999, 0.998, 0.99); without them 0.924. The mechanism works and is limited by samples. A random walk rarely
+  produces the switch-on door cases; an agent that tests uncertain outcomes on purpose would.
+- **K2 confirmed:** W1–W6 are each within 0.01 of part 20 (W6 improved, 0.962 → 0.977).
+
+**The loops, from traces:**
+- **The RESET loop:** it had two causes.
+  - The dead zone: no plan, then RESET, then a random action.
+  - M1 valuing RESET as an untried action worth 1 bit.
+  RESET is now an action in the model (its effect: the level's first screen) and is used only inside plans. In ls20
+  it acts as a teleport back to the start, which is cheaper than walking. M1 no longer values it.
+- **Losing the avatar on a content change:** fixed. Columns are found by a ≥ 75% match, and the changed cells are
+  rewritten in their content memory.
+- **Speed:**
+  - Predictions now read only the features their top experts need (lazy contexts).
+  - Clicks elsewhere are cached per search.
+  - Each search has a time budget (0.3 s; 0.05 s in the fast setting).
+  - The harness runs the 25 games in parallel: about 1 minute in the fast setting (cap 3 × baseline), against
+    about 10 minutes serially before.
+
+**Fast setting, all 25 games (cap 3 × baseline, 0.05 s per search):**
+- brain: 2 levels (lf52, m0r0), mean 0.0005;
+- control: 1 level (lp85), mean 0.0011.
+
+**Added after the pre-registration (not covered by K1–K4):** goal hypotheses about joint states ("joint": all
+planning columns at once), the goal-level version of the conjunction problem.
+- **The problem:** per-column "at" hypotheses are refuted when one column reaches the right state while another is
+  wrong, as in ls20, where the avatar must reach the door with the right key.
+- **Fast-setting result:** unchanged (2 levels). The joint family is spread over 10⁶ states, so it never outweighs
+  the ~1 bit of learning what an untried click does.
+
+**Full-length evaluation, all 25 games, part 21's code plus the joint goal family (`runs/brain_part21.json`; 340 s
+wall, in parallel):**
+
+| | levels solved | mean score | levels |
+|---|---|---|---|
+| brain | 5 of 183 | **0.0019** | ar25 L1 in 29 actions (human 32: full score), ft09 L1 in 99 (43), lf52 L1 in 78 (32), lp85 L1 in 144 (17), m0r0 L1 in 81 (30) |
+| control (`runs/explorer_v0_fixed.json`) | 5 of 183 | 0.0012 | bp35, lf52, lp85, sp80, vc33 (all level 1) |
+
+**Verdicts (ARCHITECTURE.md's B-predictions, via K3):**
+- **B3 refuted:** 5 levels, not ≥ 10.
+- **B4 refuted:** 1.6 × the control's score, not ≥ 2 ×.
+- **B5 refuted:** no level 2 anywhere.
+- **B6 split:** 340 s wall for all 25 games (confirmed), but about 300 ms per step, the search budget (refuted).
+- **B1 and B2 were not measured in this run.**
+- **K4:** RESET is now sent only from plans, 1,456 times across the games, mostly as a teleport to the start. The
+  key-share half of K4 was not measured.
+
+**Reading:** the brain arm now wins different levels than the control (ar25, ft09, m0r0 are new), at a slightly higher
+score. Its limit is the balance between curiosity and goal-seeking. Learning an untried click is worth up to 1 bit,
+while goal hypotheses spread over every reachable state are each nearly worthless. So the budget goes on learning the
+model. **Next:** goal priors learned across games (warm-up play on the public games, shipped with the agent).
