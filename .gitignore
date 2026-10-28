@@ -49,3 +49,6 @@ corpora/latin_classical/
 
 # Symbolics experiment outputs (results are summarized in experiments/symbolics/CONTROLS.md)
 experiments/symbolics/runs/
+
+# ARC-AGI-3 game sources downloaded by the arc_agi toolkit (NORMAL mode); not ours to commit
+environment_files/
