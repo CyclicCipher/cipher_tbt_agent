@@ -7,8 +7,16 @@ Goal hypotheses are about kinds (a column's content signature), so evidence carr
 - ("joint", states): the columns are in this joint state, a conjunction over columns (part 21: a level's WIN usually
   needs several columns in particular states at once, so visiting one column's state with the others wrong must not
   refute it).
-Prior: a third per family; "on" split evenly over (kind, colour) pairs; "at" split evenly over kinds, each kind's
-share spread over AT_STATES states; "joint" spread over JOINT_STATES joint states. A hypothesis that holds without a WIN gains an error; at a WIN, every hypothesis that
+Prior (part 22): each hypothesis has a type that carries across games ("on-rare": an "on" whose colour covers at most
+RARE x the column's size on the screen, such as a marker, exit or slot; "on-common"; "at"; "joint"). A hypothesis's
+prior is P(type) / (the number of hypotheses of that type); "at" is spread over AT_STATES states per kind and "joint"
+over JOINT_STATES. P(type) is an overhypothesis (overhypothesis.py): at every WIN, the type of the most probable
+unrefuted hypothesis that held, scored with even type priors, is one draw. Warm-up play on other games supplies the
+first draws.
+
+The choice of plan (part 22, part 17's DE17): the plan that leaves the least drive D = (dp^3 + du^3 + de^3)^(1/2):
+dp = (1 - P(WIN along it)) x hunger (0 once P(WIN) >= ALPHA), hunger = (actions since the level started or the last
+WIN + 30) / 25; du = the share of the reachable information it leaves unlearned; de = its length / 50. A hypothesis that holds without a WIN gains an error; at a WIN, every hypothesis that
 didn't hold gains one. Hypotheses first registered after WINs start charged with them (part 17).
 """
 import math
@@ -18,11 +26,14 @@ from collections import deque
 import numpy as np
 
 from arc_agent.frames import H, W
+from arc_agent.overhypothesis import Overhypothesis
 
 ALPHA, THETA, STEP_BITS = 0.5, 0.05, 0.02
 DEPTH, MAX_NODES, AT_STATES, JOINT_STATES = 60, 3000, 4096, 10 ** 6   # the node cap bounds the search
 BUDGET = 0.3                                            # seconds per search: an anytime search, the best so far
 LOG_EPS = math.log(0.01)
+TYPES, RARE, EFFORT = ("on-rare", "on-common", "at", "joint"), 4, 50
+FIXED_HUNGER = None                                     # ablation: a constant hunger instead of a growing one
 
 
 def h2(p):
@@ -30,14 +41,24 @@ def h2(p):
 
 
 class Goals:
-    def __init__(self):
+    def __init__(self, type_draws=()):
+        self.over = Overhypothesis()                    # the prior over goal types (part 22)
+        for t in type_draws:                            # warm-up: WIN types from other games
+            self.over.add("goal", t)
+        self.win_types = []                             # this game's draws
+        self.on_type = {}                               # (kind, colour) -> "on-rare" | "on-common"
         self.on = {}                                    # (kind, colour) -> errors
         self.at = {}                                    # kind -> {state: errors}
         self.at_rest = {}                               # kind -> errors shared by every state never named
         self.joint, self.joint_rest = {}, 0             # joint state -> errors; errors of every joint state never named
         self.wins = 0
 
-    def register(self, kinds, colours):
+    def register(self, kinds, colours, static=None):
+        if static is not None:                          # an "on" is rare where its colour covers little of the screen
+            counts = dict(zip(*np.unique(static, return_counts=True)))
+            for k in kinds:
+                for c in colours:
+                    self.on_type[(k, c)] = "on-rare" if counts.get(c, 0) <= RARE * len(k[1]) else "on-common"
         for k in kinds:
             if k not in self.at:
                 self.at[k], self.at_rest[k] = {}, self.wins
@@ -45,17 +66,23 @@ class Goals:
                 if (k, c) not in self.on:
                     self.on[(k, c)] = self.wins
 
-    def _weights(self):
-        n_on = max(len(self.on), 1)
+    def type_prior(self, even=False):
+        return {t: 1 / len(TYPES) for t in TYPES} if even else self.over.prior("goal", TYPES)
+
+    def _weights(self, even=False):
+        P = self.type_prior(even)
+        n_type = {t: max(1, sum(1 for key in self.on if self.on_type.get(key, "on-common") == t)) for t in TYPES[:2]}
         n_k = max(len(self.at), 1)
-        w_on = {key: math.log(1 / 3 / n_on) + LOG_EPS * e for key, e in self.on.items()}
-        base = {k: math.log(1 / 3 / n_k / AT_STATES) for k in self.at}
+        w_on = {key: math.log(P[self.on_type.get(key, "on-common")] / n_type[self.on_type.get(key, "on-common")])
+                + LOG_EPS * e for key, e in self.on.items()}
+        base = {k: math.log(P["at"] / n_k / AT_STATES) for k in self.at}
+        self._bj = math.log(P["joint"] / JOINT_STATES)
         return w_on, base
 
     def mass(self, held):
         """Posterior probability that the WIN is caused by one of the hypotheses in `held`."""
         w_on, base = self._weights()
-        bj = math.log(1 / 3 / JOINT_STATES)
+        bj = self._bj
         m = max(list(w_on.values()) + [b + LOG_EPS * self.at_rest[k] for k, b in base.items()] +
                 [bj + LOG_EPS * self.joint_rest])
         z, num = 0.0, 0.0
@@ -91,7 +118,28 @@ class Goals:
             elif h[0] == "joint":
                 self.joint[h[1]] = self.joint.get(h[1], self.joint_rest) + 1
 
+    def win_type(self, held):
+        """The type of the most probable unrefuted hypothesis that held at the WIN, scored with even type priors."""
+        w_on, base = self._weights(even=True)
+        best = None
+        for h in held:
+            if h[0] == "on" and (h[1], h[2]) in w_on:
+                w, t = w_on[(h[1], h[2])], self.on_type.get((h[1], h[2]), "on-common")
+            elif h[0] == "at" and h[1] in base:
+                w, t = base[h[1]] + LOG_EPS * self.at[h[1]].get(h[2], self.at_rest[h[1]]), "at"
+            elif h[0] == "joint":
+                w, t = self._bj + LOG_EPS * self.joint.get(h[1], self.joint_rest), "joint"
+            else:
+                continue
+            if best is None or w > best[0]:
+                best = (w, t)
+        return None if best is None else best[1]
+
     def win(self, held):
+        t = self.win_type(held)
+        if t is not None:                               # one draw for the overhypothesis over goal types
+            self.over.add("goal", t)
+            self.win_types.append(t)
         for key in self.on:
             if ("on",) + key not in held:
                 self.on[key] += 1
@@ -114,9 +162,10 @@ class Goals:
 
 
 class Executive:
-    def __init__(self, brain):
+    def __init__(self, brain, type_draws=()):
         self.brain = brain
-        self.goals = Goals()
+        self.goals = Goals(type_draws)
+        self.since = 0                                  # actions since the level started or the last WIN
         self.plan = []                                  # [(action, expected joint state after it)]
         self.kind_of_plan = None
         self.start_grid = None                          # the level's first screen: where RESET returns
@@ -141,7 +190,7 @@ class Executive:
     def register(self, static):
         kinds = [c.kind for c in self.brain.planning() if c.frame.kind == "translation"]
         colours = [int(v) for v in np.unique(static)]
-        self.goals.register(kinds, colours)
+        self.goals.register(kinds, colours, static)
         for c in self.brain.planning():
             if c.kind not in self.goals.at:
                 self.goals.register([c.kind], [])
@@ -238,18 +287,21 @@ class Executive:
         cands = self.search(available)
         if not cands:
             return None
-        acc = [c for c in cands if c[1] >= ALPHA]
-        if acc:
-            path, kind = min(acc, key=lambda c: (len(c[0]), -c[1]))[0], "satisfice"
-        else:
-            best = max(cands, key=lambda c: (c[2] - STEP_BITS * len(c[0]), -len(c[0])))
-            if best[2] - STEP_BITS * len(best[0]) >= THETA:
-                path, kind = best[0], "explore"
-            else:
-                appr = [c for c in cands if c[1] > 0]
-                if not appr:
-                    return None
-                path, kind = max(appr, key=lambda c: (c[1], -len(c[0])))[0], "approach"
+        hunger = FIXED_HUNGER if FIXED_HUNGER is not None else (self.since + 30) / 25
+        u0 = max(c[2] for c in cands)
+
+        def drive(c):                                   # part 17's DE17: deviations weighted by urgency
+            path, pwin, info = c
+            dp = 0.0 if pwin >= ALPHA else (1 - pwin) * hunger
+            du = 0.0 if u0 < THETA else max(0.0, u0 - info - THETA) / u0
+            de = len(path) / EFFORT
+            return (dp ** 3 + du ** 3 + de ** 3) ** 0.5
+
+        best = min(cands, key=lambda c: (round(drive(c), 12), len(c[0])))
+        if best[1] <= 0 and best[2] < THETA:
+            return None
+        path = best[0]
+        kind = "satisfice" if best[1] >= ALPHA else "explore" if best[2] >= THETA else "approach"
         self.plan, self.kind_of_plan = list(path), kind
         chosen = next(c for c in cands if c[0] is path)
         self.last_choice = dict(kind=kind, length=len(path), pwin=round(chosen[1], 4), info=round(chosen[2], 3),

@@ -15,7 +15,7 @@ import numpy as np
 
 from arc_agent.claude.efference import D
 from arc_agent.claude.homeostatic_agent import AFF, PMIN, GoalModel, fkey, things, run
-from arc_agent.claude.overhypothesis import ALPHAS, Overhypothesis
+from arc_agent.overhypothesis import ALPHAS, Overhypothesis
 from arc_agent.claude.push_block_rebuild import DIRS, H, W
 
 GAMES, SEEDS, LEVELS, CAP = 12, 3, 3, 300

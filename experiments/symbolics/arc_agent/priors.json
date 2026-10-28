@@ -1,0 +1,11 @@
+{
+ "draws": [
+  "joint",
+  "on-rare"
+ ],
+ "source": "warm-up on the 25 public games",
+ "counts": {
+  "joint": 1,
+  "on-rare": 1
+ }
+}

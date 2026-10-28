@@ -4,6 +4,8 @@ A thin driver: it hands each transition to the brain, tells the executive whethe
 for the next action, and keeps the engine's rules (RESET after GAME_OVER; never RESET before acting in a level, since
 the engine would restart the whole game).
 """
+import json
+import os
 import random
 from collections import Counter
 
@@ -14,6 +16,15 @@ from arc_agent.brain import Brain, size_bucket
 from arc_agent.executive import Executive
 
 RESET, CLICK = 0, 6
+PRIORS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "priors.json")
+
+
+def shipped_priors():
+    """The goal-type draws from warm-up play (warmup.py), if they were shipped."""
+    try:
+        return json.load(open(PRIORS))["draws"]
+    except (OSError, ValueError, KeyError):
+        return []
 
 
 def region_size(grid, x, y, cap=200):
@@ -28,10 +39,10 @@ def region_size(grid, x, y, cap=200):
 
 
 class ArcAgent:
-    def __init__(self, game_id="", blueprint=DEFAULT, seed=0):
+    def __init__(self, game_id="", blueprint=DEFAULT, seed=0, type_draws=None):
         self.game_id = game_id
         self.brain = Brain(blueprint)
-        self.executive = Executive(self.brain)
+        self.executive = Executive(self.brain, shipped_priors() if type_draws is None else type_draws)
         self.level, self.prev, self.acted = None, None, 0
         self.expected = None
         self.rng = random.Random(seed)
@@ -57,6 +68,7 @@ class ArcAgent:
                 self.executive.observe(win_states=states)
                 self.notes["win"] += 1
             self.level = fd.levels_completed
+            self.executive.since = 0
             self.brain.start(grid, new_level=True)
             self.executive.plan, self.prev, self.acted = [], None, 0
             self.executive.start_grid = grid.copy()
@@ -97,5 +109,6 @@ class ArcAgent:
             self.notes[self.executive.kind_of_plan] += 1
         self.prev = (grid, action, self.kind(action, grid))
         self.acted += 1
+        self.executive.since += 1
         aid, x, y = action
         return aid, ({"x": x, "y": y} if aid == CLICK else None)

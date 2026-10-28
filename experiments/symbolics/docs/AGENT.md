@@ -1057,3 +1057,81 @@ wall, in parallel):**
 score. Its limit is the balance between curiosity and goal-seeking. Learning an untried click is worth up to 1 bit,
 while goal hypotheses spread over every reachable state are each nearly worthless. So the budget goes on learning the
 model. **Next:** goal priors learned across games (warm-up play on the public games, shipped with the agent).
+
+# Part 22: goal priors from warm-up play, and drives instead of a fixed order (pre-registered 2026-10-28, before the code)
+
+**Why (the user):** warm-up rounds, so that what is learned on other games makes the first WIN of a new game fast
+(parts 18–19's overhypotheses, applied to the real games).
+
+**The problem it addresses:** part 21's agent spends its budget learning its model. An untried click is worth up to
+1 bit, while each goal hypothesis is spread over every reachable state and so is worth almost nothing. The executive
+also explores before it approaches (part 15b's fixed order), so goals never get a turn while anything is uncertain.
+
+**Changes:**
+1. **Goal types:** every goal hypothesis gets a type that carries across games.
+   - "on-rare": a column lies wholly on a colour that covers at most 4 × the column's size on the screen, such as a
+     marker, exit or slot.
+   - "on-common": the same with a common colour.
+   - "at": one column's state.
+   - "joint": the joint state.
+2. **A prior over types:** a hypothesis's prior is P(its type) / (the number of hypotheses of that type). P(type) is
+   part 19's overhypothesis (a Dirichlet-multinomial with α learned), moved into `arc_agent/overhypothesis.py`.
+   - **The draws:** at each WIN, the type of the most probable unrefuted hypothesis that held there, scored with even
+     type priors (so each type is judged by its own description length, not by the prior being learned).
+   - **When it updates:** within a game at every WIN (so level 2 benefits from level 1), and across games from the
+     warm-up.
+3. **Drives instead of the fixed order (part 17's DE17):** the plan chosen minimises
+   D = (dp³ + du³ + de³)^½, where:
+   - dp = (1 − P(WIN along the plan)) × hunger, and 0 once P(WIN) ≥ 0.5;
+   - hunger = (actions since the level started or last WIN, + 30) / 25;
+   - du = the share of the reachable information the plan leaves unlearned;
+   - de = the plan's length / 50.
+   Curiosity yields as hunger grows.
+4. **Warm-up (`arc_agent/warmup.py`):** the agent plays every public game offline with a long budget (20 × the human
+   baseline per level; warm-up actions are never scored) and records each WIN's type.
+   - **Evaluation is cross-validated:** 5 folds of 5 games, each fold played with a prior learned only from the
+     other 20 games' warm-up.
+   - **What's shipped:** a prior learned from all 25 games.
+
+**Arms, fast setting (all 25 games, cap 3 × baseline):** part 21's brain is recorded (2 levels, mean 0.0005).
+- DRIVE: changes 1–3 with an even type prior.
+- DRIVE+PRIOR: the cross-validated warm-up prior.
+
+| # | prediction |
+|---|---|
+| G1 | the warm-up wins ≥ 15 levels across the 25 games, and its type counts are not all one type |
+| G2 | DRIVE solves ≥ as many levels as part 21's brain (fast: 2) |
+| G3 | DRIVE+PRIOR solves ≥ 4 levels in the fast setting, with mean score ≥ 0.001 (2 × part 21) |
+| G4 | the full-length evaluation of DRIVE+PRIOR: ≥ 8 levels and mean ≥ 0.0024 (2 × the control) |
+
+**Cost:** warm-up ≤ 6 minutes (parallel); each fast run about 1 minute; the full evaluation about 6 minutes.
+
+## Part 22 results (2026-10-28)
+
+**Changes made as pre-registered;** in addition, the harness reports each game as it finishes, and a warm-up game has
+a 150 s wall-clock limit. Fast setting, all 25 games:
+
+| arm | levels | mean | which |
+|---|---|---|---|
+| part 21 brain (recorded) | 2 | 0.0005 | lf52, m0r0 |
+| DRIVE (even type prior, hunger growing) | 2 | **0.0009** | ar25 L1 in 88, lp85 L1 in 20 (human 17) |
+| DRIVE with hunger held at 1.2 (ablation, asked by the user) | 1 | 0.0002 | m0r0 |
+
+**Warm-up (`runs/warmup.txt`, `.json`; 222 s):** 2 levels won with 20 × the human budget: ft09 L1 in 525 actions
+(type "joint") and lp85 L1 in 20 ("on-rare").
+
+**Verdicts:**
+- **G1 refuted:** 2 WINs, not ≥ 15. There is too little to learn a goal prior from: the agent rarely finds a WIN at
+  all, even with a long budget.
+- **G2 confirmed:** DRIVE solves 2 levels, as many as part 21, at a higher score.
+- **G3 and G4 were not run.** With 2 draws the cross-validated prior is close to the even one, so the arm would test
+  nothing new.
+
+**Hunger (the user asked whether it is useful):** growing hunger did better than constant hunger (2 levels against 1;
+0.0009 against 0.0002). In lp85, growing hunger stops the exploring after the button's effect is learned and repeats
+it (20 actions); with constant hunger the agent keeps exploring. This is one run per arm with small counts. Hunger is
+still a stand-in for the real budget, which every game draws on screen and which the clock columns already find.
+
+**The bottleneck:** goal priors cannot be learned from the agent's own WINs, because it finds too few. Options:
+(a) learn from watching the control play, since it stumbles into different WINs; (b) explore joint states the way the
+control does, on top of the brain's model.

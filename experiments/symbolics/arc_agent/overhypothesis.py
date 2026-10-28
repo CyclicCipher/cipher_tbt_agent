@@ -1,4 +1,6 @@
-"""Overhypotheses (docs/AGENT.md, part 19): priors learned across games (Kemp, Perfors & Tenenbaum 2007).
+"""Overhypotheses (docs/AGENT.md, parts 19 and 22): priors learned across games (Kemp, Perfors & Tenenbaum 2007).
+In the arc_agent it holds the prior over goal types (executive.Goals), learned from WINs within a game and from
+warm-up play on other games.
 
 A slot is a variable that recurs in every game (what action 2 does; how a one-cell object responds to contact). Each
 game contributes one confident value per slot, a draw. The prior for a new game is a Dirichlet-multinomial,
