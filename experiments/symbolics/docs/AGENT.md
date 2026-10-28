@@ -1487,3 +1487,113 @@ column, as a proposal for the user to vet; it is not built.
 
 **State of the code:** this branch has part 25's attention. It is worse than part 24 on the worlds and loses the PFC's
 meta-learning; the games are unchanged. Part 24's version is commit 3923404.
+
+# Part 26: in-context attention in the columns (pre-registered 2026-10-28, before the code)
+
+**Why (the user):** build the in-context version of `docs/ATTENTION.md` section 7. Part 25 learned attention in the
+weights, which needs more data than a game gives; a transformer's fast learning happens in context.
+
+**The change (`arc_agent/column.py`, `ConditionalOps`), for each (column, action):**
+- **Memory:** every observation is stored as an episode: the situation's features, every key's value, the operator
+  seen, and the log probability each key gave that operator before it was seen (its prequential score). At most 1,000
+  episodes per (column, action); the oldest are dropped.
+- **Situation features** (what the query is made of): the other columns' states, what lies beneath the column, the
+  column's own state, and its quotients.
+- **Similarity of a stored episode to the current situation:** κ = exp(−Σ_f θ_f [feature f differs]), θ_f ≥ 0; a
+  matching episode counts 1.
+- **Values:** what a key's value means here: counts of the operators seen with that value, each episode weighted by κ;
+  unseen values back off to the κ-weighted counts of every episode.
+- **Attention:** a key's score is its prior (part 23's description length plus the warm-up head start) plus its
+  evidence in similar situations, Σ_episodes κ × its prequential score. The TOP most attended keys are read, as now.
+- **Learning:** only θ, by the gradient of the log probability of each new observation, with per-feature step
+  normalisation (RMSprop, η = 0.1); θ starts at 0. The memory is the fast learning.
+- **Endpoints:** θ = 0 is part 20's track record; θ_f very large is part 21's conjunction cases on feature f.
+- **Deleted:** part 25's W, heads, biases and EM tables.
+
+**First, a feel-experiment** (`structure/claude/attention_incontext_feel.py`): the synthetic switch-door task of
+`docs/ATTENTION.md` section 6 (5 seeds), with a distractor situation feature (a random number 0–9 each step) added
+beside the switch.
+
+| # | prediction |
+|---|---|
+| F1 | in-context ≥ 0.93 at 300 steps (last 200) and ≥ 0.97 at 3,000 (last 1,000); track record: 0.896 / 0.898; part 25's gradient: 0.845 / 0.966 |
+| F2 | the learned θ for the switch exceeds θ for the distractor in every seed |
+| G1 | W7 (switch door, 300 steps, 3 seeds) ≥ 0.96 |
+| G2 | W1–W6 and W8–W10: each ≥ part 24's accuracy − 0.01 |
+| G3 | the fast 25-game run (node budget, cross-validated priors): ≥ 2 levels and mean ≥ 0.0015 |
+| G4 | the PFC's meta-learning test: PERSIST's ratio (episodes 10–12 over 1–3) ≤ 0.5, and PERSIST < RESET in episodes 10–12 |
+| G5 | cost: the ten worlds in ≤ 3 minutes; the fast 25-game run in ≤ 4 minutes |
+
+## Part 26 results (2026-10-28)
+
+**The feel-experiment** (`runs/attention_incontext_feel.txt`; 5 seeds; a few seconds):
+- The analytic gradient of θ matched finite differences to 6 decimals (the apparatus check). θ = 0 reproduced the
+  track record exactly (0.896 / 0.898).
+
+| learner | 300 steps (last 200) | 3,000 steps (last 1,000) |
+|---|---|---|
+| track record | 0.896 | 0.898 |
+| part 25's weight learning | 0.845 | 0.966 |
+| **in-context, θ learned** | **0.977** | **1.000** |
+| in-context, θ fixed at (switch 20, distractor 0): part 21's cases | 0.991 | 1.000 |
+
+- **F1 confirmed** (0.977 ≥ 0.93; 1.000 ≥ 0.97).
+- **F2 confirmed:** θ for the switch exceeds θ for the distractor in every seed (1.4–2.0 vs 0.06–0.36 at 300 steps;
+  18.5–18.9 vs 0.0 at 3,000).
+
+**Build check in the agent:**
+- **The gradient check, repeated on the agent's own code:** analytic and finite-difference gradients agree on a toy
+  stream, and `dist` agrees with the learning step's mixture probability when every key is read.
+- **Seed 0 of the ten worlds:** mean 0.978 (part 24: 0.983). W2 was 0.92, and its trace showed the cause.
+  - The column's own position and its five quotients were all situation features: six codes of one position.
+  - Each got its own θ step, so together they made every episode at another position count about e^−3 ≈ 0.05. That
+    shrank a key's evidence twenty-fold while its prior gap stayed the same.
+  - It also made every table a per-position memory again: the "own state" memorisation of part 23, back through the
+    similarity.
+- **Amendment, made after seeing seed 0: quotients are keys only, not situation features.** Seed-0 mean 0.983; W2
+  0.96. The column's own state stays a situation feature: without it the mean was 0.985, the same within noise, and the
+  PFC's own state is its situation.
+
+**Main results:**
+
+| world (3 seeds; `runs/test_conditions_part26.txt`) | part 24 | part 25 | part 26 |
+|---|---|---|---|
+| W1 walls | 0.993 | 0.968 | 0.993 |
+| W2 inverted | 0.975 | 0.862 | 0.975 |
+| W3 torus | 0.993 | 0.957 | 0.988 |
+| W4 ice | 0.990 | 0.842 | 0.990 |
+| W5 one-way | 0.988 | 0.918 | 0.990 |
+| W6 speed switch | 0.972 | 0.965 | 0.973 |
+| W7 switch door | 0.942 | 0.933 | **0.950** |
+| W8 rotating | 0.985 | 0.990 | 0.990 |
+| W9 ladders | 0.988 | 0.977 | 0.985 |
+| W10 sliding | 0.962 | 0.982 | 0.980 |
+| mean | 0.979 | 0.939 | **0.981** |
+
+- **The attended keys are now readable:** for W1, W4 and W5 the most attended key of each direction is the cell
+  ahead (for "up", ("at", 0, −3)).
+- **The 25 games, fast setting** (`runs/p26_fast_cv.json`; 122 s): 2 levels, the same as parts 24 and 25 (ar25 L1 in
+  23 actions, ft09 L1 in 101); mean 0.0015; no crashes. In the games the most attended key is the unconditional one
+  (610 of 807 records).
+- **The PFC's meta-learning test** (`runs/test_pfc_part26.txt`):
+  - PERSIST's errors per episode fall from 0.53 (episodes 1–3) to 0.00 (episodes 10–12): ratio 0.00 (part 24b: 0.25).
+    RESET: 0.67 → 0.53.
+  - The PFC learned θ = 3.5 for its own state. Where the region has no model yet, it attends to the region's size
+    (0.5) and thinness (0.5). Where a model is responsible, every key predicts "stay" and attention is spread.
+  - The test's "attended" field reads the unconditional key because the last step of each episode is a "stay" step.
+
+**Verdicts:**
+- **G1 refuted:** W7 0.950 (needed ≥ 0.96); the best W7 of any part.
+- **G2 confirmed:** every world is ≥ part 24 − 0.01 (the closest: W3 −0.005, W9 −0.003).
+- **G3 confirmed:** 2 levels, mean 0.0015.
+- **G4 confirmed:** ratio 0.00 ≤ 0.5, and PERSIST (0.00) < RESET (0.53) in episodes 10–12.
+- **G5 confirmed:** ten worlds in 56 s; 25 games in 122 s.
+
+**What this establishes:**
+- **One mechanism now does what three did:**
+  - part 20's track record (θ = 0);
+  - part 21's conjunction cases (a large θ);
+  - part 24's PFC conjunction ("no model yet" and size).
+  None of them is coded; the similarity is learned.
+- **The game score didn't move.** In the games the conditional keys rarely win attention, so what limits the games is
+  not conditioning: frame types (lp85's permutation along a loop), goals, and exploration.

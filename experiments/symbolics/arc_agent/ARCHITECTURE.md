@@ -52,12 +52,20 @@ column: on the column's own cells ("on me"), or on another region, named by that
 and size). So "clicking a button changes a column elsewhere" is learnable: a remote binding (cue competition, the
 Rescorla–Wagner rule in its count form).
 
-**Conditions (part 20, replacing a contact rule):** what an action does to a column is predicted by attention over
-experts, weighted by each one's track record. One expert is unconditional; every other expert reads one context
-feature in the column's own frame (the content at one position relative to the column, with "edge" off the screen and
-the remembered content beneath it; or another column's state), and holds a table from the feature's value to the
-operator seen. Nothing says what blocks or what changes a move: walls, one-way tiles, ice and switches are whichever
-feature predicts. Conjunctions of two features are not covered yet.
+**Conditions (part 20, replacing a contact rule; in-context attention since part 26):** what an action does to a
+column is predicted by attention over keys. One key is unconditional; every other key reads one context feature in the
+column's own frame (the content at one position relative to the column, with "edge" off the screen and the remembered
+content beneath it; another column's state; a quotient of its position; the numeric expert). Every observation is kept
+as an episode (the situation, every key's value, the operator seen, and what each key had predicted). For the current
+situation (the other columns' states, what lies beneath, the column's own state), each episode counts by its
+similarity, exp(-sum of theta over the situation features that differ):
+- what a key's value means is the similarity-weighted counts of the operators seen with it;
+- how much a key is trusted is its prior plus its similarity-weighted record of predictions.
+
+Only theta is learned (the gradient of each new operator's log probability). theta = 0 is part 20's track record; a
+large theta on one feature gives part 21's conjunction cases on it (a door that blocks only while the switch is off).
+Nothing says what blocks or what changes a move: walls, one-way tiles, ice and switches are whichever key predicts, in
+the situations where it predicts.
 
 ## 4. Spotlight memory (`spotlight.py`)
 

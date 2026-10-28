@@ -128,7 +128,7 @@ Accuracy over 2,000 steps. Results below.
 
 Each is the transformer's mechanism with its learning written as a local rule.
 
-## 7. What the agent showed (part 25), and the in-context version (a proposal, not built)
+## 7. What the agent showed (part 25), and the in-context version (built in part 26)
 
 Part 25 put sections 5–6 into the arc_agent's columns (`docs/AGENT.md` part 25). It was worse than the track record
 within a game's few hundred steps, for two reasons:
@@ -157,3 +157,14 @@ similarity.
 
 The learned θ, in between, is the part neither older mechanism had: which features of the situation matter for which
 action. As in a transformer, the weights set what counts as similar, and the context does the learning.
+
+**Built in part 26 (`docs/AGENT.md` part 26).** On the synthetic switch-door task:
+
+| learner | accuracy at 300 steps | at 3,000 steps |
+|---|---|---|
+| track record (θ = 0) | 0.896 | 0.898 |
+| part 25's weight learning | 0.845 | 0.966 |
+| **in-context, θ learned** | **0.977** | **1.000** |
+
+The switch's θ rose to 1.4–2.0 by 300 steps and 18.5 by 3,000; the distractor's stayed near 0. In the agent, the ten
+worlds match or beat part 24 (W7 0.950, the best so far), and the PFC learns to learn again.
