@@ -125,7 +125,7 @@ def main(argv):
               f"{[r['situation'] for r in rs]} | attended (seed 0) {rs[0]['attended']}", flush=True)
     if opts["out"]:
         json.dump(res, open(opts["out"], "w"), indent=1, default=str)
-    print(f"total {time.time() - t0:.1f} s wall (hidden area {'on' if hidden else 'off'})")
+    print(f"total {time.time() - t0:.1f} s wall (hidden-state area {'on' if hidden else 'off'})")
 
 
 if __name__ == "__main__":

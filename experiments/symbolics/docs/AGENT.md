@@ -1605,7 +1605,7 @@ beside the switch.
 - **What it fixes:** in `docs/HIDDEN_STATE.md` (sections 7–8), part 26's product similarity (every situation feature's
   θ multiplies every episode's weight down) either let noise erase the memory or, with a prior, ignored rare but
   decisive features.
-- **The hidden columns:** they move from the experiment scripts into the agent as ordinary `Column`s.
+- **The hidden-state columns:** they move from the experiment scripts into the agent as ordinary `Column`s.
 
 **The change, in two parts:**
 
@@ -1619,7 +1619,7 @@ beside the switch.
      - a feature that appears later starts with the evidence "no situation" has.
    - **The prediction** mixes the 3 most weighted dimensions.
    - **θ and its gradient are deleted.**
-2. **A hidden area (`arc_agent/hidden.py`): columns whose state is not on the screen.**
+2. **A hidden-state area (`arc_agent/hidden.py`): columns whose state is not on the screen.**
    - **Delay columns** (Choice frames): the event 1, 2, 3 and 4 steps ago. They learn their own dynamics like any
      column (lag k copies lag k − 1).
    - **A graph column** (a Choice frame over 6 states).
@@ -1630,7 +1630,7 @@ beside the switch.
      - After a fit, state labels are matched to the old ones (the assignment that agrees most). Every stored episode's
        graph state is rewritten, in every visible column's memory and in the graph column's own memory.
      - The column learns its own transitions from its inferred states, like any column.
-   - **The hidden columns' states reach the visible columns as ordinary "other column" situation features** (and as
+   - **The hidden-state columns' states reach the visible columns as ordinary "other column" situation features** (and as
      keys). They are not in the planner's joint state yet: a plan holds them fixed, and they are re-read every step.
    - **An event** is the action, with a click named by its target (M1's kind).
 
@@ -1643,7 +1643,7 @@ beside the switch.
 
 **Arms:**
 - part 26 (commit 3e11087, run in a separate worktree with the new worlds);
-- part 27 without the hidden area (competing dimensions only);
+- part 27 without the hidden-state area (competing dimensions only);
 - part 27 in full.
 
 | # | prediction |
@@ -1682,7 +1682,7 @@ beside the switch.
 
 **Main results** (3 seeds; `runs/test_conditions_part27*.json`, `runs/test_conditions_part26_hidden_worlds.txt`):
 
-| world | part 26 | part 27, no hidden area | part 27 in full |
+| world | part 26 | part 27, no hidden-state area | part 27 in full |
 |---|---|---|---|
 | W1 walls | 0.993 | 0.992 | 0.992 |
 | W2 inverted | 0.975 | 0.978 | 0.978 |
@@ -1711,7 +1711,7 @@ beside the switch.
 - **G2:**
   - confirmed on W14 (0.955, +0.726);
   - refuted on W11 (0.947, +0.025), W12 (+0.012) and W13 (+0.018): each is above 0.95 except W11, but below part 26
-    + 0.03. The hidden columns help on every hidden world, by less than predicted.
+    + 0.03. The hidden-state columns help on every hidden world, by less than predicted.
 - **G3:**
   - confirmed for W11–W13;
   - refuted as worded for W14: the delay column works as a key (its value says the move), not as the leading
@@ -1797,7 +1797,7 @@ Against part 26:
 - **The games** are unchanged (2 levels): their bottleneck is elsewhere (part 26).
 
 **Open:**
-1. **The hidden columns are not in the planner's joint state yet.** A plan holds them fixed, so the agent cannot yet
+1. **The hidden-state columns are not in the planner's joint state yet.** A plan holds them fixed, so the agent cannot yet
    plan "press 5 then 7 to open the doors". The graph's transitions are learned, so this is the next wiring step.
 2. **Counters and timers** (the innate lines and residues of HIDDEN_STATE.md section 5) are not in the agent. The
    learned graph covers the small cases (6 states).

@@ -416,7 +416,7 @@ class ConditionalOps:
             sl[c] = sl.get(c, np.zeros(len(self.keys))) + sign * self.L[t]
 
     def restate(self, f, value_at):
-        """Rewrite the stored value of situation feature f (a hidden column relabelled after a fit): value_at maps the
+        """Rewrite the stored value of situation feature f (a hidden-state column relabelled after a fit): value_at maps the
         time an episode was seen to the feature's value then."""
         i = self.sindex.get(f)
         if i is None:
@@ -440,7 +440,7 @@ class ConditionalOps:
         return self.last_dim
 
     def trusted(self):
-        """The key with the most evidence over every episode (for the hidden area's evidence)."""
+        """The key with the most evidence over every episode (for the hidden-state area's evidence)."""
         if not self.T:
             return None
         return self.keys[int(np.argmax(np.array(self.prior) + self.tot))]

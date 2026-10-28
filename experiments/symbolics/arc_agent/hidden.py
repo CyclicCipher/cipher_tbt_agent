@@ -1,4 +1,4 @@
-"""The hidden area (docs/HIDDEN_STATE.md sections 7-8; docs/AGENT.md part 27): columns whose state is not on the screen.
+"""The hidden-state area (docs/HIDDEN_STATE.md sections 7-8; docs/AGENT.md part 27): columns whose state is not on the screen.
 
 - Delay columns: the event 1, 2, ..., LAGS steps ago. Each is an ordinary Column over a Choice frame, and what an event
   does to it is learned like any column's (lag k copies lag k - 1): nothing but the wiring makes it a delay line.
@@ -148,7 +148,7 @@ class Hidden:
 
     def observe(self, t, aid, event, learned):
         """One step: what the visible columns just learned (learned: [(observer, its ConditionalOps)]) updates the
-        graph's belief, the event moves every hidden column, and each learns what the event did to it. Returns True
+        graph's belief, the event moves every hidden-state column, and each learns what the event did to it. Returns True
         after a fit (the graph's stored states were rewritten: Brain.restate)."""
         try:
             hash(event)

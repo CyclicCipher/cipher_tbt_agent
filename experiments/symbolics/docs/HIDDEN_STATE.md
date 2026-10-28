@@ -112,7 +112,7 @@ Several columns can share one kind of frame. Cortex has five answers to how they
 
 ## 5. The proposal (to test first)
 
-**Hidden columns with innate temporal frames, read in context.** For each event type, two kinds of column:
+**Hidden-state columns with innate temporal frames, read in context.** For each event type, two kinds of column:
 - **A counter column:** the event's count since the level began, read in its frame as the count itself and as residues
   (count mod k for k = 2…6). This is the grid-cell residue code, applied to counts: similar columns differ by scale.
 - **A timer column:** steps since the event last happened (the lateral-entorhinal "time since").
@@ -234,7 +234,7 @@ finite differences to 6 decimals.
    - JEPA learns what is predictable; SIGReg keeps it spread out and uncorrelated. That is the right objective for a
      general-purpose frame learned before the task (as grid and time cells are), which in-context attention then reads.
 
-## 7. Revision: what "time" hid, and a hidden column's frame in general (2026-10-28)
+## 7. Revision: what "time" hid, and a hidden-state column's frame in general (2026-10-28)
 
 **The user:** "Time? That's it? That's just one dimension."
 
@@ -253,7 +253,7 @@ That is many one-dimensional summaries of the event history, and every one is a 
 
 **Section 6's four rules were all expressible by them,** so that experiment tested selection, not coverage.
 
-**The revised proposal:** a hidden column's frame is the state space of a hidden variable, with a transition for each
+**The revised proposal:** a hidden-state column's frame is the state space of a hidden variable, with a transition for each
 event. Four shapes:
 1. **A line:** a counter, or a timer. Innate.
 2. **A circle:** cycles and toggles (the residues). Innate.
@@ -274,7 +274,7 @@ event. Four shapes:
 - latent causes inferred when prediction errors persist.
 
 Lines and circles are the shapes built in innately, as grid cells' torus is. The joint hidden state is the product of
-all hidden columns: each is small, together they cover a large space.
+all hidden-state columns: each is small, together they cover a large space.
 
 **Collapse:** a learned graph is a learned representation, so collapse here would mean two hidden states merged into
 one. EM is anchored to observed outcomes, which works against that. Specialisation between several learned graphs is
@@ -342,7 +342,7 @@ outcome, so EM must find a chain of states before the chain pays. Baum–Welch i
      when its gradient is consistently positive. At λ = 0.3, R2 T is 0.89 / 0.94 and R3 TD 1.0 / 1.0.
    - The first experiment (section 6) ran without it (λ = 0) and stands as recorded.
    - **This affects part 26 in the agent too:** its similarity has the same drift, so the agent's in-context attention
-     should get the same prior when hidden columns add many features.
+     should get the same prior when hidden-state columns add many features.
 
 ### Results (2026-10-28; `runs/hidden_state_feel2.txt`; 296 s)
 

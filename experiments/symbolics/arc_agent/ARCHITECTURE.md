@@ -27,7 +27,7 @@ default blueprint:
 | **assoc** (association) | n = 32 slots | learned, per column: translation (Z², a set of cells moving together), recolour (a permutation of colours on fixed cells), or clock (Z, a counter that advances on every action) | its frame type by evidence; its content (template); for each action, which operator the action applies to its frame (the generalized efference copy) |
 | **HC** (hippocampus) | 1 | the product of the assoc columns' frames (a joint state is one point in it) | episodes: Spotlight memory addressed by joint state; which states were visited, what each action did there, where WINs happened |
 | **PFC** | 1 (`pfc.py`, part 24) | a choice frame: which kind of model is responsible | which assoc column to trust where several explain the same change: Bayesian model selection whose prior is the PFC column's own prediction, learned like any column's, so the right model is picked faster with experience (learning to learn, emergent). Goals, plans and drives are still in `executive.py` |
-| **hidden** | 5 (`hidden.py`, part 27) | choice frames whose state is not read from the screen: 4 delay columns (the event 1-4 steps ago) and 1 graph column (6 states) | the delay columns learn their own dynamics like any column (lag k copies lag k - 1); the graph column's state is inferred: an HMM with event-conditioned transitions, fitted by Baum-Welch on the visible columns' own memories (each planned column's operator, given its most trusted key's value). Both reach the other columns as ordinary "other column" features |
+| **hidden state** | 5 (`hidden.py`, part 27) | choice frames whose state is not read from the screen: 4 delay columns (the event 1-4 steps ago) and 1 graph column (6 states) | the delay columns learn their own dynamics like any column (lag k copies lag k - 1); the graph column's state is inferred: an HMM with event-conditioned transitions, fitted by Baum-Welch on the visible columns' own memories (each planned column's operator, given its most trusted key's value). Both reach the other columns as ordinary "other column" features |
 
 The blueprint is where innate structure lives (DESIGN.md: priors are geometries). V1 and M1 get their frames from the
 blueprint; assoc columns get only a menu of frame *types* and must find their own frames from the data. Adding a
@@ -56,7 +56,7 @@ Rescorla–Wagner rule in its count form).
 **Conditions (part 20, replacing a contact rule; in-context attention since part 26, one head per situation feature
 since part 27b):** what an action does to a column is predicted by attention over keys. One key is unconditional;
 every other key reads one context feature in the column's own frame (the content at one position relative to the
-column, with "edge" off the screen and the remembered content beneath it; another column's state, hidden columns'
+column, with "edge" off the screen and the remembered content beneath it; another column's state, hidden-state columns'
 included; a quotient of its position; the numeric expert). Every observation is kept as an episode (the situation,
 every key's value, the operator seen, and what each key had predicted).
 

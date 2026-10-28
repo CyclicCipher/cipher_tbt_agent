@@ -208,7 +208,7 @@ class Brain:
 
     def others(self, exclude=None, states=None):
         """The other columns' states a column reads as context: the planning columns' (or the given joint states), and
-        the hidden columns' (part 27)."""
+        the hidden-state columns' (part 27)."""
         out = {c.cid: c.state for c in self.planning() if c is not exclude} if states is None else dict(states)
         if self.hidden is not None:
             out.update(self.hidden.states())
@@ -322,7 +322,7 @@ class Brain:
         report = dict(moved=[], lost=[], recruited=[], unexplained=0)
         render = before.copy()
         others = self.others()
-        learned = []                                    # part 27: what each visible column saw, for the hidden area
+        learned = []                                    # part 27: what each visible column saw, for the hidden-state area
         planned = set(others)                           # (only the models in use: the PFC's rivals are not evidence)
         ctxs = {c.cid: self.context(c, c.state, before, others, self.v1.under_at) for c in self.active()}
         painted, claimed = {}, {}                       # part 24: each grouped column's prediction of its cells
