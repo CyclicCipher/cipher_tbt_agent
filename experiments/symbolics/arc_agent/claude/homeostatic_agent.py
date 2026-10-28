@@ -105,14 +105,21 @@ def driver_posterior(f):
 
 class Affordances:
     """How a board object that hasn't moved yet responds when the body moves into it; keyed by shape and colour."""
-    def __init__(self):
+    def __init__(self, prior=None):
         self.lw = {}
+        self.prior = prior                                  # part 19: prior(shape) -> {response: p}
+
+    def _start(self, shape):
+        pri = self.prior(shape) if self.prior else None
+        return {a: math.log(pri[a]) for a in AFF} if pri else {a: 0.0 for a in AFF}
 
     def posterior(self, shape):
-        return normalized(self.lw.get(shape, {a: 0.0 for a in AFF}))
+        return normalized(self.lw[shape] if shape in self.lw else self._start(shape))
 
     def observe(self, shape, outcome):
-        w = self.lw.setdefault(shape, {a: 0.0 for a in AFF})
+        if shape not in self.lw:
+            self.lw[shape] = self._start(shape)
+        w = self.lw[shape]
         for a in AFF:
             w[a] += math.log(1 - EPS) if a == outcome else math.log(EPS / 2)
 
@@ -453,19 +460,90 @@ def beyond_horizon(agent, th, endo, combos, exo, post, nodes, macro=False):
     return sorted((-win_probability(agent, th, endo, combos, exo, post, list(p)), len(p), p) for p in cands)
 
 
-def drive(c, since, u0, common=False):
+def reachable(ths, roles, state, i):
+    """Part 19: the translations thing i could still reach from state, relaxed (an overestimate). A body: breadth-first
+    over its believed displacements, around solid things. A pushed object: a push by d needs the cell behind it (at -d)
+    and the cells ahead (at +d) on the board and not solid; whether the body can get behind it is ignored."""
+    solid = set()
+    for j, r in enumerate(roles):
+        if r[0] == "solid":
+            solid |= set(ths[j].at(state[j]))
+    bodies = [j for j, r in enumerate(roles) if r[0] == "body"]
+    r = roles[i]
+    if r[0] == "body":
+        moves = [d for d in r[1].values() if d and d != (0, 0)]
+    elif r[0] in ("push", "pushable"):
+        pushers = ([r[1]] if r[1] is not None else []) if r[0] == "push" else bodies
+        moves = sorted({d for j in pushers for d in roles[j][1].values() if d and d != (0, 0)})
+    else:
+        return {state[i]}
+    ok = lambda cells: all(inb(x, y) for x, y in cells) and not solid & set(cells)
+    seen, q = {state[i]}, deque([state[i]])
+    while q:
+        t = q.popleft()
+        cells = ths[i].at(t)
+        for d in moves:
+            nt = (t[0] + d[0], t[1] + d[1])
+            if nt in seen or not ok(ths[i].at(nt)):
+                continue
+            if r[0] != "body":                              # a pusher must fit behind some cell of the object
+                behind = [(x - d[0], y - d[1]) for x, y in cells]
+                if not any(inb(x, y) and (x, y) not in solid and (x, y) not in cells for x, y in behind):
+                    continue
+            seen.add(nt)
+            q.append(nt)
+    return seen
+
+
+def viability(agent, th, endo, combos, post):
+    """Part 19: V(path) = the posterior mass of the GOAL_K most probable goal hypotheses still attainable at the end of
+    path (under the most probable model), counting those made true along it as attained."""
+    roles, ths = combos[0][1], [th[k] for k in endo]
+    top = [(h, p) for h, p in sorted(post.items(), key=lambda kv: -kv[1])[:GOAL_K] if p > 1e-9]
+    cache = {}
+
+    def att(state, skip):
+        if (state, skip) not in cache:
+            reach, v = {}, 0.0
+            for h, p in top:
+                if h in skip:
+                    continue
+                for i, t in enumerate(ths):
+                    if t.shape != h[1]:
+                        continue
+                    if i not in reach:
+                        reach[i] = reachable(ths, roles, state, i)
+                    if any(h in GoalModel.holds(t, tt, agent.static) for tt in reach[i]):
+                        v += p
+                        break
+            cache[(state, skip)] = v
+        return cache[(state, skip)]
+
+    def V(path):
+        state, held = tuple(th[k].t for k in endo), set()
+        for d, a in enumerate(path):
+            nxt = sim(ths, roles, state, a, agent.t + d + 1)
+            state = state if nxt is None else nxt
+            for i in range(len(ths)):
+                held |= GoalModel.holds(ths[i], state[i], agent.static)
+        done = frozenset(h for h, _ in top if h in held)
+        return sum(p for h, p in top if h in done) + att(state, done)
+    return V
+
+
+def drive(c, since, u0, common=False, extra=0.0):
     """Part 16: the deviation-weighted drive after a plan (Keramati & Gutkin's form, n = 3, m = 2). Progress: zero in
     its dead zone (P(WIN) >= ALPHA), else the unmet chance of winning times hunger, which grows with the steps since
     the last WIN. Understanding: zero once the reachable information is below THETA, else what the plan leaves of it."""
     d, _, pwin, eig = c
     h = (since + (DEPTH_SAT if common else d)) / HUNGER        # part 17: every plan judged at the same moment
-    dp = 0.0 if pwin >= ALPHA else (1 - pwin) * h
+    dp = (0.0 if pwin >= ALPHA else (1 - pwin) * h) + extra      # part 19: extra = hunger added by lost reachability
     du = 0.0 if u0 < THETA else max(0.0, u0 - eig - THETA) / u0      # amended before the run: relative to what is reachable
     de = d / EP_MAX if common else 0.0                         # part 17: effort, the share of the budget used
     return (dp ** 3 + du ** 3 + de ** 3) ** 0.5
 
 
-def plan(agent, goal, aff, epistemic=True, eff=None, since=None, macro=False, common=False, out=None):
+def plan(agent, goal, aff, epistemic=True, eff=None, since=None, macro=False, common=False, out=None, viable=False):
     """Returns (path, kind, predicted information gain). since=None: the lexicographic order (part 15b); otherwise the
     deviation-weighted drive, with since = steps since the last WIN (part 16)."""
     th, endo, combos, exo = model(agent, aff, eff)
@@ -480,7 +558,20 @@ def plan(agent, goal, aff, epistemic=True, eff=None, since=None, macro=False, co
         cands = [n for n in nodes if n[0] > 0] +                 [(len(p), list(p), -npw, 0.0) for npw, _, p in beyond_horizon(agent, th, endo, combos, exo, post, nodes, macro)]
         if not cands:
             return None, "random", 0.0
-        n = min(cands, key=lambda c: (round(drive(c, since, u0, common), 12), c[0]))
+        if not viable:
+            n = min(cands, key=lambda c: (round(drive(c, since, u0, common), 12), c[0]))
+        else:                                               # part 19: the hunger lost reachability adds
+            V = viability(agent, th, endo, combos, post)    # (exact: it only adds, so stop once the old drive is worse)
+            v0 = V([])
+            best, n = None, None
+            for c in sorted(cands, key=lambda c: (round(drive(c, since, u0, common), 12), c[0])):
+                if best is not None and round(drive(c, since, u0, common), 12) > best[0]:
+                    break
+                lost = max(0.0, v0 - V(list(c[1])))         # goal mass no longer attainable: no WIN until the attempt ends
+                extra = lost * max(0, EP_MAX - agent.t - c[0]) / HUNGER
+                key = (round(drive(c, since, u0, common, extra), 12), c[0])
+                if best is None or key < best:
+                    best, n = key, c
         kind = "satisfice" if n[2] >= ALPHA else "explore" if n[3] >= THETA else "approach" if n[2] > 1e-6 else None
         return (list(n[1]), kind, n[3]) if kind else (None, "random", 0.0)
     acc = [n for n in nodes if n[0] > 0 and n[2] >= ALPHA]
@@ -514,6 +605,7 @@ def bodies_before(agent, a, eff=None):
 
 def contact_update(agent, aff, th_before, nframes, bodies):
     blobs = [t for t in th_before if t.frame is None]
+    pushed = lambda b: any(set(map(tuple, g.body.tolist())) & set(b.cells) for g in agent.frames[nframes:])
     for t in th_before:                                     # any frame that moved onto a board object passed over it
         if t.frame is None or t.frame >= len(agent.frames):
             continue
@@ -521,8 +613,8 @@ def contact_update(agent, aff, th_before, nframes, bodies):
         now = (f.pose[0], f.pose[1])
         if now != t.t:
             cells = {(x + now[0], y + now[1]) for x, y in rot(f.body, f.pose[2]).tolist()}
-            for b in blobs:
-                if cells & set(b.cells):
+            for b in blobs:                                 # part 19 fix: unless the object moved off as a new frame
+                if cells & set(b.cells) and not pushed(b):
                     aff.observe(b.shape, "passable")
     for i, t0, d in bodies:
         if i >= len(agent.frames):
@@ -564,17 +656,20 @@ def trajectory(info, path, t0):
 
 
 def run(kw, seed, epistemic=True, eff_on=False, drives_on=False, walls=False, commit=False, macro=False, common=False,
-        world=None, goal_factory=None, levels=None, cap=None, probe=None):
+        world=None, goal_factory=None, levels=None, cap=None, probe=None, aff_prior=None, eff_prior=None, viable=False,
+        keep=None):
     rng = np.random.default_rng(seed)
     if world is None:
         world = WallWorld(np.random.default_rng(100 + seed)) if walls else PushWorld(np.random.default_rng(100 + seed), **kw)
-    agent, aff = FrameAgent(score_discovery=True), Affordances()
+    agent, aff = FrameAgent(score_discovery=True), Affordances(aff_prior)
     goal = goal_factory(agent, aff) if goal_factory else GoalModel(charge_new=commit)
     n_levels, n_cap = levels or LEVELS, cap or CAP
     snapshot = getattr(world, "snapshot", lambda: (world.player, world.box, world.target))
     restore = getattr(world, "restore", lambda lay: restart(world, lay))
     best = getattr(world, "optimum", lambda: optimum(world))
-    eff = Efference() if eff_on else None
+    eff = Efference(eff_prior) if eff_on else None
+    if keep is not None:                                    # part 19: the caller reads the beliefs after the game
+        keep.update(eff=eff, aff=aff, agent=agent)
     F = world.reset()
     layout = snapshot()
     agent.start(F)
@@ -589,7 +684,8 @@ def run(kw, seed, epistemic=True, eff_on=False, drives_on=False, walls=False, co
                 gains.append((pending[0], pending[1] - belief_entropy(agent, goal, aff)))
                 pending = None
             info_out = {} if commit else None
-            path, kind, info = plan(agent, goal, aff, epistemic, eff, since if drives_on else None, macro, common, info_out)
+            path, kind, info = plan(agent, goal, aff, epistemic, eff, since if drives_on else None, macro, common, info_out,
+                                    viable)
             path = path or []
             if kind == "explore":
                 pending = (info, belief_entropy(agent, goal, aff))

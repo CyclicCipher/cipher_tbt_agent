@@ -7,23 +7,29 @@ didn't happen is evidence against every displacement that would have landed on a
 (off the board, or into something) it says nothing about the action: the block is the world's.
 """
 import math
+from collections import Counter
 
 D = [(dx, dy) for dx in range(-2, 3) for dy in range(-2, 3)]
 EPS = 0.01
 
 
 class Efference:
-    def __init__(self):
-        self.lw = {}
+    def __init__(self, prior=None):
+        self.lw, self.moves = {}, Counter()                 # moves: observed moves per (kind, action)
+        self.prior = prior                                  # part 19: prior(a) -> {d: p} for a body never seen
 
     def _w(self, kind, a):
-        return self.lw.setdefault((kind, a), [0.0] * len(D))
+        if (kind, a) not in self.lw:
+            pri = self.prior(a) if self.prior else None
+            self.lw[(kind, a)] = [math.log(pri[d]) for d in D] if pri else [0.0] * len(D)
+        return self.lw[(kind, a)]
 
     def observe(self, kind, a, t0, e, cells, free):
         """t0: the body's translation before the step; e: the observed element (dx, dy, r); cells: the body's cells at
         translation (0, 0); free(x, y): the cell is on the board and holds nothing (background, no frame)."""
         w = self._w(kind, a)
         moved = (e[0], e[1]) != (0, 0) or e[2] != 0
+        self.moves[(kind, a)] += moved
         for i, d in enumerate(D):
             if moved:
                 lik = 1 - EPS if e[2] == 0 and (e[0], e[1]) == d else EPS / len(D)

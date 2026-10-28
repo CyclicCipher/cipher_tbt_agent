@@ -677,3 +677,198 @@ under the flat prior. But first-WIN steps barely changed: before the first WIN, 
   to action effects and to affordances.
 - **Curiosity should be weighted by relevance.** Touching both distractors in every game is information the goal
   rarely needs.
+
+# Part 19: overhypotheses for actions and objects, and keeping the goal reachable (pre-registered 2026-10-27, before the code was written)
+
+**Why (the user):** pre-register and run the next step from part 18: learned priors for what actions do and how objects
+respond, plus relevance-weighted curiosity. After this part the work pivots to the real ARC-AGI-3 public games.
+
+## A diagnosis of part 18, made before this design (scratch scripts on part 18's code, unchanged)
+
+Part 18's LS arm was replayed with every belief's entropy logged per step. The replay reproduces part 18 exactly (1,839
+steps before first WINs, the same as the recorded breakdown).
+
+**Where the steps before the first WIN go:**
+- **Learning the 4 actions and touching the 4 objects:** done within the first 10–25 steps of every game.
+- **Touching a distractor after the box is known:** about 5 steps per game. This is all that relevance-weighted
+  curiosity, as proposed, could save.
+- **Steps after the box got stuck:** 580 of the 1,448 steps before the first WIN in push games (40%), in 20 events
+  across 21 push games. Reach games: none.
+  - **"Stuck":** the box is in a position from which no sequence of pushes brings it onto the target. In these games
+    that means against an edge, since nothing can pull it back.
+  - **What happens next:** no plan can win (best P(WIN) ≈ 0.01). The agent spends the rest of the 50-step attempt on
+    plans worth 0.04–0.1 bits, until the attempt ends and the level restarts.
+  - **How it gets stuck:** exploratory or approach plans push the box to an edge while testing goal hypotheses.
+
+**So relevance-weighted curiosity is dropped from this part.** In its place is the mechanism the diagnosis points to:
+a drive to keep the goal reachable.
+
+## Mechanism 1: overhypotheses (`arc_agent/claude/overhypothesis.py`)
+
+**What it is:** one mechanism for priors learned across games (Kemp, Perfors & Tenenbaum 2007), applied at two levels
+here.
+- **A slot:** a variable that recurs in every game, such as "what action 2 does".
+- **A draw:** one game's confident value of the slot.
+- **The prior for a new game:** a Dirichlet-multinomial over the slot's values, P(v) = (n_v + α·b_v) / (N + α).
+  - n_v: past draws equal to v; N: all past draws; b: the flat prior over the slot's values.
+  - **α (how much games vary)** is learned, not set: the prediction is averaged over α ∈ {0.01, 0.1, 1, 10, 100}, each
+    weighted by how well it predicted the past draws in order (equal prior weights).
+  - **Consequence:** if every game agrees, small α wins and the prior becomes nearly certain after about 4 games. If
+    games disagree, the prior stays close to the observed frequencies.
+
+**Slot 1, action effects:**
+- One slot per action index; values: the efference copy's 25 displacements.
+- **A draw:** at the end of each game, each action's most probable displacement for the body, if its probability is
+  ≥ 0.98.
+- **Use:** a new body's efference copy starts from this prior instead of the uniform one. If an action's prior
+  probability is ≥ 0.98, the body is planned to move by it before it has ever moved. One observation confirms it;
+  two contrary ones overturn it.
+
+**Slot 2, object responses:**
+- One slot per shape without colour (the cells' offsets); values: passable, solid, pushable.
+- **A draw:** at the end of each game, each board object whose response is known with probability ≥ 0.98.
+- **Use:** an object of a new colour starts from this prior instead of the flat one. In these games every object is a
+  single cell, and one in four is the box. So the expected prior is about ¾ passable, ¼ pushable, solid near 0.
+
+**The goal prior stays part 18's** (α fixed at 1), so that this part measures only the new levels.
+
+## Mechanism 2: viability, keeping the goal reachable (in `homeostatic_agent.py`)
+
+**What it is:** a fourth homeostatic deviation in the drive, D = (dp³ + du³ + de³ + dv³)^½.
+- **Attainable goal mass, V(s):** under the most probable model, the summed posterior probability of the 8 most
+  probable goal hypotheses that some sequence of actions could still make true from state s. A hypothesis already
+  made true along the plan counts as attained (the plan would have won).
+- **Reachability is relaxed (optimistic):**
+  - the body: breadth-first search over its own translations using the believed actions, around solid things;
+  - a pushed object: breadth-first search over its translations, where a push by d needs the cell behind it (at −d)
+    and the cell ahead (at +d) on the board and not solid; whether the body can get behind it is ignored.
+
+  Relaxed reachability only ever overestimates. So a plan is penalized only when it destroys reachability even in the
+  relaxed sense.
+- **The deviation:** dv = (V(now) − V(plan's end)) / V(now), or 0 if V(now) = 0 or the plan raises V.
+- **Selection:** candidates are scored in increasing order of the old drive. Since dv only adds, the search stops as
+  soon as the old drive exceeds the best full drive found, so the result is exact.
+
+**Biology and alignment:**
+- **Ashby's essential variables, and viability:** the organism's first job is to stay in states it can recover from.
+- **Alignment:** this is attainable-utility preservation (Turner, Hadfield-Menell & Tadepalli 2020) and relative
+  reachability (Krakovna et al. 2019), with the agent's own goal posterior as the set of utilities to preserve. A
+  satisficer that also avoids irreversible loss of options is the safer design the HOMEOSTASIS note argues for.
+
+## Arms, games and comparison
+
+**The games:** part 18's exactly (3 seeds × 12 games, the same specs and layouts).
+- **LS:** part 18's learned-prior arm. Its results are reused from `runs/learning_sets.json`, not re-run; the code it
+  ran is unchanged.
+- **OH:** LS + overhypotheses for action effects and object responses.
+- **LSV:** LS + the viability drive.
+- **OHV:** LS + both.
+
+**Paired comparisons:** every arm plays the same 36 games. Means are over games; "games 7–12" is the last half of each
+run. **A within-family Harlow curve:** first-WIN steps of push games in games 7–12 against push games in games 1–6,
+which removes part 18's family-mix confound.
+
+| # | prediction |
+|---|---|
+| O1 | in games 7–12, OH's prior makes all 4 actions certain (≥ 0.98) before the body first moves, in every game |
+| O2 | in games 7–12, OH's prior P(pushable) for a new single-cell object is between 0.15 and 0.35 |
+| O3 | in games 7–12, OH's mean first-WIN steps ≤ 0.9 × LS's (62.4 → ≤ 56.2) |
+| V1 | over all 21 push games of each arm pair, steps spent with the box stuck before the first WIN fall by ≥ 70%: LSV ≤ 0.3 × LS's 580 |
+| V2 | mean first-WIN steps in push games: LSV ≤ 0.7 × LS |
+| V3 | no regression: in reach games, LSV's mean first-WIN steps ≤ 1.1 × LS's; every arm wins every game, and levels 2–3 in their first attempt |
+| C1 | in games 7–12, OHV's mean first-WIN steps ≤ 0.6 × LS's (≤ 37.4), part 18's L2 target |
+| C2 | a within-family Harlow curve for OHV: push games 7–12 ≤ 0.75 × push games 1–6 |
+
+**Also logged:** steps before each first WIN by plan kind; stuck steps and stuck events before the first WIN (from the
+true game, never shown to the agent); the learned α of each slot; milliseconds per step.
+
+**Untested here:** a game whose actions differ from earlier games (revision of the action prior). All games share the
+same action mapping, as ARC-AGI-3 games largely do.
+
+**Cost:** about 3–4 minutes for the 3 new arms. A 9.5-minute guard.
+
+    python -m arc_agent.claude.learning_sets --part19      (from experiments/symbolics)
+
+**Amendments from part 19's build check, before its main run (seed 0, all arms):**
+1. **A bug in the contact update since part 15, fixed in the shared agent.** When the body pushed an object, the rule
+   "a frame that moved onto a board object passed over it" fired as well as the push rule. So every box ended with
+   passable and pushable at 0.5 each, and the learned prior for one-cell objects drifted to P(pushable) = 0. Now an
+   object that moved off as a new frame is recorded as pushable only.
+   - **Consequence:** LS behaves differently, so it is **re-run** as the baseline (arm LS). Part 18's recorded LS stays
+     as a reference row (LS18). Parts 15–18's results stand as recorded.
+2. **The viability term changes form: lost reachability is counted as hunger, not as a fourth deviation.**
+   - **Why:** in the build check, a plan that cut the attainable goal mass from 0.85 to 0.29 was chosen anyway. dv is
+     at most 1, while hunger passes 2 within 30 steps, and the cube makes dv³ negligible beside dp³.
+   - **The principled form:** a goal made unattainable cannot be won until the attempt ends. So losing attainable mass
+     L (absolute, not relative) adds L × (steps left in the attempt after the plan) / 25 to the progress deviation dp,
+     in hunger's own units.
+   - The selection stays exact, since the added term is never negative.
+   - Seed 0, game 10 after both fixes: steps with the box stuck before the first WIN fell from 116 to 12.
+3. **O1 is fixed by the mechanism:** with every game agreeing, the action prior reaches 0.98 at 7 draws (0.9798 at 6).
+   So game 7 can't pass O1. O1 is kept as written; games 8–12 are reported alongside.
+
+**Predictions V1–V3 now compare LSV with the re-run LS; C1 compares OHV with the re-run LS.**
+
+## Part 19 results (2026-10-27; `runs/learning_sets_part19.txt`, `.json`; 230 s)
+
+3 seeds × 12 games, part 18's identical games. The re-run LS (with the contact fix) reproduced part 18's LS exactly,
+game for game, including 580 stuck steps. So the bug never changed LS's behaviour, and the diagnosis is confirmed on
+the main run's apparatus.
+
+| | LS | OH | LSV | OHV |
+|---|---|---|---|---|
+| mean first-WIN steps, games 1–3 | 28.9 | 31.7 | 28.9 | 31.7 |
+| mean first-WIN steps, games 7–12 | 62.4 | **41.1** (0.66 ×) | 52.7 (0.84 ×) | **39.9** (0.64 ×) |
+| push games, 1–6 → 7–12 | 72.2 → 84.6 | 71.2 → **54.5** | 63.8 → 70.6 | 57.0 → **52.0** |
+| reach games, 1–6 → 7–12 | 23.5 → 18.2 | **51.1** → 14.2 | 25.0 → 16.8 | **51.1** → 15.8 |
+| steps with the box stuck before the first WIN (events) | 580 (20) | 372 (12) | 310 (13) | **203** (9) |
+| games not won within 300 steps | 0 | **1** | 0 | **1** |
+| levels 2–3 won in the first attempt | 100% | 100% | 100% | 100% |
+| actions certain before the body moves, games 7–12 / 8–12 | – | 0.67 / 0.80 | – | 0.67 / 0.80 |
+| prior P(pushable) for a new one-cell object, games 7–12 | – | 0.254 | – | 0.252 |
+| learned α (each run) | – | actions 0.01, objects 1 | – | the same |
+| ms per step | 26 | 32 | 28 | 32 |
+
+**Verdicts:**
+- **O1 refuted:** 0.67 of games 7–12 start with all actions certain (0.80 of games 8–12). Game 7 failed by construction
+  (amendment 3). Also, a game in which an action was never confirmed contributes no draw for it, which delays the
+  prior.
+- **O2 confirmed:** P(pushable) = 0.254, against a true frequency of 0.25.
+- **O3 confirmed:** OH is 0.66 × LS in games 7–12 (predicted ≤ 0.9).
+- **V1 refuted:** stuck steps fell to 0.53 × LS (310 vs 580), not ≤ 0.3 ×.
+- **V2 refuted:** LSV's push games are 0.85 × LS (68.3 vs 80.4), not ≤ 0.7 ×.
+- **V3 confirmed for LSV:** reach games 1.03 × LS, every game won, levels 2–3 in the first attempt. But OH and OHV each
+  lost one game (below), so "every arm wins every game" is refuted.
+- **C1 refuted narrowly:** OHV is 0.64 × LS in games 7–12 (predicted ≤ 0.6).
+- **C2 refuted:** OHV's push games 7–12 are 0.91 × its push games 1–6 (predicted ≤ 0.75). OH alone shows the curve
+  (0.77 ×); LS shows none (its push games got slower).
+
+**A defect found: the hard threshold on action beliefs.**
+- **The symptom:** in early games, OH and OHV were much slower on reach games (51.1 vs 23.5 steps in games 1–6).
+  One game (seed 2, game 5) was never won.
+- **The cause, seen in that game:**
+  - After 4 games, the prior put actions 1 and 2 at 0.963. That is below the 0.98 at which an action is planned with,
+    so both counted as unknown.
+  - An unknown action is valued only by the entropy of its outcome, about 0.2 bits at 0.963.
+  - In 300 steps the agent never pressed either. It made 152 exploratory plans and never reached the target.
+- **What it shows:** a continuous belief cut by a hard threshold has a bad middle band. In that band the action is too
+  uncertain to plan with and too certain to be worth testing.
+- **The fix, not made here:** plan over action uncertainty directly. Each action's alternative displacements become
+  weighted model combinations, so P(WIN) includes the chance that the action does what the prior says. No threshold.
+
+**Reading:**
+- **Overhypotheses are the larger lever.** In games 7–12 they cut the first WIN by a third. Within push games they
+  give the Harlow curve that part 18's goal prior alone did not. The learned α came out as Kemp et al.'s account
+  predicts: near 0 for actions (games agree), 1 for object responses (games vary, so the prior is the frequency).
+- **Viability helps but doesn't prevent most stuck boxes** (−47% stuck steps alone, −65% with OH). Three reasons
+  remain:
+  - the first push is what reveals the box is pushable, so reachability can't protect it before that;
+  - relaxed reachability is optimistic;
+  - once hunger is high, a small chance of winning still outweighs the expected loss.
+- **For the real games (the user's note: ARC-AGI-3 public games mostly have no player character):** the body-centred
+  parts of this agent will not carry over as they are (frames moved by the actions, pushing by contact). These three
+  lessons will:
+  - priors over action effects learned across games, with α learned;
+  - irreversibility counted in the progress variable's own units (in ARC-AGI-3, RESET makes the cost "a reset and a
+    replay", not "the rest of the attempt");
+  - no hard thresholds on beliefs.
