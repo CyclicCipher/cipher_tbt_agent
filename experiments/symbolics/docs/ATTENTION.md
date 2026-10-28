@@ -127,3 +127,33 @@ Accuracy over 2,000 steps. Results below.
 3. values specialised by responsibility (EM).
 
 Each is the transformer's mechanism with its learning written as a local rule.
+
+## 7. What the agent showed (part 25), and the in-context version (a proposal, not built)
+
+Part 25 put sections 5–6 into the arc_agent's columns (`docs/AGENT.md` part 25). It was worse than the track record
+within a game's few hundred steps, for two reasons:
+1. **The step:** the rule moves a score by at most η(r − a) per observation, while a position key starts about 5 nats
+   behind (one of about 120). The track record moves about 4 nats per informative event.
+2. **Starvation:** the tables learn with weight r, so a key that is barely attended never learns what its values mean.
+
+Transformers have the same slowness in their weights and pay for it with data. Within a task they learn in context: the
+query attends over earlier tokens, and the answer is read off what followed similar tokens. The weights only set the
+similarity.
+
+**The in-context version for a column** (for one (column, action)):
+- **Memory:** each observation is stored as an episode: the situation's features, every key's value, the operator seen.
+- **Query:** the current situation. **Keys:** the stored situations. **Similarity:** κ(q, q_t) = exp(Σ_f θ_f [q_f =
+  q_t,f]), a weight θ_f per situation feature (another column's state, what lies beneath, a quotient).
+- **Values:** what a key's value meant in similar situations, P_j(op | v, q) ∝ Σ_t κ(q, q_t) [v_t,j = v] [op_t = op]
+  plus the backoff (kernel regression over episodes: Nadaraya–Watson).
+- **Which key to read:** each key's evidence in similar situations, E_j(q) = Σ_t κ(q, q_t) log P_j(op_t), the
+  prequential log probability it gave each past outcome; attention a_j ∝ prior_j exp(E_j(q)).
+- **Learning:** only θ, by the log-likelihood's gradient (again a responsibility error, now times the feature matches
+  of the episodes). The fast learning is the memory itself.
+
+**The two older mechanisms are its endpoints:**
+- θ = 0 (every situation is similar): E_j is the track record of part 20.
+- θ_f large for chosen features (only exactly matching situations count): the conjunction cases of part 21.
+
+The learned θ, in between, is the part neither older mechanism had: which features of the situation matter for which
+action. As in a transformer, the weights set what counts as similar, and the context does the learning.

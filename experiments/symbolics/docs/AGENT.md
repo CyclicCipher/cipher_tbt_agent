@@ -1379,3 +1379,111 @@ episodes, so the right model was chosen at the decisive step. No code targets me
 - **lp85 is lost** (part 23 solved it in 20 actions). Its button moves tile contents around a loop, which is neither a
   rigid motion nor a colour map. Every candidate keeps failing and being re-recruited, so the planner never holds a
   stable model of the button. This needs a frame for contents permuted along a path (not covered by the folder).
+
+# Part 25: real attention in the columns (pre-registered 2026-10-28, before the code)
+
+**Why (the user):** implement the attention of `docs/ATTENTION.md`. It is the transformer's mechanism with its learning
+written as a local rule, and it replaces the track-record weighting and the conjunction cases.
+
+**The change (`arc_agent/column.py`, `ConditionalOps`):** for each (column, action):
+- **Keys:** the context features; the unconditional expert is one more key. A key's vector:
+  - its kind (unconditional, position, other column, own state, quotient, numeric);
+  - for a position: where it lies relative to the action's usual direction of motion, as (along, across) bins;
+  - for a quotient: its modulus;
+  - for another column: that column's frame type.
+- **Each key also has a learned bias per head.** It starts at the description-length prior (−log of the number of
+  keys of its kind), plus the kind's warm-up head start (part 23).
+- **Query:** the situation, as a hashed one-hot (64 dimensions, a stable hash) of the other columns' states, the
+  column's quotient features, and what lies beneath it.
+- **Scores and output:** H = 2 heads; s(h, key) = bias(h, key) + q·W_h·k; attention = softmax over every (head, key);
+  the prediction is the attention-weighted mixture of each (head, key)'s table.
+- **Learning, after each observation:**
+  - the responsibilities r = a·P(observed) / Σ;
+  - W_h += η Σ (r − a) q kᵀ, and bias += η (r − a), with η = 0.5;
+  - each (head, key)'s table counts the observation with weight r (EM), so the heads can specialise.
+- **Deleted:** the track-record weights, and part 21's conjunction cases.
+- **Unchanged:** the numeric expert's formula is the value of the "numeric" key, shared by both heads.
+
+| # | prediction |
+|---|---|
+| E1 | W7 (switch door, 300 steps, 3 seeds): ≥ 0.96 (part 24: 0.942) |
+| E2 | W1–W6 and W8–W10: each ≥ part 24's accuracy − 0.01 |
+| E3 | the fast 25-game run (node budget, cross-validated priors): ≥ 2 levels and mean ≥ 0.0015 (part 24) |
+| E4 | the warm-up's most common attended kind is no longer "own state" |
+| E5 | cost: the ten worlds in ≤ 3 minutes and the fast 25-game run in ≤ 4 minutes |
+
+## Part 25 results (2026-10-28)
+
+**Changes made during the build check, before the main test:**
+1. **"Own state" is no longer a key.** As a key, its table memorised the exact position. It is part of the query
+   instead: for the PFC column, its own state (which model is responsible now) is its situation. The query is the
+   other columns' states, the column's quotients, its own state, and what lies beneath it.
+2. **Value tables shared across the position keys of one (along, across) bin: tried and removed.** No effect (ten-world
+   mean on seed 0: 0.947 per key, 0.944 shared). The pre-registered per-key tables are used.
+3. **Numeric refits** (a cost fix): the numeric expert refits only when the column's attention-weighted prediction also
+   failed (P(observed) < 0.5), and half as often after each refit that leaves the recent data unexplained. The refits
+   were 22 of the 24 s of a W2 run; a world run now takes about 10 s.
+
+**Main results:**
+
+| world (3 seeds; `runs/test_conditions_part25.txt`) | part 24 | part 25 |
+|---|---|---|
+| W1 walls | 0.993 | 0.968 |
+| W2 inverted | 0.975 | 0.862 |
+| W3 torus | 0.993 | 0.957 |
+| W4 ice | 0.990 | 0.842 |
+| W5 one-way | 0.988 | 0.918 |
+| W6 speed switch | 0.972 | 0.965 |
+| W7 switch door | 0.942 | 0.933 |
+| W8 rotating | 0.985 | 0.990 |
+| W9 ladders | 0.988 | 0.977 |
+| W10 sliding | 0.962 | 0.982 |
+
+- **The 25 games, fast setting** (`runs/p25_fast_cv.json`): 2 levels, the same as part 24 (ar25 L1 in 23 actions, ft09
+  L1 in 101); mean 0.0015.
+- **The PFC's meta-learning test** (`runs/test_pfc_part25.txt`): PERSIST's errors per episode go from 0.53 (episodes
+  1–3) to 0.67 (episodes 10–12), a ratio of 1.25 (part 24b: 0.25). Its attention stays on the unconditional expert.
+
+**Verdicts:**
+- **E1 refuted:** W7 0.933 (needed ≥ 0.96).
+- **E2 refuted:** W1–W5 and W9 are more than 0.01 below part 24; W6, W8 and W10 are within it.
+- **E3 confirmed:** 2 levels, mean 0.0015.
+- **E4 confirmed, but only by construction:** "own state" can no longer be attended. The informative number: in the
+  25 games the most attended kind is now the unconditional expert (458 of 779 records), so the conditional keys rarely
+  win attention.
+- **E5 confirmed:** ten worlds in 94 s; 25 games in 133 s.
+- **Not pre-registered, but a regression:** the PFC's learning to learn (part 24b) is lost.
+
+**Why, from traces and from variants of the feel-experiment** (`structure/claude/attention_feel_variants.py`):
+1. **The step is too small for a game.** The rule moves a score by at most η(r − a) ≤ 0.5 per observation.
+   - A position key starts at −log(number of position keys) ≈ −4.8 (the description-length prior of part 23).
+   - An action sees about 5–10 informative events (a wall, door or ice ahead) in 300 steps.
+   - The track record (part 24) moves the right key by about 4 nats per informative event (log 0.98 − log 0.02).
+   - In the feel-experiment, giving the 8 position keys that −4.8 start drops attention to 0.71 at 300 steps (0.84 when
+     every key starts level).
+2. **Starvation.** EM counts an observation into a key's table with weight r. A key with tiny attention gets tiny
+   counts, so its table never learns what its values mean, so it never earns attention: the rich-get-richer collapse
+   of mixtures of experts.
+   - W4 trace: by step 168 no position key is among the 4 most attended; the attended keys are the unconditional
+     expert, quotients and the numeric expert. The ice ahead is never read.
+3. **Quotients and own state in the query let W learn per-position attention** to the quotient keys (W1 trace:
+   ("mod", 4) scored 5–7 at particular positions). Taking them out of the query left the means unchanged (0.947 vs
+   0.950), so this is not the main cause.
+
+**Tried and rejected:**
+
+| variant | feel-experiment (300 / 1,000 / 3,000 steps) | agent, ten worlds, seed 0 |
+|---|---|---|
+| none: the gradient, 2 heads | 0.845 / 0.904 / 0.966 | 0.947 |
+| prioritised replay, 4 stored steps per step (sampled by surprise) | 0.912 / 0.978 / – | 0.927: it entrenches the early winners faster |
+| natural-gradient step, Δs = η log(r / a) | 0.839 / – / 0.803 | – |
+| bias by exact Bayes (the track record) + W by the gradient | 0.75 / – / 0.75 | – |
+| every key counts every step, split across heads by responsibility | 0.86 / – / 0.90 (the conjunction is lost) | – |
+
+**What this says:** the transformer's weight learning is the right rule, and it is slow. Transformers pay for that with
+enormous training sets. Their sample-efficient learning happens in context, in the forward pass: attention over earlier
+tokens of the context window, with no weight change. Section 7 of `docs/ATTENTION.md` sets out that version for a
+column, as a proposal for the user to vet; it is not built.
+
+**State of the code:** this branch has part 25's attention. It is worse than part 24 on the worlds and loses the PFC's
+meta-learning; the games are unchanged. Part 24's version is commit 3923404.
