@@ -872,3 +872,91 @@ the main run's apparatus.
   - irreversibility counted in the progress variable's own units (in ARC-AGI-3, RESET makes the cost "a reset and a
     replay", not "the rest of the attempt");
   - no hard thresholds on beliefs.
+
+# Part 20: conditions learned by attention (pre-registered 2026-10-27, before the code was written)
+
+**Why (the user):**
+- The arc_agent must not hardcode when an action's effect is stopped. A rule like "things don't pass through solid
+  things" can't be computed from a 2D screen, and a hardcoded version can never be revised.
+- The solution should be simple: the attention we already have.
+- Make intentionally hard cases where conditional logic is needed.
+
+**The change (`arc_agent/column.py`, `arc_agent/brain.py`):** what an action does to a column is predicted by
+attention over experts, weighted by each expert's track record (accumulated log predictive probability, as for drivers
+in part 13).
+- **The unconditional expert:** "this action applies operator X". This is what the efference copy was.
+- **One expert per context feature.** Each is a table from the feature's value to the operator seen. Features are read
+  in the column's own frame:
+  - the content at each position relative to the column, within a window around it;
+  - beneath the column, the remembered content (V1's Spotlight lattice);
+  - off the screen, the value "edge";
+  - the state of every other column.
+- **Unseen values** back off to the unconditional expert's prediction.
+- **Deleted:** passability by colour, the contact rule, part 16's "a blocked move is no evidence" rule, and the
+  screen-edge rule. Nothing says what blocks; it is whatever feature predicts.
+
+**The hard cases (`arc_agent/worlds.py`).** Each is a 64 × 64 screen built from 3-pixel cells. An avatar of 3 × 3
+pixels moves one cell (3 pixels) per key, with random layouts per seed.
+
+| world | the condition | what predicts it |
+|---|---|---|
+| W1 walls | colour-5 cells block | the content where the avatar would go |
+| W2 inverted | colour 5 is passable; small colour-14 dots block | the same, with no colour keeping a meaning across worlds |
+| W3 torus | leaving one edge re-enters at the opposite edge (the edge doesn't block) | the "edge" value beside the avatar |
+| W4 ice | stepping onto ice (colour 11) slides the avatar 2 cells instead of 1 | the content one cell ahead |
+| W5 one-way | colour-12 tiles can be entered only moving right | the content ahead, per action |
+| W6 speed switch | while a switch (a corner indicator toggled by ACTION5) is on, every move is 2 cells | the switch column's state (gating by another column) |
+| W7 switch door | colour-8 doors block unless the switch is on | a conjunction (door ahead AND switch off): **expected to defeat single-feature experts** |
+
+**Protocol:**
+- A random walk of 300 actions per world (keys 1–4, plus ACTION5 in W6–W7), 3 seeds.
+- Measure: before each action, the brain predicts the avatar's next position. Accuracy is counted over actions
+  101–300.
+- **Arms:**
+  - ATTN: the change;
+  - UNCOND: the unconditional expert only (an ablation inside the same code).
+
+| # | prediction |
+|---|---|
+| C1 | ATTN's accuracy ≥ 0.95 in W1–W6 |
+| C2 | UNCOND's accuracy ≤ 0.85 in each of W1–W6 (it cannot represent the conditions) |
+| C3 | the attended feature is the right one: after the walk, the most-attended expert for each key is a content feature on the side the key moves toward (W1, W2, W4, W5), an "edge" or content feature on that side (W3), or the switch column's state (W6) |
+| C4 | W7: ATTN < 0.95 (the conjunction is out of reach of single features), but ATTN > UNCOND |
+
+**Cost:** under 2 minutes.
+
+    venv312/Scripts/python.exe -m arc_agent.test_conditions      (from experiments/symbolics)
+
+## Part 20 results (2026-10-27; `runs/test_conditions.txt`, `.json`; 14 s)
+
+Accuracy of the next-position prediction, actions 101–300, mean of 3 seeds:
+
+| world | ATTN | UNCOND | ATTN's attended feature on the right side |
+|---|---|---|---|
+| W1 walls | **0.993** | 0.675 | 1.00, exactly the cell the key moves into, for every key |
+| W2 inverted | **0.990** | 0.800 | 1.00, the dot's pixel in the cell ahead |
+| W3 torus | **0.993** | 0.972 | 0.67 |
+| W4 ice | **0.990** | 0.682 | 1.00 |
+| W5 one-way | **0.993** | 0.643 | 1.00 |
+| W6 speed switch | **0.962** | 0.647 | 1.00, the switch column's state, for every key |
+| W7 switch door | 0.942 | 0.915 | 0.75 |
+
+**Verdicts:**
+- **C1 confirmed:** ATTN ≥ 0.95 in W1–W6 (lowest W6, 0.962).
+- **C2 refuted for W3 only:** UNCOND is 0.972 there. A random walk rarely reaches the board's edge, so the condition
+  is rarely tested. W1, W2, W4, W5 and W6 confirm it (0.64–0.80).
+- **C3 confirmed except W3:** there, one feature (3 pixels left and 4 up) is attended for all four keys. It sees
+  "edge" in the top row and the left column, so it predicts wraps for up and left, but not for down and right.
+- **C4 confirmed:** the conjunction world defeats single-feature experts (0.942 < 0.95), and ATTN still beats UNCOND
+  (0.915).
+
+**Reading:**
+- Walls, inverted colours, one-way tiles, ice and a remote switch are all learned by one mechanism with no rule
+  saying what blocks. The attended feature is the cell the action moves into, or the switch.
+- Deleted from the agent: passability by colour, the contact rule, part 16's "a blocked move is no evidence" rule, and
+  the screen-edge rule.
+- **Open:**
+  - conjunctions (W7);
+  - rare conditions that a random walk seldom tests (W3);
+  - the real games: a smoke test on ls20, vc33 and tu93 runs (16 s) but solves nothing. Planning and the RESET logic
+    are the next work, not the condition model.

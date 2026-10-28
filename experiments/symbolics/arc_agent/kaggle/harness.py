@@ -26,7 +26,11 @@ logging.disable(logging.WARNING)
 from arc_agi import Arcade, OperationMode          # noqa: E402
 from arcengine import GameAction, GameState         # noqa: E402
 
-from explorer import Explorer                       # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from explorer import Explorer                       # noqa: E402  (the control arm)
+from arc_agent.agent import ArcAgent                # noqa: E402  (the brain arm)
+
+ARMS = {"control": Explorer, "brain": ArcAgent}
 
 CAP = 10                                            # a level is abandoned at CAP x its human baseline
 
@@ -71,4 +75,15 @@ def main(games=None, make_agent=Explorer, out=None):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:] or None)
+    args = sys.argv[1:]
+    arm = "brain"
+    if "--arm" in args:
+        i = args.index("--arm")
+        arm = args[i + 1]
+        args = args[:i] + args[i + 2:]
+    out = None
+    if "--out" in args:
+        i = args.index("--out")
+        out = args[i + 1]
+        args = args[:i] + args[i + 2:]
+    main(args or None, ARMS[arm], out)
