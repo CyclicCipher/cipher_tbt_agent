@@ -1135,3 +1135,102 @@ still a stand-in for the real budget, which every game draws on screen and which
 **The bottleneck:** goal priors cannot be learned from the agent's own WINs, because it finds too few. Options:
 (a) learn from watching the control play, since it stumbles into different WINs; (b) explore joint states the way the
 control does, on top of the brain's model.
+
+# Part 23: the symbolics folder's solutions, into the agent (pre-registered 2026-10-28, before the code)
+
+**Why (the user):** do everything for which the symbolics folder's code already has the solution; afterwards, report
+what the folder doesn't cover.
+
+**What goes in:**
+
+| solved in the folder | into the agent as |
+|---|---|
+| part 12: rotations act in the body frame (pose' = pose · h), translations in the world frame | a **rigid frame**, pose (x, y, r): translations and 90° rotations about the piece's own pivot. Recruited when a rotation explains a change that no translation does |
+| part 10: content regularity is a quotient of the geometry | **quotient features:** (x mod k, y mod k) of a column's own state, k = 2…6 |
+| OPEN_PROBLEMS #6: a richer vocabulary overfits, and description-length priors are the remedy | **description-length priors on experts:** an expert starts log K nats behind the unconditional one, K being the number of experts of its kind (conjunctions also pay for the choice of partner) |
+| experiments A–B3: the function finder (`regression/claude/symreg2.py`; affine and relational atoms, BIC) | **numeric experts:** a translation's displacement as a fitted function of numeric relational features. The features are, along each of 4 rays, the distance to the first cell that differs from what lies beneath the column, and the relative position of every other column. Refitted as data arrive; they compete in the same attention |
+| experiment B: library learning; the guide's case memory | **priors harvested from warm-up:** every game's learned conditions (the kind of the most-attended feature, relative to the operator: the cell moved into, the edge, another column, a quotient) and fitted formulas become an overhypothesis over expert kinds. In a new game, experts of commonly useful kinds start with that head start. This needs no WIN: conditions are learned in every game |
+| parts 2–4: completion by group axioms | already implicit: operators are group actions, and the model composes them |
+| part 6: irreducible representations; part 9: one map per position hypothesis | not used: column states are explicit group elements, and positions are observed directly |
+
+**New hard worlds (`arc_agent/worlds.py`):**
+
+| world | the condition | what predicts it |
+|---|---|---|
+| W8 rotating piece | an L-shaped piece; keys 1–4 translate it, ACTION5 rotates it 90° about its own pivot | the rigid frame (the rotation as a body-frame operator) |
+| W9 invisible ladders | "up" works only where x ≡ 0 (mod 3) cells; nothing on screen marks it | a quotient feature of the avatar's position |
+| W10 sliding ice | on an ice board the avatar slides until the cell before the first wall | a numeric expert: displacement = (distance to the wall − 1) cells |
+
+**Protocol:** as part 20 (a 300-action random walk, 3 seeds, accuracy over actions 101–300), for W1–W10.
+- **Arms:** P23 (this part) and P21 (part 21's code, from git, run on W8–W10 only; W1–W7 are recorded).
+
+| # | prediction |
+|---|---|
+| D1 | P23 ≥ 0.95 on W8, W9 and W10; P21 ≤ 0.85 on each |
+| D2 | no regression: P23 within 0.01 of part 21 on W1–W7 |
+| D3 | the fast 25-game run, with warm-up-harvested expert priors (cross-validated as in part 22): ≥ 3 levels and mean ≥ 0.0009 (part 22's DRIVE) |
+| D4 | the warm-up harvests condition kinds in ≥ 20 of 25 games, and the most common kind is "the cell moved into" |
+
+**Cost:** the worlds in under a minute; warm-up about 4 minutes; each fast run about 1 minute.
+
+## Part 23 results (2026-10-28)
+
+**Hand-built worlds (`runs/test_conditions_part23.txt`, `.json`; 3 seeds, accuracy over actions 101–300; run in
+parallel, 123 s wall):**
+
+| world | P23 | P21 (part 21's code) | P23's most-attended expert |
+|---|---|---|---|
+| W1 walls | 0.993 | 0.993 (part 21) | the cell moved into |
+| W2 inverted | 0.975 | 0.990 (part 21) | the cell moved into |
+| W3 torus | 0.993 | 0.993 (part 21) | numeric, and an edge feature |
+| W4 ice | 0.990 | 0.988 (part 21) | the cell moved into |
+| W5 one-way | 0.988 | 0.993 (part 21) | the cell moved into; numeric for "right" |
+| W6 speed switch | 0.972 | 0.977 (part 21) | the switch column |
+| W7 switch door | 0.942 | 0.942 (part 21) | mixed |
+| **W8 rotating piece** | **0.985** | 0.825 | the rigid frame tracks the turns |
+| **W9 invisible ladders** | **0.988** | 0.952 | "up": (x mod 3), the quotient |
+| **W10 sliding ice** | **0.962** | 0.860 | the numeric expert (the function finder's fit) |
+
+**Measurement note:** the first P21 rows were wrong. They came out identical to P23 because the pool's worker
+processes are reused: a worker that had run a P23 job kept the new code loaded. P21 was re-run in its own pool, and
+those are the numbers above.
+
+**Verdicts:**
+- **D1, P23 half:** confirmed (≥ 0.95 on W8–W10).
+- **D1, P21 half:** refuted for W9 and W10 (0.952, 0.860 > 0.85). Part 21's code partly memorises exact positions
+  through its own-state feature.
+- **D2:** confirmed except W2 (0.975 against 0.990, beyond the 0.01 allowed).
+
+**Correction (the user, 2026-10-28):** the thesis is that the column *with its frame* is the reusable unit.
+Generalising is easy in the right coordinate system, so the task is to pick the right column for the task, which is the
+PFC's job. It is not one model shared across many frames, as I put it in chat.
+
+**Warm-up (`runs/warmup23.txt`, `runs/warmup.json`; 283 s):**
+- 2 levels won (the same two as part 22).
+- Expert kinds harvested from 19 of 25 games: own state 385, other column 171, ahead (the cell moved into) 29,
+  unconditional 16, elsewhere 14, numeric 6, conjunction 3.
+- 15 library templates learned from the numeric experts' formulas.
+
+**Two fixes during the warm-up:** a kind-classifier bug (a recolour operator with three colour pairs was read as a
+move); and the harness now reports a game that crashes as that game's result instead of ending the run.
+
+**Fast 25-game runs (cap 3 × baseline):**
+
+| arm | levels | mean | wall |
+|---|---|---|---|
+| part 22 DRIVE (recorded) | 2 | 0.0009 | 57 s |
+| P23, even priors | 1 (lp85) | 0.0008 | 169 s |
+| P23, cross-validated warm-up priors | 2 (lp85 in 20, ar25 in 60) | **0.0011** | 127 s |
+
+**Verdicts:**
+- **D3 refuted on levels** (2, not ≥ 3); its mean-score half holds (0.0011 ≥ 0.0009).
+- **D4 refuted:** kinds came from 19 games, not ≥ 20, and the most common kind is "own state", not "ahead".
+
+**Reading:**
+- **The folder's pieces work where they apply:** rotation, quotients and the function finder each solve their
+  hand-built world (W8–W10).
+- **On the real games they change little.** The bottleneck is still finding WINs.
+- **The harvested priors expose a weakness:** the most-attended expert in most games is "own state", a lookup by
+  exact position. That is memorisation, not a generalising condition, so a prior learned from it rewards memorising.
+  This is the frame-choice problem: in a wrong or missing frame, the only thing left to attend to is the raw state.
+- **Runs got slower** (the numeric experts' fits): 127–169 s for the fast 25-game run.

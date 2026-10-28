@@ -21,6 +21,8 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+import numpy as np
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
 sys.path.insert(0, str(HERE))
@@ -30,7 +32,18 @@ logging.disable(logging.WARNING)
 
 
 def play(game_id, arm, cap, budget, draws=None, time_limit=None, hunger=None):
-    """One game in its own process. draws: the goal-type prior's draws (None: whatever is shipped)."""
+    """One game in its own process; a crash is reported as that game's result, not the run's end."""
+    try:
+        return _play(game_id, arm, cap, budget, draws, time_limit, hunger)
+    except Exception as e:                              # noqa: BLE001
+        import traceback
+        return dict(game=game_id[:4], levels=1, solved=0, actions=[], baseline=[], score=0.0, seconds=0.0,
+                    notes={}, win_types=[], kinds=[], corpus=[], error=f"{type(e).__name__}: {e}",
+                    trace=traceback.format_exc()[-600:])
+
+
+def _play(game_id, arm, cap, budget, draws=None, time_limit=None, hunger=None):
+    """One game. draws: what was learned on other games (None: whatever is shipped)."""
     logging.disable(logging.WARNING)
     from arc_agi import Arcade, OperationMode
     from arcengine import GameAction, GameState
@@ -44,7 +57,7 @@ def play(game_id, arm, cap, budget, draws=None, time_limit=None, hunger=None):
     env = arc.make(game_id)
     base = info.baseline_actions
     fd = env.reset()
-    agent = ArcAgent(game_id, type_draws=draws) if arm == "brain" else Explorer(game_id)
+    agent = ArcAgent(game_id, priors=draws) if arm == "brain" else Explorer(game_id)
     level, used, done, t0 = 0, 0, [], time.time()
     while level < len(base):
         a, data = agent.act(fd)
@@ -63,21 +76,56 @@ def play(game_id, arm, cap, budget, draws=None, time_limit=None, hunger=None):
     return dict(game=game_id[:4], levels=len(base), solved=len(done), actions=done, baseline=base[:len(done) + 1],
                 score=sum((i + 1) * s for i, s in enumerate(scores)) / sum(range(1, len(base) + 1)),
                 seconds=round(time.time() - t0, 1), notes=dict(getattr(agent, "notes", {})),
-                win_types=list(getattr(getattr(agent, "executive", None), "goals", None).win_types)
-                if arm == "brain" else [])
+                win_types=list(agent.executive.goals.win_types) if arm == "brain" else [],
+                **(harvest(agent) if arm == "brain" else {}))
+
+
+def harvest(agent):
+    """What a game taught that carries to others (part 23): expert kinds, and the fitted formulas' terms."""
+    from regression.claude.library import Corpus
+    kinds, formulas = agent.brain.harvest()
+    corpus = Corpus()
+    for rec, n in formulas:
+        corpus.add(rec, n)
+    terms = [dict(n=t["n"], terms=[dict(struct=[list(x) for x in term["struct"]], theta=[float(v) for v in term["theta"]],
+                                        prim=term["prim"]) for term in t["terms"]]) for t in corpus.tasks]
+    return dict(kinds=kinds, corpus=terms)
+
+
+def learn_library(tasks):
+    """Library learning (experiment B, regression/claude/library.py) over the formulas of the given games."""
+    from regression.claude.library import Corpus, learn
+    corpus = Corpus()
+    for t in tasks:
+        corpus.tasks.append(dict(n=t["n"], terms=[dict(struct=tuple(tuple(x) for x in term["struct"]),
+                                                       theta=np.asarray(term["theta"], float), prim=term["prim"])
+                                                  for term in t["terms"]]))
+    if not corpus.tasks:
+        return []
+    library, _, _ = learn(corpus)
+    return [dict(s, theta=[float(v) for v in s["theta"]], free=[bool(v) for v in s["free"]])
+            for s in (t.spec() for t in library)]
 
 
 def priors_for(ids, mode):
-    """mode "even": no draws; "cv": 5 folds, each game's draws from the warm-up of the other folds' games;
-    "shipped": the agent's priors.json."""
+    """mode "even": nothing learned elsewhere; "cv": 5 folds, each game's priors from the warm-up of the other folds'
+    games (goal types, expert kinds, the formula library); "shipped": the agent's priors.json."""
     if mode == "shipped":
         return [None] * len(ids)
     if mode == "even":
-        return [[] for _ in ids]
+        return [{} for _ in ids]
     warm = json.load(open(HERE.parents[1] / "runs" / "warmup.json"))["games"]
     allids = sorted(warm)
     fold = {g: i % 5 for i, g in enumerate(allids)}
-    return [[t for h in allids if fold[h] != fold.get(g, -1) for t in warm[h]] for g in ids]
+    out, libs = [], {}
+    for g in ids:
+        f = fold.get(g[:4], -1)
+        others = [h for h in allids if fold[h] != f]
+        if f not in libs:
+            libs[f] = learn_library([t for h in others for t in warm[h].get("corpus", [])])
+        out.append(dict(draws=[t for h in others for t in warm[h].get("win_types", [])],
+                        kinds=[k for h in others for k in warm[h].get("kinds", [])], library=libs[f]))
+    return out
 
 
 def main(games=None, arm="brain", out=None, fast=False, cap=None, budget=None, priors="shipped", time_limit=None,

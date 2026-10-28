@@ -9,6 +9,10 @@ W4 ice          stepping onto ice (colour 11) slides the avatar 2 cells instead 
 W5 one-way      colour-12 tiles can be entered only moving right
 W6 speed switch while the switch (top-right corner: colour 10 off, 14 on) is on, every move is 2 cells
 W7 switch door  colour-8 doors block unless the switch is on (a conjunction: door ahead AND switch off)
+W8 rotating     an L-shaped piece: keys 1-4 move it one cell, ACTION5 turns it 90 degrees about its own pivot (part 12)
+W9 ladders      "up" works only where the avatar's column x is 0 mod 3; nothing on screen marks it (a quotient, part 10)
+W10 sliding     an ice board: the avatar slides in the key's direction until the cell before the first wall (a numeric
+                relation: the slide is the distance to the wall)
 
 Leaving the board otherwise fails (the avatar stays), except in W3.
 """
@@ -16,15 +20,18 @@ import numpy as np
 
 N, C = 21, 3                                            # board cells, pixels per cell
 MOVES = {1: (0, -1), 2: (0, 1), 3: (-1, 0), 4: (1, 0)}
-WORLDS = ("W1 walls", "W2 inverted", "W3 torus", "W4 ice", "W5 one-way", "W6 speed switch", "W7 switch door")
+WORLDS = ("W1 walls", "W2 inverted", "W3 torus", "W4 ice", "W5 one-way", "W6 speed switch", "W7 switch door",
+          "W8 rotating", "W9 ladders", "W10 sliding")
+PIECE = [(0, -1), (0, 0), (0, 1), (1, 1)]               # W8's L, around its pivot (0, 0)
 
 
 class World:
     def __init__(self, name, rng):
         self.name, self.rng = name, rng
         self.tiles = {}                                 # (x, y) -> colour
-        density = {"W1": 0.2, "W2": 0.15, "W4": 0.25, "W5": 0.25, "W7": 0.2}.get(name[:2], 0.0)
-        colour = {"W1": 5, "W2": 14, "W4": 11, "W5": 12, "W7": 8}.get(name[:2])
+        self.tag = name.split()[0]
+        density = {"W1": 0.2, "W2": 0.15, "W4": 0.25, "W5": 0.25, "W7": 0.2, "W10": 0.15}.get(self.tag, 0.0)
+        colour = {"W1": 5, "W2": 14, "W4": 11, "W5": 12, "W7": 8, "W10": 5}.get(self.tag)
         for x in range(N):
             for y in range(N):
                 if (x, y) != (10, 10) and colour is not None and rng.random() < density:
@@ -34,13 +41,24 @@ class World:
                 for y in range(N):
                     if (x, y) not in self.tiles and (x, y) != (10, 10) and rng.random() < 0.3:
                         self.tiles[(x, y)] = 5
-        self.switched = name[:2] in ("W6", "W7")
+        self.switched = self.tag in ("W6", "W7")
+        self.turn = 0                                   # W8: the piece's quarter turns
         if self.switched:
             self.tiles.pop((N - 1, 0), None)
         self.avatar, self.on = (10, 10), False
 
     def actions(self):
-        return [1, 2, 3, 4, 5] if self.switched else [1, 2, 3, 4]
+        return [1, 2, 3, 4, 5] if (self.switched or self.tag == "W8") else [1, 2, 3, 4]
+
+    def piece(self, at=None, turn=None):
+        ax, ay = self.avatar if at is None else at
+        t = self.turn if turn is None else turn
+        out = []
+        for x, y in PIECE:
+            for _ in range(t % 4):
+                x, y = -y, x
+            out.append((ax + x, ay + y))
+        return out
 
     def frame(self):
         g = np.zeros((64, 64), np.int8)
@@ -51,8 +69,13 @@ class World:
                 g[y * C:y * C + C, x * C:x * C + C] = c
         if self.switched:
             g[0:C, (N - 1) * C:N * C] = 14 if self.on else 10
-        ax, ay = self.avatar
-        g[ay * C:ay * C + C, ax * C:ax * C + C] = 9
+        if self.tag == "W10":                           # the ice board under everything else
+            ice = g == 0
+            ice[N * C:, :] = False
+            ice[:, N * C:] = False
+            g[ice] = 11
+        for ax, ay in (self.piece() if self.tag == "W8" else [self.avatar]):
+            g[ay * C:ay * C + C, ax * C:ax * C + C] = 9
         return g
 
     def passable(self, cell, a):
@@ -71,6 +94,30 @@ class World:
         return True
 
     def step(self, a):
+        if self.tag == "W8":
+            at, turn = self.avatar, self.turn
+            if a == 5:
+                turn = (turn + 1) % 4
+            else:
+                at = (at[0] + MOVES[a][0], at[1] + MOVES[a][1])
+            if all(0 <= x < N and 0 <= y < N for x, y in self.piece(at, turn)):
+                self.avatar, self.turn = at, turn
+            return self.frame()
+        if self.tag == "W9":
+            dx, dy = MOVES[a] if a in MOVES else (0, 0)
+            x, y = self.avatar
+            if a == 1 and x % 3 != 0:                   # an invisible ladder only every third column
+                return self.frame()
+            if 0 <= x + dx < N and 0 <= y + dy < N:
+                self.avatar = (x + dx, y + dy)
+            return self.frame()
+        if self.tag == "W10":
+            dx, dy = MOVES[a]
+            x, y = self.avatar
+            while 0 <= x + dx < N and 0 <= y + dy < N and self.tiles.get((x + dx, y + dy)) != 5:
+                x, y = x + dx, y + dy
+            self.avatar = (x, y)
+            return self.frame()
         if a == 5:
             if self.switched:
                 self.on = not self.on

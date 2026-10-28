@@ -63,6 +63,12 @@ def side_ok(name, k, f):
         return False
     if name.startswith("W6"):
         return f[0] == "col"
+    if name.startswith("W9"):
+        return f[0] == "mod" or (k != 1 and f[0] == "at")
+    if name.startswith("W10"):
+        return f[0] == "num"
+    if name.startswith("W8"):
+        return f[0] in ("at", None) or f is None
     if f[0] != "at":
         return False
     dx, dy = f[1], f[2]

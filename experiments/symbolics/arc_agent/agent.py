@@ -5,6 +5,7 @@ for the next action, and keeps the engine's rules (RESET after GAME_OVER; never 
 the engine would restart the whole game).
 """
 import json
+import math
 import os
 import random
 from collections import Counter
@@ -14,17 +15,36 @@ import numpy as np
 from arc_agent.blueprint import DEFAULT
 from arc_agent.brain import Brain, size_bucket
 from arc_agent.executive import Executive
+from arc_agent.overhypothesis import Overhypothesis
 
 RESET, CLICK = 0, 6
 PRIORS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "priors.json")
 
 
 def shipped_priors():
-    """The goal-type draws from warm-up play (warmup.py), if they were shipped."""
+    """What warm-up play on other games taught (warmup.py), if it was shipped: goal-type draws, expert-kind draws, and
+    the formula library's templates."""
     try:
-        return json.load(open(PRIORS))["draws"]
-    except (OSError, ValueError, KeyError):
-        return []
+        return json.load(open(PRIORS))
+    except (OSError, ValueError):
+        return {}
+
+
+def kind_boost(draws):
+    """Part 23: an overhypothesis over the kinds of attended experts; a kind's head start is log(P(kind) x kinds)."""
+    from arc_agent.column import feature_kind  # noqa: F401  (the kinds' vocabulary lives there)
+    kinds = ("unconditional", "ahead", "elsewhere", "other column", "own state", "quotient", "numeric", "conjunction")
+    if not draws:
+        return {}
+    o = Overhypothesis()
+    for d in draws:
+        o.add("kind", d)
+    p = o.prior("kind", kinds)
+    return {k: math.log(p[k] * len(kinds)) for k in kinds}
+
+
+def library_specs(specs):
+    return [dict(s, theta=np.asarray(s["theta"], float), free=np.asarray(s["free"], bool)) for s in specs or []]
 
 
 def region_size(grid, x, y, cap=200):
@@ -39,10 +59,13 @@ def region_size(grid, x, y, cap=200):
 
 
 class ArcAgent:
-    def __init__(self, game_id="", blueprint=DEFAULT, seed=0, type_draws=None):
+    def __init__(self, game_id="", blueprint=DEFAULT, seed=0, priors=None):
+        """priors: {"draws": goal types, "kinds": expert kinds, "library": formula templates}; None = shipped."""
         self.game_id = game_id
-        self.brain = Brain(blueprint)
-        self.executive = Executive(self.brain, shipped_priors() if type_draws is None else type_draws)
+        pri = shipped_priors() if priors is None else priors
+        self.brain = Brain(blueprint, kind_prior=kind_boost(pri.get("kinds", [])),
+                           library=library_specs(pri.get("library", [])))
+        self.executive = Executive(self.brain, pri.get("draws", []))
         self.level, self.prev, self.acted = None, None, 0
         self.expected = None
         self.rng = random.Random(seed)

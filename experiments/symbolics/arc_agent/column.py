@@ -18,12 +18,73 @@ An action, seen from a column: a key ("key", id); a click on the column's own ce
 import math
 from collections import Counter
 
+import numpy as np
+
 from arc_agent.spotlight import Spotlight
 
 A = 0.02                          # pseudo-count: one consistent observation makes a deterministic outcome ~0.98
 PMIN = 0.02
 TOP = 8                           # experts used for a prediction (the most attended)
 CASES = 4                         # conjunction cases per (action, column)
+NUM_MIN, NUM_EVERY = 6, 8         # the numeric expert: observations before its first fit; new ones between refits
+
+
+def feature_kind(f, op=None):
+    """What kind of context an expert reads, relative to the operator when it is a move (for priors across games)."""
+    if f is None:
+        return "unconditional"
+    if f[0] == "at":
+        if isinstance(op, tuple) and len(op) == 3 and all(isinstance(v, int) for v in op) and (op[0] or op[1]):
+            return "ahead" if f[1] * op[0] + f[2] * op[1] > 0 else "elsewhere"
+        return "elsewhere"
+    return {"col": "other column", "self": "own state", "mod": "quotient", "num": "numeric",
+            "and": "conjunction"}.get(f[0], "other")
+
+
+class Numeric:
+    """The numeric expert (part 23): a translation's displacement as a function of the column's numeric features
+    (distances along four rays, its own position), fitted by the function finder of experiments A-B3
+    (regression/claude/symreg2.py: residual-greedy, affine atoms, BIC). Refitted when its prediction fails."""
+
+    def __init__(self, library=None):
+        self.X, self.Y, self.fit, self.last, self.library = [], [], None, -10 ** 9, library or []
+
+    def predict(self, x):
+        if self.fit is None:
+            return None
+        out = []
+        for f in self.fit:
+            if isinstance(f, int):
+                out.append(f)
+                continue
+            with np.errstate(all="ignore"):
+                v = float(f.predict(np.array([x], float))[0])
+            if not math.isfinite(v):                    # outside where the formula is defined: no prediction
+                return None
+            out.append(int(round(v)))
+        return tuple(out)
+
+    def add(self, x, op):
+        self.X.append(tuple(float(v) for v in x))
+        self.Y.append(op)
+        if len(self.X) >= NUM_MIN and len(self.X) - self.last >= NUM_EVERY and self.predict(x) != op:
+            self.refit()
+
+    def refit(self):
+        from regression.claude.symreg2 import Finder
+        X = np.array(self.X, float)
+        fit = []
+        for c in range(len(self.Y[0])):
+            y = np.array([o[c] for o in self.Y], float)
+            if np.all(y == y[0]) or c == 2:
+                fit.append(int(Counter(int(v) for v in y).most_common(1)[0][0]))
+            else:
+                fit.append(Finder([f"n{i}" for i in range(X.shape[1])], library=self.library, affine=True,
+                                  k_max=2).fit(X, y))
+        self.fit, self.last = fit, len(self.X)
+
+    def formulas(self):
+        return [f.best for f in (self.fit or []) if not isinstance(f, int)]
 P_IDENTITY = {"key": 0.5, "self": 0.5, "at": 0.99}  # innate: a click elsewhere rarely changes me (locality)
 
 
@@ -36,8 +97,10 @@ class ConditionalOps:
     only when the feature equals v, holding a table from g's value to the operator. Their unseen values back off to
     the parent expert, and they compete in the same attention."""
 
-    def __init__(self, K, identity, p0, conditional=True):
+    def __init__(self, K, identity, p0, conditional=True, kind_prior=None, library=None):
         self.K, self.identity, self.p0, self.conditional = K, identity, p0, conditional
+        self.kind_prior = kind_prior or {}              # kind -> log head start, learned on other games (part 23)
+        self.numeric = Numeric(library) if conditional else None
         self.n0 = Counter()                             # the unconditional expert's counts
         self.tables = {}                                # feature -> {value: Counter(op)}
         self.ev = {None: 0.0}                           # expert -> log evidence (None = unconditional)
@@ -64,7 +127,7 @@ class ConditionalOps:
         for f, v in self.cases:
             if ctx.get(f) == v:
                 for g, gv in ctx.items():
-                    if g != f:
+                    if g != f and g[0] != "num":
                         out[("and", f, v, g)] = gv
         return out
 
@@ -73,6 +136,13 @@ class ConditionalOps:
             return p0, rest
         if f[0] == "and":                               # a conjunction backs off to its parent expert's case
             p0, rest = self._expert(f[1], f[2], p0, rest)
+        if f[0] == "num":                               # the fitted formula, or the unconditional expert until fitted
+            op = self.numeric.predict(v) if v is not None else None
+            if op is None:
+                return p0, rest
+            p = {o: 0.01 * x for o, x in p0.items()}
+            p[op] = p.get(op, 0.0) + 0.99
+            return p, 0.01 * rest
         cnt = self.tables.get(f, {}).get(v)
         if not cnt:
             return p0, rest
@@ -121,9 +191,16 @@ class ConditionalOps:
         p0, rest = self._p0()
         if self.conditional:
             ctx = self._augment(ctx)
+            kinds = Counter(f[0] for f in ctx)
             for f in ctx:
-                if f not in self.ev:                    # a new feature: no track record; a conjunction starts with
-                    self.ev[f] = self.ev[f[1]] if f[0] == "and" else self.ev[None]   # its parent's, others the prior's
+                if f not in self.ev:                    # a new expert: no track record. Description length (part 23,
+                    # OPEN_PROBLEMS #6): it starts log K behind, K the experts of its kind (a conjunction: behind its
+                    # parent by log of the partners); plus the head start its kind earned on other games
+                    if f[0] == "and":
+                        self.ev[f] = self.ev.get(f[1], self.ev[None]) - math.log(max(1, len(ctx) - 1))
+                    else:
+                        self.ev[f] = self.ev[None] - math.log(kinds[f[0]])
+                    self.ev[f] += self.kind_prior.get(feature_kind(f, op), 0.0)
         for f in list(self.ev):
             if f is not None and f not in ctx:
                 continue
@@ -133,8 +210,11 @@ class ConditionalOps:
         self._order = None
         if self.conditional:
             for f, v in ctx.items():
-                self.tables.setdefault(f, {}).setdefault(v, Counter())[op] += 1
-            base = [f for f in ctx if f[0] != "and"]
+                if f[0] != "num":                       # the numeric expert keeps data, not a table
+                    self.tables.setdefault(f, {}).setdefault(v, Counter())[op] += 1
+            if ("num",) in ctx and isinstance(op, tuple) and len(op) == 3:
+                self.numeric.add(ctx[("num",)], op)
+            base = [f for f in ctx if f[0] not in ("and", "num")]
             if base and len(self.cases) < CASES:      # refutation: the most-attended expert's cell is mixed
                 top = max(base, key=lambda f: self.ev[f])
                 case = (top, ctx[top])
@@ -147,9 +227,10 @@ class ConditionalOps:
 
 
 class Column:
-    def __init__(self, cid, frame, state, born, conditional=True):
+    def __init__(self, cid, frame, state, born, conditional=True, kind_prior=None, library=None):
         self.cid, self.frame, self.state, self.born = cid, frame, state, born
-        self.conditional = conditional
+        self.conditional, self.kind_prior, self.library = conditional, kind_prior, library
+        self.unit = 0                                   # the gcd of the moves seen: the lattice quotients are taken in
         self.content = Spotlight()                      # the template, addressed by cell index in the frame
         for i, c in enumerate(getattr(frame, "colours", [])):
             self.content.write(i, "colour", int(c))
@@ -178,7 +259,8 @@ class Column:
     def belief(self, akey):
         if akey not in self.keys:
             self.keys[akey] = ConditionalOps(self.frame.K, self.frame.identity, P_IDENTITY[akey[0]],
-                                             conditional=self.conditional and akey[0] != "at")
+                                             conditional=self.conditional and akey[0] != "at",
+                                             kind_prior=self.kind_prior, library=self.library)
         return self.keys[akey]
 
     def driver(self):
@@ -196,5 +278,19 @@ class Column:
         b.observe(ctx, op)
         self.clock.observe({}, op)
         self.uses += 1
-        if isinstance(op, tuple) and len(op) == 2 and all(isinstance(v, int) for v in op):
+        if isinstance(op, tuple) and len(op) == 3 and all(isinstance(v, int) for v in op):
             self.reach = min(16, max(self.reach, abs(op[0]) + 1, abs(op[1]) + 1))   # local context only
+            for v in op[:2]:
+                if v:
+                    self.unit = math.gcd(self.unit, abs(v))
+
+    def harvest(self):
+        """What this column learned that carries to other games: for each key, the kind of its most-attended expert,
+        relative to the key's usual operator."""
+        out = []
+        for akey, b in self.keys.items():
+            if akey[0] != "key" or b.n < 3:
+                continue
+            op = b.n0.most_common(1)[0][0]
+            out.append(feature_kind(b.attended(), op))
+        return out

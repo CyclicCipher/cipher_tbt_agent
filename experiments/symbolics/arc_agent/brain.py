@@ -76,6 +76,7 @@ class LazyContext:
     when an expert asks for it. Conjunction features ("and", f, v, g) are present when f's value is v."""
 
     def __init__(self, brain, col, state, scene, others, under):
+        self.brain = brain
         self.col, self.state, self.scene, self.others, self.under = col, state, scene, others, under
         self.window = brain.window_set(col)
         self.cells = col.frame.place(state)
@@ -91,6 +92,8 @@ class LazyContext:
             return f[1] in self.others and f[1] != self.col.cid
         if f[0] == "and":
             return f[1] in self and f[3] in self and self.get(f[1]) == f[2]
+        if f[0] in ("mod", "num"):
+            return self.col.frame.kind == "translation"
         return False
 
     def get(self, f, default=None):
@@ -112,6 +115,10 @@ class LazyContext:
             v = self.others.get(f[1], default)
         elif f[0] == "and":
             v = self.get(f[3], default)
+        elif f[0] == "mod":
+            v = self.brain.quotients(self.col, self.state)[f]
+        elif f[0] == "num":
+            v = self.brain.numeric(self.col, self.state, self.scene, self.under)
         else:
             v = default
         self.vals[f] = v
@@ -168,8 +175,9 @@ class M1:
 
 
 class Brain:
-    def __init__(self, blueprint=DEFAULT, conditional=True):
+    def __init__(self, blueprint=DEFAULT, conditional=True, kind_prior=None, library=None):
         self.bp, self.conditional = blueprint, conditional
+        self.kind_prior, self.library = kind_prior or {}, library or []
         self.slots = blueprint.area("assoc").columns
         self.v1, self.m1, self.hc = V1(), M1(), Spotlight()
         self.columns, self.next_id, self.t = [], 0, 0
@@ -240,7 +248,31 @@ class Brain:
         for cid, st in others.items():
             if cid != col.cid:
                 ctx[("col", cid)] = st
+        if col.frame.kind == "translation":
+            ctx.update(self.quotients(col, state))
+            ctx[("num",)] = self.numeric(col, state, scene, under)
         return ctx
+
+    def quotients(self, col, state):
+        """Part 10: content regularity is a quotient of the geometry. The column's position modulo k, in units of its
+        own moves."""
+        u = col.unit or 1
+        return {("mod", k): ((state[0] // u) % k, (state[1] // u) % k) for k in range(2, 7)}
+
+    def numeric(self, col, state, scene, under):
+        """The numeric features (part 23): along each of four rays from the column's middle, the distance to the
+        first cell unlike what lies beneath the column (or to the screen's edge); then its own position."""
+        cells = col.frame.place(state)
+        (x0, y0), (x1, y1) = cells.min(0), cells.max(0)
+        cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+        base = under(int(cells[0][0]), int(cells[0][1])) if 0 <= cells[0][0] < W and 0 <= cells[0][1] < H else -1
+        out = []
+        for (dx, dy), (sx, sy) in (((0, -1), (cx, y0)), ((0, 1), (cx, y1)), ((-1, 0), (x0, cy)), ((1, 0), (x1, cy))):
+            d, x, y = 0, sx + dx, sy + dy
+            while 0 <= x < W and 0 <= y < H and scene[y, x] == base:
+                d, x, y = d + 1, x + dx, y + dy
+            out.append(d)
+        return tuple(out) + (int(state[0]), int(state[1]))
 
     # ---- a new level, or the same level restarted ---------------------------------------------------------------
     def start(self, grid, new_level):
@@ -340,7 +372,7 @@ class Brain:
             if not idle:
                 return None
             self.columns.remove(min(idle, key=lambda c: c.uses))
-        c = Column(self.next_id, frame, state, self.t, self.conditional)
+        c = Column(self.next_id, frame, state, self.t, self.conditional, self.kind_prior, self.library)
         self.next_id += 1
         self.columns.append(c)
         return c
@@ -350,18 +382,22 @@ class Brain:
         sites = components(residual)
         if len(sites) > MAX_SITES:
             return
-        for _ in range(3):                              # translations first: common fate by a Hough vote
+        for _ in range(3):                              # rigid motions first: common fate, translation or turn
             found = self._translation(before, after, residual, ground)
+            turned = self._rotation(before, after, residual, ground)
+            if turned is not None and (found is None or turned[2] > self._explained(found[0], found[1], residual)):
+                found = turned[:2]
             if found is None:
                 break
             cells, d = found
+            d = tuple(d) + (0,) * (3 - len(d))
             frame = Translation(cells, [before[y, x] for x, y in cells])
-            col = self._new(frame, (0, 0))
+            col = self._new(frame, (0, 0, 0))
             if col is None:
                 return
-            akey = col.akey(action, (0, 0))
+            akey = col.akey(action, (0, 0, 0))
             others = {c.cid: c.state for c in self.planning() if c is not col}
-            col.learn(akey, self.context(col, (0, 0), before, others, self.v1.under_at), d)   # evidence (part 15)
+            col.learn(akey, self.context(col, (0, 0, 0), before, others, self.v1.under_at), d)   # evidence (part 15)
             col.state = d
             for x, y in cells:
                 residual[y, x] = False
@@ -387,6 +423,43 @@ class Brain:
             col.learn(col.akey(action, col.state), self.context(col, col.state, before, others, self.v1.under_at), op)
             col.state = tuple(b for _, b in pairs)
             report["recruited"].append(col.cid)
+
+    @staticmethod
+    def _explained(cells, d, residual):
+        f = Translation(cells, [0] * len(cells))
+        d = tuple(d) + (0,) * (3 - len(d))
+        pts = set(map(tuple, f.place((0, 0, 0)).tolist())) | set(map(tuple, f.place(d).tolist()))
+        return sum(1 for x, y in pts if 0 <= x < W and 0 <= y < H and residual[y, x])
+
+    def _rotation(self, before, after, residual, ground):
+        """Part 12: a set of cells turned about its own pivot (and perhaps moved). Candidate sets: the connected
+        non-ground regions of the old screen that the change touches. Returns (cells, (dx, dy, k), explained)."""
+        mask = before != ground
+        best = None
+        for comp in components(mask):
+            if not 3 <= len(comp) <= 300 or not any(residual[y, x] for x, y in comp):
+                continue
+            f = Translation(comp, [before[y, x] for x, y in comp])
+            for k in (1, 2, 3):
+                for dx in range(-4, 5):
+                    for dy in range(-4, 5):
+                        s = (dx, dy, k)
+                        if f.matches(after, s):
+                            e = self._explained(comp, s, residual)
+                            if best is None or e > best[2]:
+                                best = (comp, s, e)
+        return best
+
+    def harvest(self):
+        """What the columns learned that carries to other games (part 23): the kinds of their attended experts, and
+        the formulas the numeric experts fitted."""
+        kinds, formulas = [], []
+        for c in self.columns:
+            kinds += c.harvest()
+            for b in c.keys.values():
+                if b.numeric is not None:
+                    formulas += [(r, len(b.numeric.X)) for r in b.numeric.formulas()]
+        return kinds, formulas
 
     def _extend_bar(self, site, pairs):
         """A small change with one colour map next to a column that just made the same change: a counter's next cell.

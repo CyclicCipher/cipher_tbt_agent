@@ -1,8 +1,8 @@
 """Reference frames for assoc columns (ARCHITECTURE.md sections 2-3): each is a coordinate system with a group of
 operators, and lays its column's content out on the screen.
 
-- translation: a set of cells that one displacement moves together (Z^2). State: the offset of the cells from where
-  the column was found. Operator: a displacement (dx, dy); (0, 0) is the identity.
+- translation: a rigid set of cells (part 12: translations in the world frame, quarter turns about its own pivot in
+  its body frame). State: (tx, ty, r). Operator: (dx, dy, k); (0, 0, 0) is the identity.
 - recolour: fixed cells whose colours change together by one colour map. State: the colours, in cell order.
   Operator: a colour map, as a sorted tuple of (old, new) pairs; () is the identity.
 - bar: an ordered line of cells filled one at a time (Z_n, a count). State: how many cells are filled. Operator: a
@@ -13,23 +13,30 @@ touching structure.
 """
 import numpy as np
 
+from arc_agent.claude.push_block_rebuild import rot     # part 12-13's 90-degree rotations of the plane
+
 H = W = 64
 
 
 class Translation:
+    """A rigid set of cells (part 12): translations act in the world frame, 90-degree rotations about the piece's own
+    pivot act in its body frame. State (tx, ty, r): the cells are rot(cells0 - pivot, r) + pivot + (tx, ty).
+    Operator (dx, dy, k): move the pivot by (dx, dy) and turn the piece by k quarter turns about it."""
     kind = "translation"
-    identity = (0, 0)
-    K = 33 * 33                                         # displacements within 16 cells: the operator universe's size
+    identity = (0, 0, 0)
+    K = 33 * 33 * 4                                     # displacements within 16 cells, times 4 turns
 
     def __init__(self, cells, colours):
         self.cells0 = np.array(cells, int)              # (n, 2) as (x, y), where the column was found
         self.colours = np.array(colours, np.int8)
+        self.pivot = np.round(self.cells0.mean(0)).astype(int)
+        self.rel = {r: rot(self.cells0 - self.pivot, r).astype(int) for r in range(4)}
 
     def place(self, state):
-        return self.cells0 + np.array(state, int)
+        return self.rel[state[2] % 4] + self.pivot + np.array(state[:2], int)
 
     def apply(self, state, op):
-        return (state[0] + op[0], state[1] + op[1])
+        return (state[0] + op[0], state[1] + op[1], (state[2] + op[2]) % 4)
 
     def inside(self, state):
         p = self.place(state)
@@ -41,20 +48,10 @@ class Translation:
         grid[p[ok, 1], p[ok, 0]] = self.colours[ok]
 
     def matches(self, grid, state):
-        return self.inside(state) and bool(np.all(grid[self.place(state)[:, 1], self.place(state)[:, 0]] == self.colours))
-
-    def find(self, grid, near, radius=16):
-        """The state nearest `near` at which the column's content is seen exactly, or None."""
-        best = None
-        for r in range(radius + 1):                     # rings of growing radius, so the nearest is found first
-            for dx in range(-r, r + 1):
-                for dy in (-r, r) if abs(dx) != r else range(-r, r + 1):
-                    s = (near[0] + dx, near[1] + dy)
-                    if self.matches(grid, s):
-                        return s
-            if best is not None:
-                return best
-        return None
+        if not self.inside(state):
+            return False
+        p = self.place(state)
+        return bool(np.all(grid[p[:, 1], p[:, 0]] == self.colours))
 
     def score(self, grid, state):
         """The fraction of the column's cells whose colour is seen at this state (0 if any cell is off the screen)."""
@@ -63,25 +60,46 @@ class Translation:
         p = self.place(state)
         return float(np.mean(grid[p[:, 1], p[:, 0]] == self.colours))
 
+    def _rings(self, near, radius, turns):
+        for r in range(radius + 1):                     # nearest first
+            for dx in range(-r, r + 1):
+                for dy in (-r, r) if abs(dx) != r else range(-r, r + 1):
+                    for k in turns:
+                        yield (near[0] + dx, near[1] + dy, (near[2] + k) % 4)
+
+    def find(self, grid, near, radius=16):
+        """The state nearest `near` at which the content is seen exactly: same turn first, then the other turns."""
+        for s in self._rings(near, radius, (0,)):
+            if self.matches(grid, s):
+                return s
+        for s in self._rings(near, 4, (1, 2, 3)):
+            if self.matches(grid, s):
+                return s
+        return None
+
     def find_near(self, grid, near, radius, frac):
         """The best-matching state within radius (at least frac of the cells seen), nearest on ties, or None."""
         best = None
-        for dx in range(-radius, radius + 1):
-            for dy in range(-radius, radius + 1):
-                s = (near[0] + dx, near[1] + dy)
-                sc = self.score(grid, s)
-                if sc >= frac and (best is None or (sc, -abs(dx) - abs(dy)) > best[0]):
-                    best = ((sc, -abs(dx) - abs(dy)), s)
+        for i, s in enumerate(self._rings(near, radius, (0, 1, 2, 3))):
+            sc = self.score(grid, s)
+            if sc >= frac and (best is None or sc > best[0]):
+                best = (sc, s)
         return None if best is None else best[1]
 
     def find_all(self, grid):
         """Every state at which the content is seen exactly (for a new level)."""
-        x0, y0 = self.cells0[0]
-        ys, xs = np.nonzero(grid == self.colours[0])
-        return [(int(x - x0), int(y - y0)) for x, y in zip(xs, ys) if self.matches(grid, (int(x - x0), int(y - y0)))]
+        out = []
+        for r in range(4):
+            x0, y0 = self.rel[r][0] + self.pivot
+            ys, xs = np.nonzero(grid == self.colours[0])
+            for x, y in zip(xs, ys):
+                s = (int(x - x0), int(y - y0), r)
+                if self.matches(grid, s):
+                    out.append(s)
+        return out
 
     def op_between(self, s0, s1):
-        return (s1[0] - s0[0], s1[1] - s0[1])
+        return (s1[0] - s0[0], s1[1] - s0[1], (s1[2] - s0[2]) % 4)
 
 
 class Recolour:
