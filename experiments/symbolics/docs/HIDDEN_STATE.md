@@ -1,5 +1,10 @@
 # Hidden state: JEPA, SIGReg, and columns whose frame is time
 
+**Where this stands (2026-10-28):** the agent has it. `arc_agent/hidden.py` holds the delay columns and the learned
+graph column as ordinary Columns; `arc_agent/column.py` reads situations with competing heads (parts 27 and 27b in
+`docs/AGENT.md`, with results). The feel-experiments below came first; the agent's own tests are worlds W11–W14
+(`arc_agent/worlds.py`, `arc_agent/test_conditions.py`).
+
 Written 2026-10-28 for item 4 of the open list. The user: start on the hidden state with JEPA and SIGReg; each
 cortical column should be a world model of what its reference frame makes it best at modelling; how models with
 similar reference frames specialise should be answered with biological insight.

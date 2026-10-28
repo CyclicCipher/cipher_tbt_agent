@@ -14,6 +14,12 @@ W9 ladders      "up" works only where the avatar's column x is 0 mod 3; nothing 
 W10 sliding     an ice board: the avatar slides in the key's direction until the cell before the first wall (a numeric
                 relation: the slide is the distance to the wall)
 
+Hidden state (part 27; docs/HIDDEN_STATE.md): nothing on the screen shows it.
+W11 hidden toggle   colour-8 doors block unless a hidden switch is on; ACTION5 toggles it
+W12 lock            ACTION5 arms (and closes), then ACTION7 opens if armed (closes otherwise): doors open only after 5 then 7
+W13 mode            ACTION5 advances a hidden mode A -> B -> C -> A, ACTION7 returns it to A; doors are open in B and C
+W14 replay          a second block (colour 12) repeats the avatar's move from 3 steps earlier (no tiles)
+
 Leaving the board otherwise fails (the avatar stays), except in W3.
 """
 import numpy as np
@@ -22,6 +28,7 @@ N, C = 21, 3                                            # board cells, pixels pe
 MOVES = {1: (0, -1), 2: (0, 1), 3: (-1, 0), 4: (1, 0)}
 WORLDS = ("W1 walls", "W2 inverted", "W3 torus", "W4 ice", "W5 one-way", "W6 speed switch", "W7 switch door",
           "W8 rotating", "W9 ladders", "W10 sliding")
+HIDDEN_WORLDS = ("W11 hidden toggle", "W12 lock", "W13 mode", "W14 replay")
 PIECE = [(0, -1), (0, 0), (0, 1), (1, 1)]               # W8's L, around its pivot (0, 0)
 
 
@@ -30,8 +37,9 @@ class World:
         self.name, self.rng = name, rng
         self.tiles = {}                                 # (x, y) -> colour
         self.tag = name.split()[0]
-        density = {"W1": 0.2, "W2": 0.15, "W4": 0.25, "W5": 0.25, "W7": 0.2, "W10": 0.15}.get(self.tag, 0.0)
-        colour = {"W1": 5, "W2": 14, "W4": 11, "W5": 12, "W7": 8, "W10": 5}.get(self.tag)
+        density = {"W1": 0.2, "W2": 0.15, "W4": 0.25, "W5": 0.25, "W7": 0.2, "W10": 0.15, "W11": 0.2, "W12": 0.2,
+                   "W13": 0.2}.get(self.tag, 0.0)
+        colour = {"W1": 5, "W2": 14, "W4": 11, "W5": 12, "W7": 8, "W10": 5, "W11": 8, "W12": 8, "W13": 8}.get(self.tag)
         for x in range(N):
             for y in range(N):
                 if (x, y) != (10, 10) and colour is not None and rng.random() < density:
@@ -46,9 +54,12 @@ class World:
         if self.switched:
             self.tiles.pop((N - 1, 0), None)
         self.avatar, self.on = (10, 10), False
+        self.q, self.follower, self.past = 0, (4, 4), []   # W11-W13: the hidden machine; W14: the second block
 
     def actions(self):
-        return [1, 2, 3, 4, 5] if (self.switched or self.tag == "W8") else [1, 2, 3, 4]
+        if self.tag in ("W12", "W13"):
+            return [1, 2, 3, 4, 5, 7]
+        return [1, 2, 3, 4, 5] if (self.switched or self.tag in ("W8", "W11")) else [1, 2, 3, 4]
 
     def piece(self, at=None, turn=None):
         ax, ay = self.avatar if at is None else at
@@ -74,16 +85,23 @@ class World:
             ice[N * C:, :] = False
             ice[:, N * C:] = False
             g[ice] = 11
+        if self.tag == "W14":
+            fx, fy = self.follower
+            g[fy * C:fy * C + C, fx * C:fx * C + C] = 12
         for ax, ay in (self.piece() if self.tag == "W8" else [self.avatar]):
             g[ay * C:ay * C + C, ax * C:ax * C + C] = 9
         return g
+
+    def open(self):
+        """W11-W13: whether the hidden machine lets doors pass."""
+        return {"W11": self.q == 1, "W12": self.q == 2, "W13": self.q in (1, 2)}[self.tag]
 
     def passable(self, cell, a):
         x, y = cell
         if self.switched and cell == (N - 1, 0):
             return False                                # the switch's cell
         t = self.tiles.get(cell)
-        if self.name.startswith("W1"):
+        if self.tag == "W1":                            # (W10-W14 also start with "W1")
             return t != 5
         if self.name.startswith("W2"):
             return t != 14
@@ -91,6 +109,10 @@ class World:
             return t != 12 or a == 4
         if self.name.startswith("W7"):
             return t != 8 or self.on
+        if self.tag in ("W11", "W12", "W13"):
+            return t != 8 or self.open()
+        if self.tag == "W14" and cell == self.follower:
+            return False
         return True
 
     def step(self, a):
@@ -117,6 +139,21 @@ class World:
             while 0 <= x + dx < N and 0 <= y + dy < N and self.tiles.get((x + dx, y + dy)) != 5:
                 x, y = x + dx, y + dy
             self.avatar = (x, y)
+            return self.frame()
+        if self.tag == "W14":                           # the second block repeats the move from 3 steps earlier
+            lag = self.past[-3] if len(self.past) >= 3 else None
+            self.past.append(a)
+            if lag is not None:
+                fx, fy = self.follower[0] + MOVES[lag][0], self.follower[1] + MOVES[lag][1]
+                if 0 <= fx < N and 0 <= fy < N and (fx, fy) != self.avatar:
+                    self.follower = (fx, fy)
+        if a in (5, 7) and self.tag in ("W11", "W12", "W13"):
+            if self.tag == "W11" and a == 5:
+                self.q = 1 - self.q
+            elif self.tag == "W12":
+                self.q = 1 if a == 5 else (2 if self.q == 1 else 0)
+            elif self.tag == "W13":
+                self.q = (self.q + 1) % 3 if a == 5 else 0
             return self.frame()
         if a == 5:
             if self.switched:

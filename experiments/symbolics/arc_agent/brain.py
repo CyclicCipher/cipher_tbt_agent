@@ -18,6 +18,7 @@ import numpy as np
 from arc_agent.blueprint import DEFAULT
 from arc_agent.column import PMIN, Column
 from arc_agent.frames import H, W, Bar, Recolour, Translation
+from arc_agent.hidden import Hidden
 from arc_agent.pfc import PFC
 from arc_agent.spotlight import Spotlight
 
@@ -176,9 +177,10 @@ class M1:
 
 
 class Brain:
-    def __init__(self, blueprint=DEFAULT, conditional=True, kind_prior=None, library=None, pfc=None):
+    def __init__(self, blueprint=DEFAULT, conditional=True, kind_prior=None, library=None, pfc=None, hidden=True):
         self.bp, self.conditional = blueprint, conditional
         self.pfc = pfc if pfc is not None else PFC()    # part 24: the prefrontal column, shared with whoever passed it
+        self.hidden = Hidden(conditional, kind_prior) if hidden else None   # part 27: columns not on the screen
         self.level, self.last_act = 0, "key"
         self.kind_prior, self.library = kind_prior or {}, library or []
         self.slots = blueprint.area("assoc").columns
@@ -203,6 +205,14 @@ class Brain:
 
     def joint(self):
         return tuple((c.cid, c.state) for c in self.planning())
+
+    def others(self, exclude=None, states=None):
+        """The other columns' states a column reads as context: the planning columns' (or the given joint states), and
+        the hidden columns' (part 27)."""
+        out = {c.cid: c.state for c in self.planning() if c is not exclude} if states is None else dict(states)
+        if self.hidden is not None:
+            out.update(self.hidden.states())
+        return out
 
     def claimed(self):
         m = np.zeros((H, W), bool)
@@ -284,6 +294,8 @@ class Brain:
     # ---- a new level, or the same level restarted ---------------------------------------------------------------
     def start(self, grid, new_level):
         self.v1.start(grid, new_level)
+        if self.hidden is not None:
+            self.hidden.start(new_level)
         if new_level:
             self.m1.done.clear()
             self.level += 1
@@ -309,7 +321,9 @@ class Brain:
         ground = self.v1.ground
         report = dict(moved=[], lost=[], recruited=[], unexplained=0)
         render = before.copy()
-        others = {c.cid: c.state for c in self.planning()}
+        others = self.others()
+        learned = []                                    # part 27: what each visible column saw, for the hidden area
+        planned = set(others)                           # (only the models in use: the PFC's rivals are not evidence)
         ctxs = {c.cid: self.context(c, c.state, before, others, self.v1.under_at) for c in self.active()}
         painted, claimed = {}, {}                       # part 24: each grouped column's prediction of its cells
         for c in self.active():
@@ -339,7 +353,8 @@ class Brain:
                     report["lost"].append(c.cid)
                     continue
                 op = f.op_between(old, new)
-                c.learn(akey, ctx, op)
+                c.learn(akey, ctx, op, self.t)
+                learned.append(((c.cid, akey), c.belief(akey)))
                 cells_old = f.place(old)
                 selfset = set(map(tuple, cells_old.tolist()))
                 for x, y in cells_old.tolist():
@@ -359,11 +374,17 @@ class Brain:
                     c.active = False
                     report["lost"].append(c.cid)
                     continue
-                c.learn(akey, ctx, op)
+                c.learn(akey, ctx, op, self.t)
+                learned.append(((c.cid, akey), c.belief(akey)))
                 f.draw(render, new)
                 c.state = new
             if op != f.identity:
                 report["moved"].append(c.cid)
+        if self.hidden is not None and self.hidden.observe(self.t, action[0], kind if kind is not None
+                                                           else ("key", action[0]),
+                                                           [(m, b) for m, b in learned
+                                                            if b.conditional and b.T and m[0] in planned]):
+            self.restate()
         residual = render != after
         report["unexplained"] = int(residual.sum())
         self.pfc.observe(self._group_evidence(painted, claimed, before, after), self.last_act)   # part 24
@@ -378,6 +399,13 @@ class Brain:
             self.m1.done.add((action[1], action[2]))
         self.v1.scene = after.copy()
         return report
+
+    def restate(self):
+        """After the hidden graph is refitted: rewrite its state in every stored episode that reads it."""
+        g = self.hidden.graph_col.cid
+        for c in self.columns + self.hidden.columns():
+            for b in c.keys.values():
+                b.restate(("self",) if c.cid == g else ("col", g), self.hidden.value_at)
 
     # ---- recruitment: frame types compete to explain what is left -----------------------------------------------
     def _new(self, frame, state):
@@ -412,7 +440,7 @@ class Brain:
             if col is None:
                 return
             akey = col.akey(action, (0, 0, 0))
-            others = {c.cid: c.state for c in self.planning() if c is not col}
+            others = self.others(col)
             col.learn(akey, self.context(col, (0, 0, 0), before, others, self.v1.under_at), d)   # evidence (part 15)
             col.state = d
             covered = set(map(tuple, cells))
@@ -461,7 +489,7 @@ class Brain:
         if col is None:
             return None
         op = frame.op_between(col.state, tuple(b for _, b in pairs))
-        others = {c.cid: c.state for c in self.planning() if c is not col}
+        others = self.others(col)
         col.learn(col.akey(action, col.state), self.context(col, col.state, before, others, self.v1.under_at), op)
         col.state = tuple(b for _, b in pairs)
         report["recruited"].append(col.cid)
@@ -670,7 +698,8 @@ class Brain:
             scene = static.copy()
             for cid, st in states.items():
                 cols[cid].frame.draw(scene, st)
-            self.cache[key] = {cid: LazyContext(self, cols[cid], st, scene, states, lambda x, y: int(static[y, x]))
+            others = self.others(states=states)
+            self.cache[key] = {cid: LazyContext(self, cols[cid], st, scene, others, lambda x, y: int(static[y, x]))
                                for cid, st in states.items()}
         ctxs = self.cache[key]
         new, bits = dict(states), 0.0

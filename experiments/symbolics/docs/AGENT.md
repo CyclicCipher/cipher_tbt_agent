@@ -1597,3 +1597,208 @@ beside the switch.
   None of them is coded; the similarity is learned.
 - **The game score didn't move.** In the games the conditional keys rarely win attention, so what limits the games is
   not conditioning: frame types (lp85's permutation along a loop), goals, and exploration.
+
+# Part 27: competing situation dimensions, and hidden-state columns in the agent (pre-registered 2026-10-28, before the code)
+
+**Why:**
+- **The user:** build the competing situation features, in the agent.
+- **What it fixes:** in `docs/HIDDEN_STATE.md` (sections 7–8), part 26's product similarity (every situation feature's
+  θ multiplies every episode's weight down) either let noise erase the memory or, with a prior, ignored rare but
+  decisive features.
+- **The hidden columns:** they move from the experiment scripts into the agent as ordinary `Column`s.
+
+**The change, in two parts:**
+
+1. **`ConditionalOps` (`arc_agent/column.py`): situation dimensions compete.**
+   - **Each dimension reads the episodes that match on it.** A dimension is either "no situation" (every stored episode
+     counts: part 20's track record) or one situation feature (only the episodes that match the current situation on
+     that feature count: part 21's conjunction cases on that feature). Within a dimension, key attention and value
+     tables are part 26's, with every counted episode weighing 1.
+   - **Dimensions are weighted by a prior plus their prequential evidence:**
+     - "no situation" starts with half the prior mass; the features share the other half;
+     - a feature that appears later starts with the evidence "no situation" has.
+   - **The prediction** mixes the 3 most weighted dimensions.
+   - **θ and its gradient are deleted.**
+2. **A hidden area (`arc_agent/hidden.py`): columns whose state is not on the screen.**
+   - **Delay columns** (Choice frames): the event 1, 2, 3 and 4 steps ago. They learn their own dynamics like any
+     column (lag k copies lag k − 1).
+   - **A graph column** (a Choice frame over 6 states).
+     - Its state is inferred: an HMM with event-conditioned transitions, fitted by Baum–Welch every 100 steps on the
+       stored history (cut into 50-step pieces).
+     - Starts keep their state (HIDDEN_STATE.md's amendment); 8 starts of 40 iterations.
+     - Its evidence is what the visible columns see: each column's operator, given the value of its most trusted key.
+     - After a fit, state labels are matched to the old ones (the assignment that agrees most). Every stored episode's
+       graph state is rewritten, in every visible column's memory and in the graph column's own memory.
+     - The column learns its own transitions from its inferred states, like any column.
+   - **The hidden columns' states reach the visible columns as ordinary "other column" situation features** (and as
+     keys). They are not in the planner's joint state yet: a plan holds them fixed, and they are re-read every step.
+   - **An event** is the action, with a click named by its target (M1's kind).
+
+**New worlds (`arc_agent/worlds.py`), 1,000 steps, accuracy over steps 500–999:**
+- **W11, hidden toggle:** W7 without the switch on screen; ACTION5 toggles whether doors block.
+- **W12, lock:** ACTION5 arms (and closes), then ACTION7 opens if armed (closes otherwise). Doors open only after 5
+  then 7.
+- **W13, mode:** ACTION5 advances a hidden mode A → B → C → A; ACTION7 returns it to A; doors open in B or C.
+- **W14, replay:** a second block repeats the avatar's move from 3 steps earlier. Scored on both blocks.
+
+**Arms:**
+- part 26 (commit 3e11087, run in a separate worktree with the new worlds);
+- part 27 without the hidden area (competing dimensions only);
+- part 27 in full.
+
+| # | prediction |
+|---|---|
+| G1 | part 27 in full, W1–W10 (300 steps, 3 seeds): each ≥ part 26 − 0.01 |
+| G2 | part 27 in full, W11–W14: each ≥ 0.95, and ≥ part 26 + 0.03 |
+| G3 | what does the work: on W11–W13 the most weighted dimension of most move actions is the graph column, in ≥ 2 of 3 seeds; on W14 the second block's is the 3-step delay column |
+| G4 | competing dimensions alone, W1–W10: each ≥ part 26 − 0.01 |
+| G5 | the PFC's meta-learning: PERSIST ratio ≤ 0.5, PERSIST < RESET in episodes 10–12 |
+| G6 | the 25 games (fast): ≥ 2 levels, mean ≥ 0.0015. Cost: W1–W14 × 3 seeds in ≤ 5 minutes; the games in ≤ 5 minutes |
+
+## Part 27 results (2026-10-28)
+
+**Build check, before the main runs:**
+1. **Competing dimensions, first version:** seed 0 dropped on W6, W9 and W10. Two causes:
+   - a bug: the numeric expert's stored evidence came from a table on its nearly unique feature values instead of its
+     formula;
+   - a dimension with no matching episode fell back to the raw base rate.
+
+   **Fixes:** the numeric expert is scored by its formula. A dimension's meanings shrink toward the general meaning of
+   the same key value (worth AS = 1 episode), so a dimension with no matching episode predicts exactly as "no
+   situation". Key attention became shared: one ranking over every episode.
+2. **The new worlds were wrong at first.** `passable` tested `name.startswith("W1")`, which W11–W14 also match, so
+   their doors never blocked (W11 scored 1.0 with the graph learning nothing). Now the tag is compared exactly.
+3. **The graph learned nothing in the agent at first** (one state on W11 and W12). Its evidence was recorded at
+   observation time with whatever key was trusted then. Two fixes:
+   - **evidence read at fit time:** it is read from the visible columns' own memories when the graph is fitted, with
+     each one's trusted key at that time (no second copy);
+   - **only models in use:** evidence comes only from the columns being planned with. The PFC's rival models are not
+     evidence; a recolour rival of the avatar was feeding the graph its memorised positions.
+
+   With both, the graph's states match the true hidden state on W11 at 0.953, on W12 at 1.0 and on W13 at 0.829 (A
+   separated from B and C).
+4. **The harness at first scored W14's follower only when it was planned with.** Without delay columns it is driven
+   by its clock, so only the avatar was scored (0.989). Every active block is now scored, as pre-registered.
+
+**Main results** (3 seeds; `runs/test_conditions_part27*.json`, `runs/test_conditions_part26_hidden_worlds.txt`):
+
+| world | part 26 | part 27, no hidden area | part 27 in full |
+|---|---|---|---|
+| W1 walls | 0.993 | 0.992 | 0.992 |
+| W2 inverted | 0.975 | 0.978 | 0.978 |
+| W3 torus | 0.988 | 0.990 | 0.990 |
+| W4 ice | 0.990 | 0.990 | 0.990 |
+| W5 one-way | 0.990 | 0.990 | 0.990 |
+| W6 speed switch | 0.973 | 0.967 | 0.967 |
+| W7 switch door | 0.950 | 0.935 | 0.932 |
+| W8 rotating | 0.990 | 0.990 | 0.990 |
+| W9 ladders | 0.985 | 0.985 | 0.985 |
+| W10 sliding | 0.980 | 0.977 | 0.977 |
+| W11 hidden toggle | 0.922 | 0.925 | **0.947** |
+| W12 lock | 0.964 | 0.965 | **0.976** |
+| W13 mode | 0.953 | 0.957 | **0.971** |
+| W14 replay | 0.229 | 0.229 | **0.955** |
+
+- **Which dimension leads:** on W11–W13 the graph column is the most weighted dimension for at least 3 of the 4 moves
+  in 7 of 9 runs. On W14 the follower reads the 3-step delay column as its attended key, in every action and seed.
+- **The PFC's meta-learning test:** PERSIST 0.53 → 0.60 (ratio 1.12); RESET 0.67 → 0.53.
+- **The 25 games** (`runs/p27_fast_cv.json`): 2 levels (ar25 L1 in 23, ft09 L1 in 101), mean 0.0015; no crashes;
+  115 s.
+- **Cost:** 14 worlds × 3 seeds in 167 s.
+
+**Verdicts:**
+- **G1 refuted on W7** (0.932 against ≥ 0.940); the other nine are within 0.01.
+- **G2:**
+  - confirmed on W14 (0.955, +0.726);
+  - refuted on W11 (0.947, +0.025), W12 (+0.012) and W13 (+0.018): each is above 0.95 except W11, but below part 26
+    + 0.03. The hidden columns help on every hidden world, by less than predicted.
+- **G3:**
+  - confirmed for W11–W13;
+  - refuted as worded for W14: the delay column works as a key (its value says the move), not as the leading
+    situation.
+- **G4 refuted on W7** (0.935); the other nine are within 0.01.
+- **G5 refuted:** the PFC's learning to learn is lost (ratio 1.12; part 26: 0.00).
+- **G6 confirmed:** 2 levels, 0.0015; 167 s and 115 s.
+
+**Why the PFC and W7 regressed: shared key attention.**
+- In part 26 the PFC read the region's size only where the region had no model yet. Elsewhere every key predicts
+  "stay".
+- With one ranking over every episode, the unconditional key wins overall. In the "no model yet" situation it is then
+  the key read, and its meaning there is half one kind, half the other.
+- W7's door has the same need: which key matters depends on the situation.
+
+**The repair (part 27b, next):** each situation dimension becomes its own head, part 26's similarity on that one
+feature.
+- A matching episode counts 1 and another counts e^−θ_f, with θ_f learned by part 26's exact gradient.
+- This applies to which key is read as well as to what its value means.
+- Heads still compete by evidence, so there is no product over features, and the drift of part 26 cannot occur.
+
+# Part 27b: one head per situation feature (pre-registered 2026-10-28, before the code)
+
+**The change (`ConditionalOps`):** heads replace the shared key ranking.
+- **Head 0 counts every episode** (no situation).
+- **Head f counts the episodes that match now on feature f as 1, and the others as e^−θ_f.**
+- **This weighting serves both questions:** which key is read (prior + weighted sum of each key's stored log
+  probability) and what its value means (weighted counts; unseen values back off to the head's weighted counts).
+- **Each θ_f is learned by part 26's exact gradient,** for that head's own prediction (RMSprop; θ_f starts at 0).
+- **Heads compete by prior × prequential evidence,** as dimensions did in part 27; the 3 heaviest are mixed.
+- **The stored per-key log probabilities count every episode** (one copy, not one per head).
+- **Per (head, situation value),** a running sum of those log probabilities keeps the head's key ranking cheap.
+
+| # | prediction |
+|---|---|
+| B1 | the PFC's meta-learning: PERSIST ratio ≤ 0.5, and PERSIST < RESET in episodes 10–12 |
+| B2 | W1–W10 (3 seeds): each ≥ part 26 − 0.01 (W7 ≥ 0.940) |
+| B3 | W11–W14 (3 seeds): each ≥ part 27 − 0.01 |
+| B4 | the 25 games (fast): ≥ 2 levels; the 14 worlds and the games each in ≤ 5 minutes |
+
+## Part 27b results (2026-10-28)
+
+**Apparatus:** each head's analytic θ gradient matches finite differences (6 decimals). On a toy switch-door stream,
+the switch head's θ reached 12 and its head led the weights (−29 against −95 to −97 for the others).
+
+| world (3 seeds; `runs/test_conditions_part27b.json`) | part 26 | part 27 | part 27b |
+|---|---|---|---|
+| W1 walls | 0.993 | 0.992 | 0.992 |
+| W2 inverted | 0.975 | 0.978 | 0.977 |
+| W3 torus | 0.988 | 0.990 | 0.990 |
+| W4 ice | 0.990 | 0.990 | 0.990 |
+| W5 one-way | 0.990 | 0.990 | 0.990 |
+| W6 speed switch | 0.973 | 0.967 | 0.970 |
+| W7 switch door | 0.950 | 0.932 | 0.937 |
+| W8 rotating | 0.990 | 0.990 | 0.990 |
+| W9 ladders | 0.985 | 0.985 | 0.985 |
+| W10 sliding | 0.980 | 0.977 | 0.980 |
+| W11 hidden toggle | 0.922 | 0.947 | 0.943 |
+| W12 lock | 0.964 | 0.976 | 0.971 |
+| W13 mode | 0.953 | 0.971 | 0.969 |
+| W14 replay | 0.229 | 0.955 | 0.952 |
+
+- **The PFC's meta-learning test** (`runs/test_pfc_part27b.txt`): PERSIST 0.53 → 0.00 (ratio 0.00); RESET 0.67 → 0.53.
+- **The 25 games** (`runs/p27b_fast_cv.json`): 2 levels (ar25 L1 in 23, ft09 L1 in 101), mean 0.0015; no crashes;
+  128 s.
+- **Cost:** 14 worlds × 3 seeds in 227 s.
+
+**Verdicts:**
+- **B1 confirmed:** learning to learn is back (ratio 0.00).
+- **B2 refuted on W7 alone:** 0.937 against ≥ 0.940 (part 26: 0.950); the other nine are within 0.01.
+- **B3 confirmed:** W11–W14 are each within 0.01 of part 27.
+- **B4 confirmed:** 2 levels; 227 s and 128 s.
+
+**What the agent now has (parts 27 and 27b together):**
+- **Hidden state, as columns:** delay columns (order, replay) and a learned graph (toggles, locks, modes), inferred
+  from what the planned columns see.
+- **A situation reading** that can use a rare but decisive feature (the graph's state, the PFC's own state) without
+  the noise of many features erasing the memory.
+
+Against part 26:
+- **Hidden worlds:** W11 +0.021, W12 +0.007, W13 +0.016, W14 +0.723.
+- **Everything else** within 0.01, except W7 (−0.013).
+- **The games** are unchanged (2 levels): their bottleneck is elsewhere (part 26).
+
+**Open:**
+1. **The hidden columns are not in the planner's joint state yet.** A plan holds them fixed, so the agent cannot yet
+   plan "press 5 then 7 to open the doors". The graph's transitions are learned, so this is the next wiring step.
+2. **Counters and timers** (the innate lines and residues of HIDDEN_STATE.md section 5) are not in the agent. The
+   learned graph covers the small cases (6 states).
+3. **W7** is 0.013 below part 26.

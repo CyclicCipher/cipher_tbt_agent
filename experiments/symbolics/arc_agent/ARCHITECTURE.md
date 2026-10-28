@@ -27,6 +27,7 @@ default blueprint:
 | **assoc** (association) | n = 32 slots | learned, per column: translation (Z², a set of cells moving together), recolour (a permutation of colours on fixed cells), or clock (Z, a counter that advances on every action) | its frame type by evidence; its content (template); for each action, which operator the action applies to its frame (the generalized efference copy) |
 | **HC** (hippocampus) | 1 | the product of the assoc columns' frames (a joint state is one point in it) | episodes: Spotlight memory addressed by joint state; which states were visited, what each action did there, where WINs happened |
 | **PFC** | 1 (`pfc.py`, part 24) | a choice frame: which kind of model is responsible | which assoc column to trust where several explain the same change: Bayesian model selection whose prior is the PFC column's own prediction, learned like any column's, so the right model is picked faster with experience (learning to learn, emergent). Goals, plans and drives are still in `executive.py` |
+| **hidden** | 5 (`hidden.py`, part 27) | choice frames whose state is not read from the screen: 4 delay columns (the event 1-4 steps ago) and 1 graph column (6 states) | the delay columns learn their own dynamics like any column (lag k copies lag k - 1); the graph column's state is inferred: an HMM with event-conditioned transitions, fitted by Baum-Welch on the visible columns' own memories (each planned column's operator, given its most trusted key's value). Both reach the other columns as ordinary "other column" features |
 
 The blueprint is where innate structure lives (DESIGN.md: priors are geometries). V1 and M1 get their frames from the
 blueprint; assoc columns get only a menu of frame *types* and must find their own frames from the data. Adding a
@@ -52,20 +53,24 @@ column: on the column's own cells ("on me"), or on another region, named by that
 and size). So "clicking a button changes a column elsewhere" is learnable: a remote binding (cue competition, the
 Rescorla–Wagner rule in its count form).
 
-**Conditions (part 20, replacing a contact rule; in-context attention since part 26):** what an action does to a
-column is predicted by attention over keys. One key is unconditional; every other key reads one context feature in the
-column's own frame (the content at one position relative to the column, with "edge" off the screen and the remembered
-content beneath it; another column's state; a quotient of its position; the numeric expert). Every observation is kept
-as an episode (the situation, every key's value, the operator seen, and what each key had predicted). For the current
-situation (the other columns' states, what lies beneath, the column's own state), each episode counts by its
-similarity, exp(-sum of theta over the situation features that differ):
-- what a key's value means is the similarity-weighted counts of the operators seen with it;
-- how much a key is trusted is its prior plus its similarity-weighted record of predictions.
+**Conditions (part 20, replacing a contact rule; in-context attention since part 26, one head per situation feature
+since part 27b):** what an action does to a column is predicted by attention over keys. One key is unconditional;
+every other key reads one context feature in the column's own frame (the content at one position relative to the
+column, with "edge" off the screen and the remembered content beneath it; another column's state, hidden columns'
+included; a quotient of its position; the numeric expert). Every observation is kept as an episode (the situation,
+every key's value, the operator seen, and what each key had predicted).
 
-Only theta is learned (the gradient of each new operator's log probability). theta = 0 is part 20's track record; a
-large theta on one feature gives part 21's conjunction cases on it (a door that blocks only while the switch is off).
-Nothing says what blocks or what changes a move: walls, one-way tiles, ice and switches are whichever key predicts, in
-the situations where it predicts.
+Heads compete to say which episodes are like now. Head 0 counts every episode (part 20's track record). Head f, for
+each situation feature (another column's state, what lies beneath, the column's own state), counts episodes that match
+now on f as 1 and the others as exp(-theta_f). In each head, the same weights say:
+- which key is read: its prior plus its weighted record of predictions;
+- what the key's value means: the weighted counts of the operators seen with it.
+
+theta_f is learned by the gradient of the head's log probability of each new operator; a large theta_f is part 21's
+conjunction cases on f (a door that blocks only while the switch is off). Heads are weighted by a prior times their
+prequential evidence, so a feature that does not matter loses weight instead of shrinking every episode's (part 26's
+product over features did; HIDDEN_STATE.md section 8). Nothing says what blocks or what changes a move: walls, one-way
+tiles, ice, switches and hidden locks are whichever key predicts, in the situations where it predicts.
 
 ## 4. Spotlight memory (`spotlight.py`)
 
