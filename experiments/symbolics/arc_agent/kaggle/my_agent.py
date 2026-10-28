@@ -139,7 +139,8 @@ class Explorer:
     # ---- acting ---------------------------------------------------------------------------------------------------
     def act(self, fd):
         state = getattr(fd.state, "name", str(fd.state))
-        grid = np.asarray(fd.frame[-1]) if len(fd.frame) else None
+        # a copy: the local engine reuses its frame array, so a kept reference would become the next frame
+        grid = np.array(fd.frame[-1], dtype=np.int8, copy=True) if len(fd.frame) else None
         if state in ("NOT_PLAYED", "GAME_OVER") or grid is None:
             self.prev, self.acted = None, 0
             self.notes["reset (game over)" if state == "GAME_OVER" else "reset (start)"] += 1
