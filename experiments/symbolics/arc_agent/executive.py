@@ -176,7 +176,9 @@ class Executive:
         out = {("joint", tuple(sorted(states.items())))}
         cols = {c.cid: c for c in self.brain.planning()}
         for cid, s in states.items():
-            c = cols[cid]
+            c = cols.get(cid)
+            if c is None:                               # a hidden-state column: only in the joint hypothesis
+                continue
             k = c.kind
             out.add(("at", k, s))
             if c.frame.kind == "translation":
@@ -232,6 +234,8 @@ class Executive:
             elif c.frame.kind == "recolour" and self.start_grid is not None:
                 s = c.frame.read(self.start_grid)
             out[c.cid] = s
+        if self.brain.hidden is not None:               # part 28: hidden-state columns start again too
+            out.update(self.brain.hidden.reset_states())
         return out
 
     def search(self, available):

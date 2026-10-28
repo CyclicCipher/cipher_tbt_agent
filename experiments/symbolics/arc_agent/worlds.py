@@ -19,6 +19,8 @@ W11 hidden toggle   colour-8 doors block unless a hidden switch is on; ACTION5 t
 W12 lock            ACTION5 arms (and closes), then ACTION7 opens if armed (closes otherwise): doors open only after 5 then 7
 W13 mode            ACTION5 advances a hidden mode A -> B -> C -> A, ACTION7 returns it to A; doors are open in B and C
 W14 replay          a second block (colour 12) repeats the avatar's move from 3 steps earlier (no tiles)
+W15 clock door      colour-8 doors are open while (steps since the start) mod 8 < 4 (part 28: a clock, period 8)
+W16 fuse            colour-8 doors are open for the 4 actions after each ACTION5 (part 28: a timer)
 
 Leaving the board otherwise fails (the avatar stays), except in W3.
 """
@@ -28,7 +30,7 @@ N, C = 21, 3                                            # board cells, pixels pe
 MOVES = {1: (0, -1), 2: (0, 1), 3: (-1, 0), 4: (1, 0)}
 WORLDS = ("W1 walls", "W2 inverted", "W3 torus", "W4 ice", "W5 one-way", "W6 speed switch", "W7 switch door",
           "W8 rotating", "W9 ladders", "W10 sliding")
-HIDDEN_WORLDS = ("W11 hidden toggle", "W12 lock", "W13 mode", "W14 replay")
+HIDDEN_WORLDS = ("W11 hidden toggle", "W12 lock", "W13 mode", "W14 replay", "W15 clock door", "W16 fuse")
 PIECE = [(0, -1), (0, 0), (0, 1), (1, 1)]               # W8's L, around its pivot (0, 0)
 
 
@@ -38,8 +40,9 @@ class World:
         self.tiles = {}                                 # (x, y) -> colour
         self.tag = name.split()[0]
         density = {"W1": 0.2, "W2": 0.15, "W4": 0.25, "W5": 0.25, "W7": 0.2, "W10": 0.15, "W11": 0.2, "W12": 0.2,
-                   "W13": 0.2}.get(self.tag, 0.0)
-        colour = {"W1": 5, "W2": 14, "W4": 11, "W5": 12, "W7": 8, "W10": 5, "W11": 8, "W12": 8, "W13": 8}.get(self.tag)
+                   "W13": 0.2, "W15": 0.2, "W16": 0.2}.get(self.tag, 0.0)
+        colour = {"W1": 5, "W2": 14, "W4": 11, "W5": 12, "W7": 8, "W10": 5, "W11": 8, "W12": 8, "W13": 8, "W15": 8,
+                  "W16": 8}.get(self.tag)
         for x in range(N):
             for y in range(N):
                 if (x, y) != (10, 10) and colour is not None and rng.random() < density:
@@ -55,11 +58,12 @@ class World:
             self.tiles.pop((N - 1, 0), None)
         self.avatar, self.on = (10, 10), False
         self.q, self.follower, self.past = 0, (4, 4), []   # W11-W13: the hidden machine; W14: the second block
+        self.steps, self.fuse = 0, 0                      # W15: the steps taken; W16: actions left on the fuse
 
     def actions(self):
         if self.tag in ("W12", "W13"):
             return [1, 2, 3, 4, 5, 7]
-        return [1, 2, 3, 4, 5] if (self.switched or self.tag in ("W8", "W11")) else [1, 2, 3, 4]
+        return [1, 2, 3, 4, 5] if (self.switched or self.tag in ("W8", "W11", "W16")) else [1, 2, 3, 4]
 
     def piece(self, at=None, turn=None):
         ax, ay = self.avatar if at is None else at
@@ -94,7 +98,8 @@ class World:
 
     def open(self):
         """W11-W13: whether the hidden machine lets doors pass."""
-        return {"W11": self.q == 1, "W12": self.q == 2, "W13": self.q in (1, 2)}[self.tag]
+        return {"W11": self.q == 1, "W12": self.q == 2, "W13": self.q in (1, 2), "W15": self.steps % 8 < 4,
+                "W16": self.fuse > 0}[self.tag]
 
     def passable(self, cell, a):
         x, y = cell
@@ -109,13 +114,20 @@ class World:
             return t != 12 or a == 4
         if self.name.startswith("W7"):
             return t != 8 or self.on
-        if self.tag in ("W11", "W12", "W13"):
+        if self.tag in ("W11", "W12", "W13", "W15", "W16"):
             return t != 8 or self.open()
         if self.tag == "W14" and cell == self.follower:
             return False
         return True
 
     def step(self, a):
+        out = self._step(a)
+        self.steps += 1
+        if self.tag == "W16":                           # the fuse burns one action per action, and ACTION5 relights it
+            self.fuse = 4 if a == 5 else max(0, self.fuse - 1)
+        return out
+
+    def _step(self, a):
         if self.tag == "W8":
             at, turn = self.avatar, self.turn
             if a == 5:

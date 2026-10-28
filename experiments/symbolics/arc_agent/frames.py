@@ -127,6 +127,24 @@ class Choice:
         return ("stay",) if s0 == s1 else ("to", s1)
 
 
+class Line:
+    """An integer that events add to or set (part 28: counters, timers, a clock). State: an int. Operator: an int to add
+    (0, the identity) or ("to", v); a cap, if given, bounds the state."""
+    kind = "line"
+    identity = 0
+
+    def __init__(self, cap=None, K=12):
+        self.cap, self.K = cap, K
+        self.cells0 = np.zeros((1, 2), int)
+
+    def apply(self, state, op):
+        s = op[1] if isinstance(op, tuple) else state + op
+        return s if self.cap is None else min(s, self.cap)
+
+    def op_between(self, s0, s1):
+        return ("to", s1) if s1 < s0 else s1 - s0
+
+
 class Recolour:
     kind = "recolour"
     identity = ()

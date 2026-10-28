@@ -26,6 +26,7 @@ A = 0.02                          # pseudo-count: one consistent observation mak
 PMIN = 0.02
 TOP = 8                           # keys read for a prediction (the most attended)
 MEMORY, DTOP, ETA = 1000, 3, 0.1  # episodes kept per action; heads mixed (part 27); theta's step (part 26's)
+NEAR = 10.0                       # a head's theta learns while its log weight is within this of the best (part 28)
 QUERY_ONLY = ("self",)            # the column's own state is never an item to read
 QUERY_KINDS = ("col", "self")     # the situation (with what lies beneath): other columns' states, the own state.
                                   # Not quotients: five codes of one position, whose similarity weights add up
@@ -367,8 +368,9 @@ class ConditionalOps:
             pd[d] = max(p.get(op, pr), 1e-300)
             if d == best[0]:
                 best = (d, dict(zip(picked, w)))
-        if T:                                           # each head's similarity weight: one gradient step
-            g = np.array([self._grad(d, int(q[d - 1]), ctx, op) for d in range(1, len(lw))])
+        if T:                                           # each head's similarity weight: one gradient step, for the
+            near = lw[1:] >= lw.max() - NEAR            # heads that could matter (part 28: effort follows relevance)
+            g = np.array([self._grad(d, int(q[d - 1]), ctx, op) if near[d - 1] else 0.0 for d in range(1, len(lw))])
             self.rms = 0.9 * self.rms + 0.1 * g ** 2
             self.theta = np.clip(self.theta + ETA * g / (np.sqrt(self.rms) + 1e-8), 0.0, 20.0)
         dims = np.argsort(-lw)[:DTOP]

@@ -64,9 +64,16 @@ def run(name, conditional=True, seed=0, hidden=True):
                                         for cid, s in preds)
         g = g2
     names = {c.cid: c.frame.kind for c in brain.columns}
-    if getattr(brain, 'hidden', None) is not None:
-        names.update({c.cid: f"delay {-10 - c.cid}" for c in brain.hidden.delays})
-        names[brain.hidden.graph_col.cid] = "graph"
+    joint = []
+    if getattr(brain, "hidden", None) is not None:
+        kind = getattr(brain.hidden, "kind", None)       # (an earlier commit of the agent has no kind())
+        names.update({c.cid: (kind(c.cid) if kind else "hidden %d" % c.cid) for c in brain.hidden.columns()})
+        if hasattr(brain, "relevant_hidden"):              # part 28: the hidden-state columns the planner rolls forward
+            joint = sorted(names[cid] for cid in brain.relevant_hidden())
+
+    def named(f):
+        return ("col", names.get(f[1], f[1])) + tuple(f[2:]) if (f is not None and f[0] == "col") else f
+
     attended, situation = {}, {}
     cols = targets(brain, name)
     if name.startswith("W14"):
@@ -76,12 +83,10 @@ def run(name, conditional=True, seed=0, hidden=True):
             b = c.keys.get(("key", k))
             if b is None:
                 continue
-            f = b.attended()
-            attended[k] = ("col", names.get(f[1], f[1])) if (f is not None and f[0] == "col") else f
-            d = b.situation() if hasattr(b, 'situation') else None
-            situation[k] = ("col", names.get(d[1], d[1])) if (d is not None and d[0] == "col") else d
+            attended[k] = named(b.attended())
+            situation[k] = named(b.situation() if hasattr(b, "situation") else None)
     return dict(name=name, seed=seed, accuracy=hits / max(total, 1), attended=attended, situation=situation,
-                columns=len([o for o in brain.columns if o.active]))
+                joint=joint, columns=len([o for o in brain.columns if o.active]))
 
 
 def side_ok(name, k, f):
@@ -122,7 +127,8 @@ def main(argv):
         rs = sorted([r for r in res if r["name"] == w], key=lambda r: r["seed"])
         acc = [r["accuracy"] for r in rs]
         print(f"{w:18s} accuracy {[round(a, 3) for a in acc]} mean {np.mean(acc):.3f} | most weighted situation "
-              f"{[r['situation'] for r in rs]} | attended (seed 0) {rs[0]['attended']}", flush=True)
+              f"{[r['situation'] for r in rs]} | attended (seed 0) {rs[0]['attended']} | hidden state planned "
+              f"{[r.get('joint', []) for r in rs]}", flush=True)
     if opts["out"]:
         json.dump(res, open(opts["out"], "w"), indent=1, default=str)
     print(f"total {time.time() - t0:.1f} s wall (hidden-state area {'on' if hidden else 'off'})")

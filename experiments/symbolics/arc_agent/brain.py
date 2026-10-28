@@ -69,6 +69,18 @@ def regions(grid):
     return out
 
 
+def region_size(grid, x, y, cap=200):
+    """How many cells of one colour are connected to (x, y), up to cap."""
+    c, seen, q = grid[y, x], {(x, y)}, [(x, y)]
+    while q and len(seen) < cap:
+        px, py = q.pop()
+        for nx, ny in ((px + 1, py), (px - 1, py), (px, py + 1), (px, py - 1)):
+            if (nx, ny) not in seen and 0 <= nx < grid.shape[1] and 0 <= ny < grid.shape[0] and grid[ny, nx] == c:
+                seen.add((nx, ny))
+                q.append((nx, ny))
+    return len(seen)
+
+
 def size_bucket(n):
     return 0 if n <= 2 else 1 if n <= 9 else 2 if n <= 36 else 3 if n <= 144 else 4
 
@@ -91,7 +103,10 @@ class LazyContext:
         if f[0] == "self":
             return True
         if f[0] == "col":
-            return f[1] in self.others and f[1] != self.col.cid
+            if f[1] not in self.others or f[1] == self.col.cid:
+                return False
+            h = self.brain.hidden
+            return h.has(f) if (h is not None and h.kind(f[1]) is not None) else len(f) == 2
         if f[0] == "and":
             return f[1] in self and f[3] in self and self.get(f[1]) == f[2]
         if f[0] in ("mod", "num"):
@@ -114,7 +129,11 @@ class LazyContext:
         elif f[0] == "self":
             v = self.state
         elif f[0] == "col":
-            v = self.others.get(f[1], default)
+            h = self.brain.hidden
+            if h is not None and h.kind(f[1]) is not None:    # a hidden-state column, by one of its readings
+                v = h.reading(f[1], self.others[f[1]], f[2:]) if f[1] in self.others else default
+            else:
+                v = self.others.get(f[1], default)
         elif f[0] == "and":
             v = self.get(f[3], default)
         elif f[0] == "mod":
@@ -188,7 +207,8 @@ class Brain:
         self.columns, self.next_id, self.t = [], 0, 0
         self.last_kind = None
         self.cache = {}                                 # planning: contexts per joint state
-        self.last_evidence, self.last_cells = {}, {}     # part 24: the last step's same-cell evidence per candidate                           # M1's kind of the last action
+        self.last_evidence, self.last_cells = {}, {}     # part 24: the last step's same-cell evidence per candidate
+        self.hc_n, self.hc_calls, self.hc_hits = {}, 0, 0   # part 28: writes per hippocampal cell; planner recalls                           # M1's kind of the last action
 
     # ---- the joint state and the columns used for planning ------------------------------------------------------
     def active(self):
@@ -204,15 +224,53 @@ class Brain:
         return [c for c in self.columns if c.active and (c.frame.kind == "bar" or c.driver() == "clock")]
 
     def joint(self):
-        return tuple((c.cid, c.state) for c in self.planning())
+        """The state the planner searches: the planning columns', and the hidden-state columns' that some planned
+        column relies on (part 28)."""
+        out = [(c.cid, c.state) for c in self.planning()]
+        if self.hidden is not None:
+            hs = self.hidden.states()
+            out += [(h, hs[h]) for h in sorted(self.relevant_hidden())]
+        return tuple(out)
+
+    def relevant_hidden(self):
+        """Hidden-state columns that some planned column's action model leads with (its situation head) or reads (its
+        attended key); a delay brings the delays before it, which it copies."""
+        out = set()
+        for c in self.planning():
+            for b in c.keys.values():
+                if not b.conditional:
+                    continue
+                for f in (b.situation(), b.attended()):
+                    if f is not None and f[0] == "col" and self.hidden.kind(f[1]) is not None:
+                        out.add(f[1])
+        for d in list(out):
+            if self.hidden.kind(d).startswith("delay"):
+                out |= set(range(d, -10))
+        return out
 
     def others(self, exclude=None, states=None):
         """The other columns' states a column reads as context: the planning columns' (or the given joint states), and
-        the hidden-state columns' (part 27)."""
-        out = {c.cid: c.state for c in self.planning() if c is not exclude} if states is None else dict(states)
-        if self.hidden is not None:
-            out.update(self.hidden.states())
+        the hidden-state columns' (part 27); in a given joint state, its own hidden states take precedence."""
+        out = dict(self.hidden.states()) if self.hidden is not None else {}
+        if states is None:
+            out.update({c.cid: c.state for c in self.planning() if c is not exclude})
+        else:
+            out.update(states)
         return out
+
+    def col_features(self, cid, state):
+        """What another column's state gives a context: ("col", cid), or a hidden-state column's readings."""
+        if self.hidden is not None and self.hidden.kind(cid) is not None:
+            return self.hidden.features(cid, state)
+        return {("col", cid): state}
+
+    def event(self, action, scene=None):
+        """An action as an event: a key, or a click named by its target (as M1 names it)."""
+        aid, x, y = action
+        if aid != 6:
+            return ("key", aid)
+        g = self.v1.scene if scene is None else scene
+        return ("click", int(g[y, x]), size_bucket(region_size(g, x, y)))
 
     def claimed(self):
         m = np.zeros((H, W), bool)
@@ -264,7 +322,7 @@ class Brain:
         ctx[("self",)] = state
         for cid, st in others.items():
             if cid != col.cid:
-                ctx[("col", cid)] = st
+                ctx.update(self.col_features(cid, st))
         if col.frame.kind == "translation":
             ctx.update(self.quotients(col, state))
             ctx[("num",)] = self.numeric(col, state, scene, under)
@@ -316,6 +374,7 @@ class Brain:
         """Learn from one transition. Returns a report: which columns moved, how many cells stayed unexplained, and
         which columns were recruited."""
         self.t += 1
+        j0 = self.joint()                               # part 28: for the hippocampus
         self.last_kind = kind
         self.last_act = "key" if action[0] != 6 else "click"
         ground = self.v1.ground
@@ -398,14 +457,24 @@ class Brain:
         if action[0] == 6:
             self.m1.done.add((action[1], action[2]))
         self.v1.scene = after.copy()
+        addr = (self.level, tuple(sorted(j0)))          # part 28: the hippocampus remembers the transition; the cell
+        n = self.hc_n.get((addr, action), 0)            # is written with step 1/(n+1): the outcomes' frequencies
+        self.hc.write(addr, action, tuple(sorted(self.joint())), beta=1.0 / (n + 1))
+        self.hc_n[(addr, action)] = n + 1
         return report
 
     def restate(self):
-        """After the hidden graph is refitted: rewrite its state in every stored episode that reads it."""
-        g = self.hidden.graph_col.cid
-        for c in self.columns + self.hidden.columns():
-            for b in c.keys.values():
-                b.restate(("self",) if c.cid == g else ("col", g), self.hidden.value_at)
+        """After the hidden graph and latent are refitted: rewrite their states in every stored episode that reads them,
+        and forget the hippocampal transitions that name them (their labels may mean something else now)."""
+        for hid, value_at in self.hidden.restated():
+            for c in self.columns + self.hidden.columns():
+                for b in c.keys.values():
+                    b.restate(("self",) if c.cid == hid else ("col", hid), value_at)
+        gone = {hid for hid, _ in self.hidden.restated()}
+        stale = [a for a in self.hc.cells if any(cid in gone for cid, _ in a[1])]
+        self.hc.forget(stale)
+        for k in [k for k in self.hc_n if k[0] in set(stale)]:
+            del self.hc_n[k]
 
     # ---- recruitment: frame types compete to explain what is left -----------------------------------------------
     def _new(self, frame, state):
@@ -692,18 +761,34 @@ class Brain:
     def model_step(self, states, action, static):
         """Predicted next states of the planning columns ({cid: state}) and the bits an uncertain outcome is worth
         (part 18: the entropy of the predicted OUTCOME). bits > 0 means the outcome here is not known."""
-        cols = {c.cid: c for c in self.planning()}
         key = tuple(sorted(states.items()))
+        self.hc_calls += 1                              # part 28: recall where every visit here agreed
+        w = self.hc.read((self.level, key), action)
+        if w:
+            v, q = max(w.items(), key=lambda kv: kv[1])
+            if q >= 1 - PMIN and len(v) == len(states) and all(cid in states for cid, _ in v):
+                self.hc_hits += 1
+                return dict(v), 0.0
+        cols = {c.cid: c for c in self.planning()}
         if key not in self.cache:                       # the scene and every column's context at this joint state
             scene = static.copy()
             for cid, st in states.items():
-                cols[cid].frame.draw(scene, st)
+                if cid in cols:
+                    cols[cid].frame.draw(scene, st)
             others = self.others(states=states)
             self.cache[key] = {cid: LazyContext(self, cols[cid], st, scene, others, lambda x, y: int(static[y, x]))
-                               for cid, st in states.items()}
+                               for cid, st in states.items() if cid in cols}
+            self.cache[("others", key)] = others
         ctxs = self.cache[key]
         new, bits = dict(states), 0.0
         for cid, s in states.items():
+            if cid not in cols:                         # part 28: a hidden-state column, by its own learned model
+                ns, b = self.hidden.predict(cid, s, self.cache[("others", key)], action[0], self.event(action))
+                if b > 0:
+                    bits = max(bits, b)
+                else:
+                    new[cid] = ns
+                continue
             c = cols[cid]
             akey = c.akey(action, s)
             if akey[0] == "at":                         # a click elsewhere: unconditional, so cached per search

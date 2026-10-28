@@ -77,7 +77,8 @@ def _play(game_id, cap, budget, draws=None, time_limit=None, hunger=None):
     return dict(game=game_id[:4], levels=len(base), solved=len(done), actions=done, baseline=base[:len(done) + 1],
                 score=sum((i + 1) * s for i, s in enumerate(scores)) / sum(range(1, len(base) + 1)),
                 seconds=round(time.time() - t0, 1), notes=dict(getattr(agent, "notes", {})),
-                win_types=list(agent.executive.goals.win_types), **harvest(agent))
+                win_types=list(agent.executive.goals.win_types), recall=[agent.brain.hc_hits, agent.brain.hc_calls],
+                **harvest(agent))
 
 
 def harvest(agent):

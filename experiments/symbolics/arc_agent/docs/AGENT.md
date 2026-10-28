@@ -1809,3 +1809,94 @@ Against part 26:
 2. **Counters and timers** (the innate lines and residues of HIDDEN_STATE.md section 5) are not in the agent. The
    learned graph covers the small cases (6 states).
 3. **W7** is 0.013 below part 26.
+
+# Part 28: the hippocampus, hidden-state columns in the planner, counters, timers, a clock, and a JEPA latent (pre-registered 2026-10-28, before the code)
+
+**Why (the user):** put into the arc agent all the earlier progress that went elsewhere (see the 2026-10-28
+reorganisation). Done first, outside this part: the arc agent's Kaggle submission (`arc_agent/kaggle/build.py`,
+commit 35a24a3). The inverse model and viability follow in part 29, learned frames in part 30.
+
+**The changes:**
+1. **The hippocampus (`brain.hc`, a Spotlight memory, wired at last).**
+   - **Writing:** after every step it writes the transition: address = the joint state, key = the action, value = the
+     next joint state. The cell is written with step 1/(n + 1), so it holds the frequency of each outcome seen there.
+   - **Recall in the planner (`model_step`):** where every past visit to that (joint state, action) agreed, the
+     remembered outcome is used. Elsewhere the columns' models predict, as before. Episodic memory where it has
+     experience, the cortex where it generalises.
+2. **Hidden-state columns in the planner.** The joint state the planner searches includes each hidden-state column
+   that some planned column relies on: it is the leading situation head, or the attended key, of one of that column's
+   actions. Their next states are predicted by their own learned models. The planner can then foresee, say, the lock
+   opening.
+3. **Counters, timers and a clock as hidden-state columns** (HIDDEN_STATE.md section 7's lines and circles), over a new
+   line frame (`frames.Line`: an integer state, operators that add or set).
+   - **Per event type** (an action, a click by its target; at most 8 types):
+     - a counter, read as its count mod 2 and mod 3 and capped at 8;
+     - a timer: steps since the event, capped at 9.
+   - **One clock:** steps since the level began, read mod 2…6.
+   - **Readings:** each reading is its own situation feature, so each gets its own head. The raw count and the raw
+     clock are not features: every value is new, like a position.
+   - **What each learns:** its own dynamics, like any column.
+   - **Reset:** at a level start.
+4. **A JEPA latent column (the user's JEPA + SIGReg, in the agent).**
+   - **The context:** a temporal context vector from the counters, timers and clock: phases cos and sin of 2πn/2 and
+     2πn/3, capped counts, decaying traces, and the clock's phases.
+   - **The latent:** h = W c, 4 dimensions, trained as LeJEPA every 100 steps: a linear predictor per event, plus
+     λ·SIGReg on h. This is HIDDEN_STATE.md section 6's version, now in the agent.
+   - **Its state:** the signs of h (16 values), read by the other columns like any column's state.
+5. **The learning effort follows relevance.** A head's θ takes a gradient step only while its weight is within 10
+   nats of the best head's. Every head's evidence is still computed. Without this, about 40 heads per action would
+   cost too much.
+
+**New worlds (1,000 steps, accuracy over steps 501–1,000):**
+- **W15, clock door:** doors open while (steps since the start) mod 8 < 4. Beyond the graph's 6 states and the 4
+  delays.
+- **W16, fuse:** doors open for the 4 steps after each ACTION5.
+
+| # | prediction |
+|---|---|
+| K1 | W1–W14 (3 seeds): each ≥ part 27b − 0.01 |
+| K2 | W15 and W16: each ≥ 0.95, and ≥ part 27b + 0.03 (part 27b's code run on them) |
+| K3 | the planner sees hidden state: on W11–W13 the graph column is in the planner's joint state at the end, in ≥ 2 of 3 seeds of each |
+| K4 | the hippocampus is used: in the 25 games (fast), recall answers ≥ 10% of the planner's predictions; levels ≥ 2 |
+| K5 | the JEPA latent leads no move action in any seed of W11–W16 (my expectation from section 6, where it learned the same latent for every rule) |
+| K6 | the PFC's meta-learning ratio ≤ 0.5; the 25 games mean ≥ 0.0015; cost: W1–W16 × 3 seeds ≤ 6 minutes, the games ≤ 6 minutes |
+
+## Part 28 results (2026-10-28)
+
+**Build check:** the clock's readings, pre-registered as mod 2…6, cannot express W15's period of 8 (seed 0: 0.852,
+with no clock head leading).
+- **Amendment, made after seeing that:** the clock is read modulo periods spaced about geometrically, as grid
+  modules' scales are: 2, 3, 4, 6, 8, 12, 16.
+- **Effect:** W15 seed 0 rose to 0.96, with the clock-mod-8 head leading every move.
+
+| world (3 seeds; `arc_agent/runs/test_conditions_part28.json`) | part 27b | part 28 |
+|---|---|---|
+| W1–W10 | (part 27b) | each within 0.005 of part 27b (W7 0.933, −0.004) |
+| W11 hidden toggle | 0.943 | **0.987** (the ACTION5 counter's parity leads) |
+| W12 lock | 0.971 | 0.967 |
+| W13 mode | 0.969 | 0.971 |
+| W14 replay | 0.952 | 0.953 |
+| W15 clock door | 0.889 | **0.965** |
+| W16 fuse | 0.949 | 0.946 |
+
+- **PFC meta-learning:** PERSIST 0.53 → 0.00 (ratio 0.00).
+- **25 games (fast):** 2 levels (ar25 L1 in 23, ft09 L1 in 101), mean 0.0015, no crashes, 224 s.
+- **Hippocampal recall:** answered 13,790 of 755,896 planner predictions (1.8%); per game up to 31% (sc25).
+- **Cost:** 16 worlds × 3 seeds took 434 s.
+
+**Verdicts:**
+- **K1 confirmed.**
+- **K2:**
+  - confirmed on W15 (0.965; +0.076);
+  - refuted on W16 (0.946): a 4-step fuse is within reach of part 27b's delays and graph (0.949), so W16 doesn't
+    separate the parts.
+- **K3 partly:**
+  - W13: the graph is planned in 3 of 3 seeds;
+  - W12: 1 of 3; the other seeds rely on no hidden-state column;
+  - W11: 0 of 3, because the counter of ACTION5 (its parity) is what is planned. The prediction named the wrong
+    column: the right hidden variable is planned.
+- **K4 refuted** (1.8% < 10%); levels unchanged.
+- **K5 confirmed:** the JEPA latent leads no move action in any seed of W11–W16.
+- **K6:**
+  - ratio 0.00 and mean 0.0015 confirmed;
+  - cost refuted for the worlds (434 s > 360 s); confirmed for the games (224 s).

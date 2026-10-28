@@ -13,7 +13,7 @@ from collections import Counter
 import numpy as np
 
 from arc_agent.blueprint import DEFAULT
-from arc_agent.brain import Brain, size_bucket
+from arc_agent.brain import Brain, region_size, size_bucket
 from arc_agent.executive import Executive
 from arc_agent.overhypothesis import Overhypothesis
 
@@ -47,17 +47,6 @@ def library_specs(specs):
     """Formula templates as the function finder takes them (from JSON, factors arrive as lists: make them tuples)."""
     return [dict(s, theta=np.asarray(s["theta"], float), free=np.asarray(s["free"], bool),
                  factors=tuple(tuple(f) for f in s["factors"])) for s in specs or []]
-
-
-def region_size(grid, x, y, cap=200):
-    c, seen, q = grid[y, x], {(x, y)}, [(x, y)]
-    while q and len(seen) < cap:
-        px, py = q.pop()
-        for nx, ny in ((px + 1, py), (px - 1, py), (px, py + 1), (px, py - 1)):
-            if (nx, ny) not in seen and 0 <= nx < grid.shape[1] and 0 <= ny < grid.shape[0] and grid[ny, nx] == c:
-                seen.add((nx, ny))
-                q.append((nx, ny))
-    return len(seen)
 
 
 class ArcAgent:
