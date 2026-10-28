@@ -13,7 +13,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "kaggle"))
 
-CAP, BUDGET, LIMIT = 20, 0.05, 150                      # 20 x the human baseline per level; fast search; 2.5 min a game
+CAP, BUDGET, LIMIT = 20, 400, 150                       # 20 x the human baseline per level; 400 search nodes; 2.5 min a game
 
 
 def main():

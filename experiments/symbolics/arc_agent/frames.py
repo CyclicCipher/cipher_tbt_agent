@@ -102,6 +102,24 @@ class Translation:
         return (s1[0] - s0[0], s1[1] - s0[1], (s1[2] - s0[2]) % 4)
 
 
+class Choice:
+    """A categorical frame (part 24, the PFC column's): which of a set of options holds. State: an option, or None
+    before any. Operator: ("to", option), or ("stay",), the identity."""
+    kind = "choice"
+    identity = ("stay",)
+
+    def __init__(self, options):
+        self.options = tuple(options)
+        self.K = len(self.options) + 1
+        self.cells0 = np.zeros((1, 2), int)
+
+    def apply(self, state, op):
+        return state if op == ("stay",) else op[1]
+
+    def op_between(self, s0, s1):
+        return ("stay",) if s0 == s1 else ("to", s1)
+
+
 class Recolour:
     kind = "recolour"
     identity = ()

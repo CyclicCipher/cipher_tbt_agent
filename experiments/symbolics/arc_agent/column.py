@@ -85,7 +85,8 @@ class Numeric:
 
     def formulas(self):
         return [f.best for f in (self.fit or []) if not isinstance(f, int)]
-P_IDENTITY = {"key": 0.5, "self": 0.5, "at": 0.99}  # innate: a click elsewhere rarely changes me (locality)
+P_IDENTITY = {"key": 0.5, "self": 0.5, "at": 0.99,  # innate: a click elsewhere rarely changes me (locality)
+              "pfc": 0.5}                         # the PFC column: staying with the same model, before any evidence
 
 
 class ConditionalOps:
@@ -273,8 +274,11 @@ class Column:
     def learn(self, akey, ctx, op):
         """Prequential evidence for each driver, then both learn the observed operator."""
         b = self.belief(akey)
-        self.ev["action"] += math.log(max(b.predictive(ctx, op), 1e-12))
-        self.ev["clock"] += math.log(max(self.clock.predictive({}, op), 1e-12))
+        lp_a = math.log(max(b.predictive(ctx, op), 1e-12))
+        lp_c = math.log(max(self.clock.predictive({}, op), 1e-12))
+        self.last_lp = lp_c if self.driver() == "clock" else lp_a   # this step's evidence, for the PFC (part 24)
+        self.ev["action"] += lp_a
+        self.ev["clock"] += lp_c
         b.observe(ctx, op)
         self.clock.observe({}, op)
         self.uses += 1

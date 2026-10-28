@@ -1234,3 +1234,148 @@ move); and the harness now reports a game that crashes as that game's result ins
   exact position. That is memorisation, not a generalising condition, so a prior learned from it rewards memorising.
   This is the frame-choice problem: in a wrong or missing frame, the only thing left to attend to is the raw state.
 - **Runs got slower** (the numeric experts' fits): 127–169 s for the fast 25-game run.
+
+# Part 24: the prefrontal cortex, a column that learns which column to trust (pre-registered 2026-10-28, before the code)
+
+**Why (the user):** build the PFC first, mathematically principled and biologically inspired. Meta-learning should
+emerge without bespoke machinery, from PFC columns learning the way every column learns. The thesis (the user's
+correction, part 23): the column with its frame is the reusable unit; generalising is easy in the right coordinate
+system; so the job is to pick the right column for the task.
+
+**The mathematics: Bayesian model selection with a learned prior.** When several assoc columns, each in a different
+frame, explain the same change, each is a model. The responsible model is the one with the largest posterior,
+log w(m) = log P(m | context) + Σ_t log P_m(observation_t): a prior times the prequential evidence (parts 3 and 13).
+- **The prior P(m | context)** is a column's prediction: the PFC column predicts which kind of model will be
+  responsible, from game-agnostic context. That context is the changed region's size, its number of colours, whether
+  it is bar-shaped, whether it changed under every action so far, which action caused it, and the level.
+- **Learning:** the PFC column learns that prediction exactly as any column learns what an action does: attention
+  over context experts by track record, with tables from a feature's value to what was observed.
+  - Its frame: a choice frame. The state is the responsible kind; the operator is a switch to a kind, or staying.
+  - Its observation each step: which candidate predicted best.
+  - One PFC column serves every contested region, as a reusable model over many instances of its frame.
+- **Why meta-learning emerges:** the higher column learns the lower competition's prior (hierarchical Bayes). As its
+  experience grows across regions, levels and games, the right model wins after fewer observations: learning to learn.
+  Nothing in the code targets it.
+- **Rule changes:** a switch is an ordinary operator of the choice frame, so a rule change is followed by evidence and
+  the old model stays available (latent causes).
+
+**The biology it follows:**
+- PFC biases which pathway carries a task (Miller & Cohen 2001).
+- Several paired forward models compete, and each one's responsibility is its predictive success (MOSAIC: Wolpert &
+  Kawato 1998; Haruno, Wolpert & Kawato 2001).
+- Context is inferred, and memories are created and expressed by inferred context (COIN: Heald, Lengyel & Wolpert
+  2021). Task sets are reused across contexts (Collins & Frank 2013).
+- Meta-reinforcement learning emerges in PFC because slow learning across tasks shapes a faster learning process,
+  with nothing designed for it (Wang et al. 2018).
+- Mediodorsal thalamus switches PFC between context representations (Rikhye, Gilra & Halassa 2018).
+
+**Changes:**
+1. **Recruitment keeps every explanation:** every frame type that explains a changed region (rigid, recolour, bar) is
+   recruited as a candidate column, grouped by region. Recruitment's fixed order (translation before recolour) is
+   removed; only the PFC's prior and the evidence decide.
+2. **The PFC column** (`arc_agent/pfc.py`) is a `Column` with a choice frame (`frames.py`). It sets the
+   responsibility of each group's candidates. Only responsible columns are planned with; the others keep learning,
+   latent.
+3. **Its learned state is shipped like any learned prior:** warm-up play leaves a PFC with experience.
+
+**The test of emergent meta-learning (`arc_agent/test_pfc.py`):**
+- **Episodes:** a sequence of 12 episodes, each a hand-built world chosen at random from three kinds, each kind
+  ambiguous on its first step.
+  - A one-colour block moved by keys: a translation, also explained by a recolour of the cells it touched.
+  - A toggle panel whose cells change colour on a key: a recolour.
+  - A step counter: a bar, also explained at first as a recolour.
+  - New colours and layouts each episode.
+- **Measure:** the next-state prediction errors on the contested region in each episode's first 10 actions.
+- **Arms:** PERSIST, where the PFC column is kept across episodes and everything else is new per episode; and RESET,
+  where the PFC is new each episode.
+
+| # | prediction |
+|---|---|
+| P1 | learning to learn: PERSIST's mean errors in episodes 10–12 are ≤ 0.5 × its errors in episodes 1–3 |
+| P2 | it is the PFC's learning: RESET shows no such fall (episodes 10–12 ≥ 0.8 × episodes 1–3), and PERSIST < RESET in episodes 10–12 |
+| P3 | the PFC's attended expert for the kind of model is a region feature (number of colours, shape or clock-likeness), not the level or a random feature |
+| P4 | no regression on the hand-built worlds W1–W10 (each within 0.01 of part 23), and on the fast 25-game run (≥ 2 levels; mean ≥ 0.0009) |
+
+**Cost:** the meta-learning test under 1 minute; the worlds about 2 minutes; the 25-game run about 2 minutes.
+
+## Part 24, first results (2026-10-28)
+
+**Build check, before the main test:**
+- The first version scored each candidate on its own cells only, so a recolour of the cells an avatar once touched
+  kept predicting "no change" correctly after the avatar left, and its evidence matched the rigid model's (W1 fell to
+  0.95).
+- Model selection needs the rivals scored on the same observations. Fixed: every candidate predicts every cell any
+  rival claims, with the cells it doesn't model predicted unchanged (`brain._group_evidence`).
+- W1 back to 0.995, W4 1.0, W8 0.995.
+
+**The pre-registered meta-learning test (`runs/test_pfc.txt`; 5 seeds × 12 episodes; 3.8 s):** errors per episode
+(of about 9 contested steps):
+- PERSIST: episodes 1–3 6.20, episodes 10–12 6.07 (ratio 0.98);
+- RESET: 6.27 → 6.13 (0.98).
+- The PFC's attended expert under PERSIST was its own state, or conjunctions of its own state with the region's size
+  (P3 partly: size appears only inside conjunctions).
+
+**Verdicts:**
+- **P1 refuted:** no learning to learn.
+- **P2:** RESET shows no fall (confirmed), but PERSIST is barely below RESET.
+
+**Why, from traces: the test's design, not the mechanism.**
+1. Each episode used 4 keys at random. The first press of each key is unknown to every candidate, so about half the
+   contested steps are errors that no choice of model can avoid. That noise swamps the PFC's effect.
+2. The toggling 12 × 6 block is explained rigidly as a 3 × 6 strip jumping 12 pixels: a valid rigid explanation of the
+   changed pixels, with a region the same size class as the moving block's. So the one feature that tells the kinds
+   apart was gone.
+
+Within each episode, evidence chose correctly: the rigid model for the moving block, the recolour for the toggle.
+
+# Part 24b: the corrected meta-learning test (pre-registered 2026-10-28, before it was run)
+
+**Protocol:** as part 24, with two changes:
+- each episode uses one key, chosen at random, for all 8 actions, so after the first action both candidates know
+  what that key did and the second action is the decisive one;
+- the toggle block is 12 × 12, so its region is a larger size class than the moving block's.
+
+Errors counted from the second action on. Same arms (PERSIST, RESET) and seeds.
+
+| # | prediction |
+|---|---|
+| P1b | PERSIST's errors in episodes 10–12 are ≤ 0.5 × its errors in episodes 1–3 |
+| P2b | RESET shows no such fall (episodes 10–12 ≥ 0.8 × episodes 1–3), and PERSIST < RESET in episodes 10–12 |
+| P3b | PERSIST's PFC attends to the region's size (alone or in a conjunction) |
+
+## Part 24b results (2026-10-28; `runs/test_pfc_b.txt`, `.json`)
+
+**First run of 24b:** still no learning to learn. A trace showed perception fragmenting the contest. The toggle changes
+two separate strips; each strip became its own recolour candidate seeing half the swap ("11 → 0" only), and only the
+first entered the contest. So the "recolour" rival could not predict the toggle back.
+
+**Fix (recruitment, not the PFC):** a rigid explanation's rival is now one recolour over all the changed cells it
+covers (both strips: a swap), so the rivals are compared on the same change. Re-run (5 seeds × 12 episodes, 40 s):
+
+| arm | errors per episode, episodes 1–3 | episodes 10–12 | ratio |
+|---|---|---|---|
+| PERSIST | 0.53 | **0.13** | **0.25** |
+| RESET | 0.67 | 0.53 | 0.80 |
+
+- **The PFC's most-attended expert,** in all 5 PERSIST seeds, is a conjunction: (its own state is None, i.e. the
+  region has no model yet) AND the region's size. It arose from part 21's rule: the "own state" expert's prediction
+  for new regions was refuted, which created conjunction experts for that case.
+- **P1b confirmed** (0.25 ≤ 0.5).
+- **P2b confirmed:** RESET's ratio is 0.80 (at the threshold), and PERSIST < RESET in episodes 10–12.
+- **P3b confirmed:** size, in a conjunction.
+
+**Learning to learn emerged from ordinary column learning:** the PFC column learned the competition's prior across
+episodes, so the right model was chosen at the decisive step. No code targets meta-learning.
+
+**P4, regressions:**
+- **Worlds:** W1–W10 are identical to part 23 (`runs/test_conditions_part24.txt`). Confirmed.
+- **25 games, fast setting:** the first run gave 0 levels. Its search was bounded by wall-clock time, so with 16 games
+  in parallel each search had less compute and results depended on machine load. That is an apparatus flaw: the
+  harness now bounds the search by nodes (400 in the fast setting, 3000 in full runs), and two repeat runs of lp85 and
+  ar25 gave identical results.
+- **With the node budget:** 2 levels (ar25 L1 in 23 actions, under the human's 32, so full score; ft09 L1 in 101),
+  mean **0.0015**. Confirmed (≥ 2 levels, ≥ 0.0009); the best fast score so far. Earlier parts' fast scores were
+  measured with the wall-clock budget, so the comparison is approximate.
+- **lp85 is lost** (part 23 solved it in 20 actions). Its button moves tile contents around a loop, which is neither a
+  rigid motion nor a colour map. Every candidate keeps failing and being re-recruited, so the planner never holds a
+  stable model of the button. This needs a frame for contents permuted along a path (not covered by the folder).

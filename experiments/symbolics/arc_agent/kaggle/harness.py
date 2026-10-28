@@ -7,8 +7,9 @@
 - A game's score is the average of its level scores weighted by the level number (level 1 weighs 1, level 2 weighs 2,
   ...); the overall score is the mean over games.
 - The docs set no action cap. To bound compute, a level is abandoned (and the game ends) at CAP x its baseline.
-  Recorded evaluations use CAP 10 (a level would score 0.01 there). `--fast` (for development) uses CAP 3 (0.11) and
-  a 0.05 s search budget per step.
+  Recorded evaluations use CAP 10 (a level would score 0.01 there) and 3000 search nodes per decision. `--fast` (for
+  development) uses CAP 3 (0.11) and 400 nodes. The search is bounded by nodes, not seconds, so a result doesn't depend
+  on how loaded the machine is.
 
     venv312/Scripts/python.exe experiments/symbolics/arc_agent/kaggle/harness.py --fast            (all 25, ~1 min)
     venv312/Scripts/python.exe experiments/symbolics/arc_agent/kaggle/harness.py --arm control ls20 ft09
@@ -50,7 +51,7 @@ def _play(game_id, arm, cap, budget, draws=None, time_limit=None, hunger=None):
     import arc_agent.executive as executive
     from arc_agent.agent import ArcAgent
     from explorer import Explorer
-    executive.BUDGET = budget
+    executive.MAX_NODES, executive.BUDGET = budget, 5.0   # a node budget: results don't depend on machine load
     executive.FIXED_HUNGER = hunger
     arc = Arcade(operation_mode=OperationMode.OFFLINE, environments_dir="environment_files")
     info = next(e for e in arc.get_environments() if e.game_id == game_id)
@@ -135,7 +136,7 @@ def main(games=None, arm="brain", out=None, fast=False, cap=None, budget=None, p
     ids = sorted(e.game_id for e in arc.get_environments())
     if games:
         ids = [g for g in ids if g[:4] in games]
-    c0, b0 = (3, 0.05) if fast else (10, 0.3)
+    c0, b0 = (3, 400) if fast else (10, 3000)          # search nodes per decision
     cap, budget = cap or c0, budget or b0
     draws = priors_for(ids, priors)
     t0 = time.time()

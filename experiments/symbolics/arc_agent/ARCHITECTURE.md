@@ -26,7 +26,7 @@ default blueprint:
 | **M1** (motor) | 1 | innate: the motor map, the key actions plus click addresses aligned with V1's | which actions exist, and where clicks are worth trying (proposals ranked by what has responded) |
 | **assoc** (association) | n = 32 slots | learned, per column: translation (Z², a set of cells moving together), recolour (a permutation of colours on fixed cells), or clock (Z, a counter that advances on every action) | its frame type by evidence; its content (template); for each action, which operator the action applies to its frame (the generalized efference copy) |
 | **HC** (hippocampus) | 1 | the product of the assoc columns' frames (a joint state is one point in it) | episodes: Spotlight memory addressed by joint state; which states were visited, what each action did there, where WINs happened |
-| **PFC** | 0 now | (later) a router over areas | now a stand-in, `executive.py`: goal hypotheses, plans, drives |
+| **PFC** | 1 (`pfc.py`, part 24) | a choice frame: which kind of model is responsible | which assoc column to trust where several explain the same change: Bayesian model selection whose prior is the PFC column's own prediction, learned like any column's, so the right model is picked faster with experience (learning to learn, emergent). Goals, plans and drives are still in `executive.py` |
 
 The blueprint is where innate structure lives (DESIGN.md: priors are geometries). V1 and M1 get their frames from the
 blueprint; assoc columns get only a menu of frame *types* and must find their own frames from the data. Adding a

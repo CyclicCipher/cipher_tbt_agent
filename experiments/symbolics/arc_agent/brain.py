@@ -18,6 +18,7 @@ import numpy as np
 from arc_agent.blueprint import DEFAULT
 from arc_agent.column import PMIN, Column
 from arc_agent.frames import H, W, Bar, Recolour, Translation
+from arc_agent.pfc import PFC
 from arc_agent.spotlight import Spotlight
 
 RADIUS = 16                       # the largest displacement looked for in one step
@@ -175,21 +176,27 @@ class M1:
 
 
 class Brain:
-    def __init__(self, blueprint=DEFAULT, conditional=True, kind_prior=None, library=None):
+    def __init__(self, blueprint=DEFAULT, conditional=True, kind_prior=None, library=None, pfc=None):
         self.bp, self.conditional = blueprint, conditional
+        self.pfc = pfc if pfc is not None else PFC()    # part 24: the prefrontal column, shared with whoever passed it
+        self.level, self.last_act = 0, "key"
         self.kind_prior, self.library = kind_prior or {}, library or []
         self.slots = blueprint.area("assoc").columns
         self.v1, self.m1, self.hc = V1(), M1(), Spotlight()
         self.columns, self.next_id, self.t = [], 0, 0
         self.last_kind = None
-        self.cache = {}                                 # planning: contexts per joint state                           # M1's kind of the last action
+        self.cache = {}                                 # planning: contexts per joint state
+        self.last_evidence, self.last_cells = {}, {}     # part 24: the last step's same-cell evidence per candidate                           # M1's kind of the last action
 
     # ---- the joint state and the columns used for planning ------------------------------------------------------
     def active(self):
         return [c for c in self.columns if c.active]
 
     def planning(self):
-        return [c for c in self.columns if c.active and c.frame.kind != "bar" and c.driver() == "action"]
+        """The columns planned with: action-driven, not a counter, and, if they compete with others to explain the same
+        change, the one the PFC holds responsible (part 24)."""
+        return [c for c in self.columns if c.active and c.frame.kind != "bar" and c.driver() == "action"
+                and self.pfc.responsible(c.cid, self.last_act)]
 
     def clocks(self):
         return [c for c in self.columns if c.active and (c.frame.kind == "bar" or c.driver() == "clock")]
@@ -279,6 +286,7 @@ class Brain:
         self.v1.start(grid, new_level)
         if new_level:
             self.m1.done.clear()
+            self.level += 1
         for c in self.columns:
             f = c.frame
             if f.kind == "translation":
@@ -297,11 +305,16 @@ class Brain:
         which columns were recruited."""
         self.t += 1
         self.last_kind = kind
+        self.last_act = "key" if action[0] != 6 else "click"
         ground = self.v1.ground
         report = dict(moved=[], lost=[], recruited=[], unexplained=0)
         render = before.copy()
         others = {c.cid: c.state for c in self.planning()}
         ctxs = {c.cid: self.context(c, c.state, before, others, self.v1.under_at) for c in self.active()}
+        painted, claimed = {}, {}                       # part 24: each grouped column's prediction of its cells
+        for c in self.active():
+            if c.cid in self.pfc.member:
+                painted[c.cid], claimed[c.cid] = self._paint(c, action, ctxs[c.cid])
         for c in self.active():
             f, old = c.frame, c.state
             akey = c.akey(action, old)
@@ -353,6 +366,7 @@ class Brain:
                 report["moved"].append(c.cid)
         residual = render != after
         report["unexplained"] = int(residual.sum())
+        self.pfc.observe(self._group_evidence(painted, claimed, before, after), self.last_act)   # part 24
         if residual.any():
             self._recruit(before, after, residual, action, report)
         # M1: did this action change anything beyond the clocks?
@@ -382,7 +396,9 @@ class Brain:
         sites = components(residual)
         if len(sites) > MAX_SITES:
             return
-        for _ in range(3):                              # rigid motions first: common fate, translation or turn
+        original = residual.copy()
+        rigid = []                                      # (column, the cells it explains)
+        for _ in range(3):                              # rigid explanations: common fate, translation or turn
             found = self._translation(before, after, residual, ground)
             turned = self._rotation(before, after, residual, ground)
             if turned is not None and (found is None or turned[2] > self._explained(found[0], found[1], residual)):
@@ -399,30 +415,99 @@ class Brain:
             others = {c.cid: c.state for c in self.planning() if c is not col}
             col.learn(akey, self.context(col, (0, 0, 0), before, others, self.v1.under_at), d)   # evidence (part 15)
             col.state = d
+            covered = set(map(tuple, cells))
             for x, y in cells:
                 residual[y, x] = False
             for x, y in frame.place(d).tolist():
                 if 0 <= x < W and 0 <= y < H:
                     residual[y, x] = False
+                    covered.add((x, y))
                     if (x, y) not in set(map(tuple, cells)):
                         self.v1.under.write((x, y), "under", int(before[y, x]))
+            rigid.append((col, covered))
             report["recruited"].append(col.cid)
-        for site in components(residual):              # what is left: recolour, or one more cell of a counter
+        # every change with one colour map is also explained as a recolour (part 24: no fixed order between frames).
+        # A rigid explanation's rival is ONE recolour over all the changed cells it covers (both strips of a toggle,
+        # not each strip alone), so the two are compared on the same change; the PFC decides between them.
+        sites = components(original)
+        used = set()
+        for r, cov in rigid:
+            idx = [k for k, site in enumerate(sites) if cov & set(site)]
+            if not idx:
+                continue
+            used |= set(idx)
+            union = [cell for k in idx for cell in sites[k]]
+            col = self._recolour(union, before, after, action, report)
+            if col is not None:
+                region = set(map(tuple, r.frame.cells0.tolist())) | set(union)
+                self.pfc.group([r.cid, col.cid], [r.frame.kind, "recolour"], self.region_context(region, before, after))
+        for k, site in enumerate(sites):                # the rest: a recolour, or one more cell of a counter
+            if k in used:
+                continue
             pairs = [(int(before[y, x]), int(after[y, x])) for x, y in site]
             m = {}
-            if any(m.setdefault(a, b) != b for a, b in pairs):
-                continue                                # not one colour map
-            if self._extend_bar(site, pairs):
+            if any(m.setdefault(a, b) != b for a, b in pairs) or self._extend_bar(site, pairs):
                 continue
-            frame = Recolour(site, [a for a, _ in pairs])
-            col = self._new(frame, tuple(a for a, _ in pairs))
-            if col is None:
-                return
-            op = frame.op_between(col.state, tuple(b for _, b in pairs))
-            others = {c.cid: c.state for c in self.planning() if c is not col}
-            col.learn(col.akey(action, col.state), self.context(col, col.state, before, others, self.v1.under_at), op)
-            col.state = tuple(b for _, b in pairs)
-            report["recruited"].append(col.cid)
+            self._recolour(site, before, after, action, report)
+
+    def _recolour(self, cells, before, after, action, report):
+        """A recolour column over these cells, if one colour map explains their change; else None."""
+        pairs = [(int(before[y, x]), int(after[y, x])) for x, y in cells]
+        m = {}
+        if any(m.setdefault(a, b) != b for a, b in pairs):
+            return None
+        frame = Recolour(cells, [a for a, _ in pairs])
+        col = self._new(frame, tuple(a for a, _ in pairs))
+        if col is None:
+            return None
+        op = frame.op_between(col.state, tuple(b for _, b in pairs))
+        others = {c.cid: c.state for c in self.planning() if c is not col}
+        col.learn(col.akey(action, col.state), self.context(col, col.state, before, others, self.v1.under_at), op)
+        col.state = tuple(b for _, b in pairs)
+        report["recruited"].append(col.cid)
+        return col
+
+    def _paint(self, c, action, ctx):
+        """What column c predicts for the cells it claims this step: {cell: colour}, and the cells it claims (where it
+        is now and where it predicts it will be)."""
+        f, s = c.frame, c.state
+        p, _ = c.dist(c.akey(action, s), ctx)
+        ns = f.apply(s, max(p, key=p.get))
+        out = {}
+        if f.kind == "translation":
+            for x, y in f.place(s).tolist():
+                out[(x, y)] = self.v1.under_at(x, y)     # what it leaves shows what lay beneath
+            for (x, y), v in zip(f.place(ns).tolist(), f.colours.tolist()):
+                out[(x, y)] = int(v)
+        elif f.kind == "recolour":
+            for (x, y), v in zip(f.place(ns).tolist(), ns):
+                out[(x, y)] = int(v)
+        return out, set(out)
+
+    def _group_evidence(self, painted, claimed, before, after):
+        """Part 24: the rivals in a group are scored on the SAME cells, every cell any of them claims. Each predicts
+        the cells it doesn't model as unchanged. Returns {cid: log predictive probability of what was seen}."""
+        lp, hit, miss = {}, math.log(0.99), math.log(0.01)
+        self.last_cells = {}
+        for g in self.pfc.groups.values():
+            members = [c for c in g["members"] if c in painted]
+            cells = set()
+            for c in members:
+                cells |= claimed[c]
+            cells = [(x, y) for x, y in cells if 0 <= x < W and 0 <= y < H]
+            for c in members:
+                n = sum(1 for x, y in cells if painted[c].get((x, y), int(before[y, x])) == int(after[y, x]))
+                lp[c] = n * hit + (len(cells) - n) * miss
+                self.last_cells[c] = len(cells)
+        self.last_evidence = lp
+        return lp
+
+    def region_context(self, region, before, after):
+        """The PFC's game-agnostic context for a contested region (part 24)."""
+        xs, ys = zip(*region)
+        colours = {int(before[y, x]) for x, y in region} | {int(after[y, x]) for x, y in region}
+        return {("size",): size_bucket(len(region)), ("colours",): min(4, len(colours)),
+                ("thin",): min(max(xs) - min(xs), max(ys) - min(ys)) <= 2, ("level",): min(self.level, 2)}
 
     @staticmethod
     def _explained(cells, d, residual):
