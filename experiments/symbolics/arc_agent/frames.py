@@ -13,9 +13,16 @@ touching structure.
 """
 import numpy as np
 
-from arc_agent.claude.push_block_rebuild import rot     # part 12-13's 90-degree rotations of the plane
 
 H = W = 64
+
+
+def rot(p, r):
+    """Part 12-13's 90-degree rotations of the plane: points p (n x 2) turned r quarter turns."""
+    p = np.array(p).reshape(-1, 2)
+    for _ in range(r % 4):
+        p = np.stack([-p[:, 1], p[:, 0]], -1)
+    return p
 
 
 class Translation:

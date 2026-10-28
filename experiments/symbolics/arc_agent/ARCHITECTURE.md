@@ -1,14 +1,16 @@
-# The arc_agent: columns as models over reference frames, built from a brain blueprint
+# The arc agent: columns as models over reference frames, built from a brain blueprint
 
-Written 2026-10-27, before the code. This is the agent we test on ARC-AGI-3 from now on. It replaces Gemini's agent
-(`gemini/`, archived: kept for reference, never imported). `claude/` holds the frozen apparatus of the experiments
-in `docs/COORDINATES.md` and `docs/AGENT.md` (parts 1–19); the mechanisms that worked there are rebuilt here as the
-agent's parts. `kaggle/` holds the scoring harness, the submission builder, and the explorer, which is now the
-**control arm**, not a fallback.
+Written 2026-10-27, before the code. **This is the only agent in `experiments/symbolics`, and the only one we work on**
+(the user, 2026-10-28). Everything else in the folder is in `legacy/`: kept for reference, never imported, never
+worked on. That includes Gemini's TBT agent (`legacy/gemini_tbt_agent/`), which this agent replaced, and the
+experiments that led to it (`legacy/claude_predecessor_experiments/`; `legacy/docs/COORDINATES.md`; parts 1–19 of
+`arc_agent/docs/AGENT.md`), whose mechanisms that worked are rebuilt here. The agent's code, docs (`arc_agent/docs/`),
+run outputs (`arc_agent/runs/`) and game harness (`arc_agent/kaggle/harness.py`) all live in `arc_agent/`. Paths in
+these docs are relative to `experiments/symbolics`.
 
 ## 1. The theory it implements
 
-From `claude/DESIGN.md`, in one paragraph: TBT's main problem is taking objects as a primitive. A cortical column is
+From `arc_agent/docs/DESIGN.md`, in one paragraph: TBT's main problem is taking objects as a primitive. A cortical column is
 instead a reusable model over a reference frame (a coordinate system), either innate or learned, and the frames
 together represent the task's structure. Structure (the frame and how actions move addresses in it) is stored apart
 from content (what is at an address). Objects are derived: a set of cells that one transformation moves together.
@@ -126,14 +128,17 @@ Part 15b's lexicographic satisficing agent with part 17's commitment, over the b
 - **Commitment:** a plan runs until it ends, a WIN, a surprise (a column not where predicted), or a drop in its value.
 - **RESET** is never sent before acting in a level: the engine would restart the whole game.
 
-## 7. The control arm
+## 7. Control arms
 
-`kaggle/explorer.py`, unchanged: a table of (whole screen, action) → next screen, per level. Both arms run on the
-same 25 games through `kaggle/harness.py` (level-weighted (human/agent)² score, human baselines from the toolkit).
+Until part 26 a separate explorer (a table of whole screen and action to next screen, per level) was run as a control
+arm. The user deleted it on 2026-10-28; its recorded results stay in `arc_agent/docs/AGENT.md`. A control arm is now
+this agent with one mechanism removed (as `test_conditions.py --no-hidden`), or this agent at an earlier commit. All
+games run through `arc_agent/kaggle/harness.py` (level-weighted (human/agent)² score, human baselines from the
+toolkit).
 
 ## 8. Predictions (pre-registered, before the code)
 
-The control's results are already recorded (`runs/explorer_v0_fixed.json`: 5 of 183 levels, mean score 0.0012).
+The control's results are already recorded (`legacy/runs/explorer_v0_fixed.json`: 5 of 183 levels, mean score 0.0012).
 
 | # | prediction |
 |---|---|

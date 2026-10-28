@@ -93,7 +93,7 @@ def main():
               f"attended {[a for _, a in runs]}", flush=True)
     print(f"total {time.time() - t0:.1f} s")
     json.dump({k: [[list(x) for x in r] for r, _ in v] for k, v in res.items()},
-              open("runs/test_pfc_b.json", "w"), indent=1, default=int)
+              open("arc_agent/runs/test_pfc_b.json", "w"), indent=1, default=int)
 
 
 if __name__ == "__main__":

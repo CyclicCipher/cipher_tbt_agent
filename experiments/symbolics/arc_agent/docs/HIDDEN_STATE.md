@@ -2,7 +2,7 @@
 
 **Where this stands (2026-10-28):** the agent has it. `arc_agent/hidden.py` holds the delay columns and the learned
 graph column as ordinary Columns; `arc_agent/column.py` reads situations with competing heads (parts 27 and 27b in
-`docs/AGENT.md`, with results). The feel-experiments below came first; the agent's own tests are worlds W11–W14
+`arc_agent/docs/AGENT.md`, with results). The feel-experiments below came first; the agent's own tests are worlds W11–W14
 (`arc_agent/worlds.py`, `arc_agent/test_conditions.py`).
 
 Written 2026-10-28 for item 4 of the open list. The user: start on the hidden state with JEPA and SIGReg; each
@@ -12,7 +12,7 @@ similar reference frames specialise should be answered with biological insight.
 ## 1. What hidden state is here
 
 A **hidden variable** changes what an action does but is not a feature of the current screen; only the history reveals
-it. From the public games (`arc_agent/claude/PUBLIC_GAMES.md`):
+it. From the public games (`arc_agent/docs/PUBLIC_GAMES.md`):
 
 | kind | examples |
 |---|---|
@@ -140,7 +140,7 @@ If it matched the innate frames, hidden variables of kinds not built in could be
 
 ## 6. The feel-experiment (pre-registered 2026-10-28, before the code)
 
-**Task:** the synthetic grid of `structure/claude/attention_feel.py`, with doors whose state is hidden.
+**Task:** the synthetic grid of `legacy/structure/claude/attention_feel.py`, with doors whose state is hidden.
 - Each step the agent moves in one of 4 directions, or presses (probability 0.2), which shows nothing.
 - The 8 cells around it are floor, wall or door (0.6, 0.2, 0.2). A move is blocked by a wall, or by a door while the
   hidden rule says closed.
@@ -185,7 +185,7 @@ situation features differ between arms:
 - J's prediction loss;
 - how well a linear probe of h recovers the true open/closed state.
 
-### Results (2026-10-28; `runs/hidden_state_feel.txt`; 70 s)
+### Results (2026-10-28; `legacy/runs/hidden_state_feel.txt`; 70 s)
 
 **Apparatus:** the memory's θ gradient with a continuous mismatch, and the JEPA + SIGReg gradient (W, P, b), match
 finite differences to 6 decimals.
@@ -344,7 +344,7 @@ outcome, so EM must find a chain of states before the chain pays. Baum–Welch i
    - **This affects part 26 in the agent too:** its similarity has the same drift, so the agent's in-context attention
      should get the same prior when hidden-state columns add many features.
 
-### Results (2026-10-28; `runs/hidden_state_feel2.txt`; 296 s)
+### Results (2026-10-28; `legacy/runs/hidden_state_feel2.txt`; 296 s)
 
 Accuracy over steps 2,000–2,999 (5 seeds):
 

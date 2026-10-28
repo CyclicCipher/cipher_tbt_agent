@@ -47,7 +47,7 @@ def feature_kind(f, op=None):
 class Numeric:
     """The numeric expert (part 23): a translation's displacement as a function of the column's numeric features
     (distances along four rays, its own position), fitted by the function finder of experiments A-B3
-    (regression/claude/symreg2.py: residual-greedy, affine atoms, BIC). Refitted when its own prediction and the
+    (symreg.py: residual-greedy, affine atoms, BIC). Refitted when its own prediction and the
     column's attention-weighted prediction both fail (part 25: compute is spent where error remains), less often
     after each refit that leaves the recent data unexplained."""
 
@@ -79,7 +79,7 @@ class Numeric:
                 self.every *= 2                         # compute is spent where a formula can pay off
 
     def refit(self):
-        from regression.claude.symreg2 import Finder
+        from arc_agent.symreg import Finder
         X = np.array(self.X, float)
         fit = []
         for c in range(len(self.Y[0])):

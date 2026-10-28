@@ -100,7 +100,7 @@ weightings compared:
 
 Accuracy over 2,000 steps. Results below.
 
-### Results (2026-10-28; `structure/claude/attention_feel.py`; 5 seeds × 3,000 steps; a few seconds)
+### Results (2026-10-28; `legacy/structure/claude/attention_feel.py`; 5 seeds × 3,000 steps; a few seconds)
 
 | weighting | accuracy, last 1,000 steps | log loss |
 |---|---|---|
@@ -130,7 +130,7 @@ Each is the transformer's mechanism with its learning written as a local rule.
 
 ## 7. What the agent showed (part 25), and the in-context version (built in part 26)
 
-Part 25 put sections 5–6 into the arc_agent's columns (`docs/AGENT.md` part 25). It was worse than the track record
+Part 25 put sections 5–6 into the arc_agent's columns (`arc_agent/docs/AGENT.md` part 25). It was worse than the track record
 within a game's few hundred steps, for two reasons:
 1. **The step:** the rule moves a score by at most η(r − a) per observation, while a position key starts about 5 nats
    behind (one of about 120). The track record moves about 4 nats per informative event.
@@ -158,7 +158,7 @@ similarity.
 The learned θ, in between, is the part neither older mechanism had: which features of the situation matter for which
 action. As in a transformer, the weights set what counts as similar, and the context does the learning.
 
-**Built in part 26 (`docs/AGENT.md` part 26).** On the synthetic switch-door task:
+**Built in part 26 (`arc_agent/docs/AGENT.md` part 26).** On the synthetic switch-door task:
 
 | learner | accuracy at 300 steps | at 3,000 steps |
 |---|---|---|

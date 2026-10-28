@@ -1,8 +1,15 @@
+# The arc agent's lab book
+
+**Where things are (2026-10-28):** the arc agent is `arc_agent/` (code, `arc_agent/docs/`, `arc_agent/runs/`,
+`arc_agent/kaggle/harness.py`). Parts 1–19 below are the experiments that led to it; their code and outputs are in
+`legacy/` (never imported, never worked on). Parts 19–24 compare against an explorer control arm, which the user
+deleted on 2026-10-28; its results stay as recorded. Paths are relative to `experiments/symbolics`.
+
 # The rebuilt symbolic agent: experiments
 
 Continues `COORDINATES.md`. Part 13 there rebuilt the symbolic agent's columns as frames with evidence-weighted drivers
-(`arc_agent/claude/push_block_rebuild.py`). The design is in `arc_agent/claude/DESIGN.md`, and the values in
-`arc_agent/claude/HOMEOSTASIS.md`.
+(`legacy/claude_predecessor_experiments/push_block_rebuild.py`). The design is in `arc_agent/docs/DESIGN.md`, and the values in
+`legacy/claude_predecessor_experiments/HOMEOSTASIS.md`.
 
 # Part 14: a satisficing active-inference agent (pre-registered 2026-10-27, before the code was written)
 
@@ -12,7 +19,7 @@ Continues `COORDINATES.md`. Part 13 there rebuilt the symbolic agent's columns a
 - No scalar utility: a first step toward context-dependent values, and toward the hypothesis that satisficers are
   safer than optimizers.
 
-**The agent** (`arc_agent/claude/homeostatic_agent.py`) puts `HOMEOSTASIS.md`, version 1, on part 13's frame model:
+**The agent** (`legacy/claude_predecessor_experiments/homeostatic_agent.py`) puts `HOMEOSTASIS.md`, version 1, on part 13's frame model:
 - **Variables:**
   - progress: acceptable when a reachable state has predicted P(WIN) ≥ 0.5;
   - understanding: acceptable when no reachable contact context is untried.
@@ -53,7 +60,7 @@ Continues `COORDINATES.md`. Part 13 there rebuilt the symbolic agent's columns a
 
     python -m arc_agent.claude.homeostatic_agent      (from experiments/symbolics)
 
-## Part 14 partial results (2026-10-27; `runs/homeostatic_agent.txt`; stopped at about 7.5 minutes)
+## Part 14 partial results (2026-10-27; `legacy/runs/homeostatic_agent.txt`; stopped at about 7.5 minutes)
 
 **Stopped before W3, over budget.** The build check timed the planner (2–31 ms per plan), but not the runs that never
 win. Those run to the 3,000-step cap with part 13's full model, and W2 took 6.5 minutes. The whole experiment
@@ -123,7 +130,7 @@ fixes both.
 # Part 15: version 2, exact expected information gain and planning over the posterior (pre-registered 2026-10-27, before the code was written)
 
 **Why (the user):** "Take your time to rewrite the agent to have the principled version." The definitions are in
-`arc_agent/claude/HOMEOSTASIS.md`, version 2.
+`legacy/claude_predecessor_experiments/HOMEOSTASIS.md`, version 2.
 
 **What changes from version 1 (part 14):**
 - **No count-based novelty.** Epistemic value is exact expected information gain over explicit competing hypotheses:
@@ -178,7 +185,7 @@ With these, seed 0 solved every level from level 3 on in exactly the optimal num
 **Projected cost:** about 6 minutes, nearly all of it the ablation, whose fallbacks reach the deep search on most
 steps (about 0.2 s per step on W2). No cut was needed; the run is watched, and will be stopped at 9 minutes.
 
-## Part 15 results (2026-10-27; `runs/homeostatic_agent_v2.txt`, `.json`; 91 s)
+## Part 15 results (2026-10-27; `legacy/runs/homeostatic_agent_v2.txt`, `.json`; 91 s)
 
 | world / agent | first WIN (3 seeds) | levels 2–8 won in the first attempt | steps over the optimum, levels 3–8 | exploratory decisions in levels 3–8 | box's lead after discovery | measured gain > 0 |
 |---|---|---|---|---|---|---|
@@ -244,7 +251,7 @@ and 1 (so determinism worked). The trace showed a search bug:
 After the fix, the seed gives a first WIN at step 64, then every level at exactly the optimum, identical under both
 hash seeds.
 
-## Part 15b results (2026-10-27; `runs/homeostatic_agent_v2_1.txt`, `runs/homeostatic_agent_v2.json`; 62 s)
+## Part 15b results (2026-10-27; `legacy/runs/homeostatic_agent_v2_1.txt`, `legacy/runs/homeostatic_agent_v2.json`; 62 s)
 
 | world / agent | first WIN (3 seeds) | levels completed | levels 2–8 won in the first attempt | steps over the optimum, levels 3–8 | exploratory decisions in levels 3–8 | measured gain > 0 |
 |---|---|---|---|---|---|---|
@@ -304,7 +311,7 @@ The box's lead straight after its discovery: 7.8 nats in all 18 runs.
 - **An efference copy:** what an action was meant to do, kept apart from what happened. A mismatch is then
   information about the world, not about the action.
 
-## The efference copy (`arc_agent/claude/efference.py`)
+## The efference copy (`legacy/claude_predecessor_experiments/efference.py`)
 
 **What it holds:** hypotheses, for each (body kind, action), over the intended displacement: the 25 translations
 within 2 cells, including none, with a uniform prior. After each step:
@@ -350,7 +357,7 @@ If the full product of hypotheses is larger than 12, the combinations are taken 
 combination, plus, for each uncertain thing, one combination per alternative hypothesis of that thing (the others at
 their most probable). Each is weighted by its product of marginals, then renormalized.
 
-## A new world, W4: walls and distractors (`arc_agent/claude/wall_world.py`)
+## A new world, W4: walls and distractors (`legacy/claude_predecessor_experiments/wall_world.py`)
 
 - **Mechanics:** push_block's, with random layouts.
 - **A wall:** a straight segment of 3–4 cells (colour 5) that blocks the player and the box.
@@ -468,7 +475,7 @@ ends. So the drive picked one step and replanned.
 
     python -m arc_agent.claude.homeostatic_agent --part17      (from experiments/symbolics)
 
-## Part 16 results (2026-10-27; `runs/homeostatic_agent_part16.txt`; stopped by the 9.5-minute guard)
+## Part 16 results (2026-10-27; `legacy/runs/homeostatic_agent_part16.txt`; stopped by the 9.5-minute guard)
 
 **Cut:** the guard stopped the run during W4's DE arm. DE and DW on W4 were not completed. Everything else was.
 
@@ -534,7 +541,7 @@ arms only).
 
 The same gap affected part 16's W4 arms; it is part of why L and LE were 17.5 steps over the optimum there.
 
-## Part 17 results (2026-10-27; `runs/homeostatic_agent_part17.txt`, `.json`; 56 s)
+## Part 17 results (2026-10-27; `legacy/runs/homeostatic_agent_part17.txt`, `.json`; 56 s)
 
 | world | arm | first WIN | levels done | levels 2+ won in the first attempt | steps over the optimum, levels 3+ | decisions per step | ms per step | median plan length |
 |---|---|---|---|---|---|---|---|---|
@@ -582,7 +589,7 @@ Commitment triggers over all runs: 6 surprises, no value drops. The plans were k
 - **Question:** does a learned goal-type prior make the first WIN in a new game fast, while everything else (the body,
   what actions do, how objects respond, the colours) is relearned?
 
-**Games** (`arc_agent/claude/learning_sets.py`): 12 per run, 3 runs (seeds), each game a new random set of colours
+**Games** (`legacy/claude_predecessor_experiments/learning_sets.py`): 12 per run, 3 runs (seeds), each game a new random set of colours
 drawn from 1–13.
 - **Every game's board:** the body, a box (pushable), a single target cell and two single distractor cells
   (passable). Random layouts, no walls.
@@ -632,7 +639,7 @@ predicted *outcome* at the current state.**
 under the flat prior. But first-WIN steps barely changed: before the first WIN, most steps ran exploratory plans
 (learning actions, touching every object) that a goal prior doesn't shorten. L1, L2 and L5 may therefore fail.
 
-## Part 18 results (2026-10-27; `runs/learning_sets.txt`, `.json`; 88 s)
+## Part 18 results (2026-10-27; `legacy/runs/learning_sets.txt`, `.json`; 88 s)
 
 3 seeds × 12 games; both arms play the identical games (same specs and layouts).
 
@@ -703,7 +710,7 @@ steps before first WINs, the same as the recorded breakdown).
 **So relevance-weighted curiosity is dropped from this part.** In its place is the mechanism the diagnosis points to:
 a drive to keep the goal reachable.
 
-## Mechanism 1: overhypotheses (`arc_agent/claude/overhypothesis.py`)
+## Mechanism 1: overhypotheses (`arc_agent/overhypothesis.py`)
 
 **What it is:** one mechanism for priors learned across games (Kemp, Perfors & Tenenbaum 2007), applied at two levels
 here.
@@ -758,7 +765,7 @@ here.
 ## Arms, games and comparison
 
 **The games:** part 18's exactly (3 seeds × 12 games, the same specs and layouts).
-- **LS:** part 18's learned-prior arm. Its results are reused from `runs/learning_sets.json`, not re-run; the code it
+- **LS:** part 18's learned-prior arm. Its results are reused from `legacy/runs/learning_sets.json`, not re-run; the code it
   ran is unchanged.
 - **OH:** LS + overhypotheses for action effects and object responses.
 - **LSV:** LS + the viability drive.
@@ -809,7 +816,7 @@ same action mapping, as ARC-AGI-3 games largely do.
 
 **Predictions V1–V3 now compare LSV with the re-run LS; C1 compares OHV with the re-run LS.**
 
-## Part 19 results (2026-10-27; `runs/learning_sets_part19.txt`, `.json`; 230 s)
+## Part 19 results (2026-10-27; `legacy/runs/learning_sets_part19.txt`, `.json`; 230 s)
 
 3 seeds × 12 games, part 18's identical games. The re-run LS (with the contact fix) reproduced part 18's LS exactly,
 game for game, including 580 stuck steps. So the bug never changed LS's behaviour, and the diagnosis is confirmed on
@@ -927,7 +934,7 @@ pixels moves one cell (3 pixels) per key, with random layouts per seed.
 
     venv312/Scripts/python.exe -m arc_agent.test_conditions      (from experiments/symbolics)
 
-## Part 20 results (2026-10-27; `runs/test_conditions.txt`, `.json`; 14 s)
+## Part 20 results (2026-10-27; `arc_agent/runs/test_conditions.txt`, `.json`; 14 s)
 
 Accuracy of the next-position prediction, actions 101–300, mean of 3 seeds:
 
@@ -999,7 +1006,7 @@ Accuracy of the next-position prediction, actions 101–300, mean of 3 seeds:
 
 ## Part 21 results (2026-10-27)
 
-**Conjunctions (`runs/test_conditions_part21.txt`; 14 s):**
+**Conjunctions (`arc_agent/runs/test_conditions_part21.txt`; 14 s):**
 - **K1 refuted as pre-registered:** W7's accuracy is unchanged at 0.942 over actions 101–300.
   - The cases do form, and the right conjunction is attended for "down": (door below AND the switch's state).
   - But cases form only after a door has been seen both passable and blocking, mostly after step 100.
@@ -1036,13 +1043,13 @@ planning columns at once), the goal-level version of the conjunction problem.
 - **Fast-setting result:** unchanged (2 levels). The joint family is spread over 10⁶ states, so it never outweighs
   the ~1 bit of learning what an untried click does.
 
-**Full-length evaluation, all 25 games, part 21's code plus the joint goal family (`runs/brain_part21.json`; 340 s
+**Full-length evaluation, all 25 games, part 21's code plus the joint goal family (`arc_agent/runs/brain_part21.json`; 340 s
 wall, in parallel):**
 
 | | levels solved | mean score | levels |
 |---|---|---|---|
 | brain | 5 of 183 | **0.0019** | ar25 L1 in 29 actions (human 32: full score), ft09 L1 in 99 (43), lf52 L1 in 78 (32), lp85 L1 in 144 (17), m0r0 L1 in 81 (30) |
-| control (`runs/explorer_v0_fixed.json`) | 5 of 183 | 0.0012 | bp35, lf52, lp85, sp80, vc33 (all level 1) |
+| control (`legacy/runs/explorer_v0_fixed.json`) | 5 of 183 | 0.0012 | bp35, lf52, lp85, sp80, vc33 (all level 1) |
 
 **Verdicts (ARCHITECTURE.md's B-predictions, via K3):**
 - **B3 refuted:** 5 levels, not ≥ 10.
@@ -1117,7 +1124,7 @@ a 150 s wall-clock limit. Fast setting, all 25 games:
 | DRIVE (even type prior, hunger growing) | 2 | **0.0009** | ar25 L1 in 88, lp85 L1 in 20 (human 17) |
 | DRIVE with hunger held at 1.2 (ablation, asked by the user) | 1 | 0.0002 | m0r0 |
 
-**Warm-up (`runs/warmup.txt`, `.json`; 222 s):** 2 levels won with 20 × the human budget: ft09 L1 in 525 actions
+**Warm-up (`arc_agent/runs/warmup.txt`, `.json`; 222 s):** 2 levels won with 20 × the human budget: ft09 L1 in 525 actions
 (type "joint") and lp85 L1 in 20 ("on-rare").
 
 **Verdicts:**
@@ -1148,7 +1155,7 @@ what the folder doesn't cover.
 | part 12: rotations act in the body frame (pose' = pose · h), translations in the world frame | a **rigid frame**, pose (x, y, r): translations and 90° rotations about the piece's own pivot. Recruited when a rotation explains a change that no translation does |
 | part 10: content regularity is a quotient of the geometry | **quotient features:** (x mod k, y mod k) of a column's own state, k = 2…6 |
 | OPEN_PROBLEMS #6: a richer vocabulary overfits, and description-length priors are the remedy | **description-length priors on experts:** an expert starts log K nats behind the unconditional one, K being the number of experts of its kind (conjunctions also pay for the choice of partner) |
-| experiments A–B3: the function finder (`regression/claude/symreg2.py`; affine and relational atoms, BIC) | **numeric experts:** a translation's displacement as a fitted function of numeric relational features. The features are, along each of 4 rays, the distance to the first cell that differs from what lies beneath the column, and the relative position of every other column. Refitted as data arrive; they compete in the same attention |
+| experiments A–B3: the function finder (`arc_agent/symreg.py`; affine and relational atoms, BIC) | **numeric experts:** a translation's displacement as a fitted function of numeric relational features. The features are, along each of 4 rays, the distance to the first cell that differs from what lies beneath the column, and the relative position of every other column. Refitted as data arrive; they compete in the same attention |
 | experiment B: library learning; the guide's case memory | **priors harvested from warm-up:** every game's learned conditions (the kind of the most-attended feature, relative to the operator: the cell moved into, the edge, another column, a quotient) and fitted formulas become an overhypothesis over expert kinds. In a new game, experts of commonly useful kinds start with that head start. This needs no WIN: conditions are learned in every game |
 | parts 2–4: completion by group axioms | already implicit: operators are group actions, and the model composes them |
 | part 6: irreducible representations; part 9: one map per position hypothesis | not used: column states are explicit group elements, and positions are observed directly |
@@ -1175,7 +1182,7 @@ what the folder doesn't cover.
 
 ## Part 23 results (2026-10-28)
 
-**Hand-built worlds (`runs/test_conditions_part23.txt`, `.json`; 3 seeds, accuracy over actions 101–300; run in
+**Hand-built worlds (`arc_agent/runs/test_conditions_part23.txt`, `.json`; 3 seeds, accuracy over actions 101–300; run in
 parallel, 123 s wall):**
 
 | world | P23 | P21 (part 21's code) | P23's most-attended expert |
@@ -1205,7 +1212,7 @@ those are the numbers above.
 Generalising is easy in the right coordinate system, so the task is to pick the right column for the task, which is the
 PFC's job. It is not one model shared across many frames, as I put it in chat.
 
-**Warm-up (`runs/warmup23.txt`, `runs/warmup.json`; 283 s):**
+**Warm-up (`arc_agent/runs/warmup23.txt`, `arc_agent/runs/warmup.json`; 283 s):**
 - 2 levels won (the same two as part 22).
 - Expert kinds harvested from 19 of 25 games: own state 385, other column 171, ahead (the cell moved into) 29,
   unconditional 16, elsewhere 14, numeric 6, conjunction 3.
@@ -1308,7 +1315,7 @@ log w(m) = log P(m | context) + Σ_t log P_m(observation_t): a prior times the p
   rival claims, with the cells it doesn't model predicted unchanged (`brain._group_evidence`).
 - W1 back to 0.995, W4 1.0, W8 0.995.
 
-**The pre-registered meta-learning test (`runs/test_pfc.txt`; 5 seeds × 12 episodes; 3.8 s):** errors per episode
+**The pre-registered meta-learning test (`arc_agent/runs/test_pfc.txt`; 5 seeds × 12 episodes; 3.8 s):** errors per episode
 (of about 9 contested steps):
 - PERSIST: episodes 1–3 6.20, episodes 10–12 6.07 (ratio 0.98);
 - RESET: 6.27 → 6.13 (0.98).
@@ -1343,7 +1350,7 @@ Errors counted from the second action on. Same arms (PERSIST, RESET) and seeds.
 | P2b | RESET shows no such fall (episodes 10–12 ≥ 0.8 × episodes 1–3), and PERSIST < RESET in episodes 10–12 |
 | P3b | PERSIST's PFC attends to the region's size (alone or in a conjunction) |
 
-## Part 24b results (2026-10-28; `runs/test_pfc_b.txt`, `.json`)
+## Part 24b results (2026-10-28; `arc_agent/runs/test_pfc_b.txt`, `.json`)
 
 **First run of 24b:** still no learning to learn. A trace showed perception fragmenting the contest. The toggle changes
 two separate strips; each strip became its own recolour candidate seeing half the swap ("11 → 0" only), and only the
@@ -1368,7 +1375,7 @@ covers (both strips: a swap), so the rivals are compared on the same change. Re-
 episodes, so the right model was chosen at the decisive step. No code targets meta-learning.
 
 **P4, regressions:**
-- **Worlds:** W1–W10 are identical to part 23 (`runs/test_conditions_part24.txt`). Confirmed.
+- **Worlds:** W1–W10 are identical to part 23 (`arc_agent/runs/test_conditions_part24.txt`). Confirmed.
 - **25 games, fast setting:** the first run gave 0 levels. Its search was bounded by wall-clock time, so with 16 games
   in parallel each search had less compute and results depended on machine load. That is an apparatus flaw: the
   harness now bounds the search by nodes (400 in the fast setting, 3000 in full runs), and two repeat runs of lp85 and
@@ -1382,7 +1389,7 @@ episodes, so the right model was chosen at the decisive step. No code targets me
 
 # Part 25: real attention in the columns (pre-registered 2026-10-28, before the code)
 
-**Why (the user):** implement the attention of `docs/ATTENTION.md`. It is the transformer's mechanism with its learning
+**Why (the user):** implement the attention of `arc_agent/docs/ATTENTION.md`. It is the transformer's mechanism with its learning
 written as a local rule, and it replaces the track-record weighting and the conjunction cases.
 
 **The change (`arc_agent/column.py`, `ConditionalOps`):** for each (column, action):
@@ -1426,7 +1433,7 @@ written as a local rule, and it replaces the track-record weighting and the conj
 
 **Main results:**
 
-| world (3 seeds; `runs/test_conditions_part25.txt`) | part 24 | part 25 |
+| world (3 seeds; `arc_agent/runs/test_conditions_part25.txt`) | part 24 | part 25 |
 |---|---|---|
 | W1 walls | 0.993 | 0.968 |
 | W2 inverted | 0.975 | 0.862 |
@@ -1439,9 +1446,9 @@ written as a local rule, and it replaces the track-record weighting and the conj
 | W9 ladders | 0.988 | 0.977 |
 | W10 sliding | 0.962 | 0.982 |
 
-- **The 25 games, fast setting** (`runs/p25_fast_cv.json`): 2 levels, the same as part 24 (ar25 L1 in 23 actions, ft09
+- **The 25 games, fast setting** (`arc_agent/runs/p25_fast_cv.json`): 2 levels, the same as part 24 (ar25 L1 in 23 actions, ft09
   L1 in 101); mean 0.0015.
-- **The PFC's meta-learning test** (`runs/test_pfc_part25.txt`): PERSIST's errors per episode go from 0.53 (episodes
+- **The PFC's meta-learning test** (`arc_agent/runs/test_pfc_part25.txt`): PERSIST's errors per episode go from 0.53 (episodes
   1–3) to 0.67 (episodes 10–12), a ratio of 1.25 (part 24b: 0.25). Its attention stays on the unconditional expert.
 
 **Verdicts:**
@@ -1454,7 +1461,7 @@ written as a local rule, and it replaces the track-record weighting and the conj
 - **E5 confirmed:** ten worlds in 94 s; 25 games in 133 s.
 - **Not pre-registered, but a regression:** the PFC's learning to learn (part 24b) is lost.
 
-**Why, from traces and from variants of the feel-experiment** (`structure/claude/attention_feel_variants.py`):
+**Why, from traces and from variants of the feel-experiment** (`legacy/structure/claude/attention_feel_variants.py`):
 1. **The step is too small for a game.** The rule moves a score by at most η(r − a) ≤ 0.5 per observation.
    - A position key starts at −log(number of position keys) ≈ −4.8 (the description-length prior of part 23).
    - An action sees about 5–10 informative events (a wall, door or ice ahead) in 300 steps.
@@ -1482,7 +1489,7 @@ written as a local rule, and it replaces the track-record weighting and the conj
 
 **What this says:** the transformer's weight learning is the right rule, and it is slow. Transformers pay for that with
 enormous training sets. Their sample-efficient learning happens in context, in the forward pass: attention over earlier
-tokens of the context window, with no weight change. Section 7 of `docs/ATTENTION.md` sets out that version for a
+tokens of the context window, with no weight change. Section 7 of `arc_agent/docs/ATTENTION.md` sets out that version for a
 column, as a proposal for the user to vet; it is not built.
 
 **State of the code:** this branch has part 25's attention. It is worse than part 24 on the worlds and loses the PFC's
@@ -1490,7 +1497,7 @@ meta-learning; the games are unchanged. Part 24's version is commit 3923404.
 
 # Part 26: in-context attention in the columns (pre-registered 2026-10-28, before the code)
 
-**Why (the user):** build the in-context version of `docs/ATTENTION.md` section 7. Part 25 learned attention in the
+**Why (the user):** build the in-context version of `arc_agent/docs/ATTENTION.md` section 7. Part 25 learned attention in the
 weights, which needs more data than a game gives; a transformer's fast learning happens in context.
 
 **The change (`arc_agent/column.py`, `ConditionalOps`), for each (column, action):**
@@ -1510,8 +1517,8 @@ weights, which needs more data than a game gives; a transformer's fast learning 
 - **Endpoints:** θ = 0 is part 20's track record; θ_f very large is part 21's conjunction cases on feature f.
 - **Deleted:** part 25's W, heads, biases and EM tables.
 
-**First, a feel-experiment** (`structure/claude/attention_incontext_feel.py`): the synthetic switch-door task of
-`docs/ATTENTION.md` section 6 (5 seeds), with a distractor situation feature (a random number 0–9 each step) added
+**First, a feel-experiment** (`legacy/structure/claude/attention_incontext_feel.py`): the synthetic switch-door task of
+`arc_agent/docs/ATTENTION.md` section 6 (5 seeds), with a distractor situation feature (a random number 0–9 each step) added
 beside the switch.
 
 | # | prediction |
@@ -1526,7 +1533,7 @@ beside the switch.
 
 ## Part 26 results (2026-10-28)
 
-**The feel-experiment** (`runs/attention_incontext_feel.txt`; 5 seeds; a few seconds):
+**The feel-experiment** (`legacy/runs/attention_incontext_feel.txt`; 5 seeds; a few seconds):
 - The analytic gradient of θ matched finite differences to 6 decimals (the apparatus check). θ = 0 reproduced the
   track record exactly (0.896 / 0.898).
 
@@ -1556,7 +1563,7 @@ beside the switch.
 
 **Main results:**
 
-| world (3 seeds; `runs/test_conditions_part26.txt`) | part 24 | part 25 | part 26 |
+| world (3 seeds; `arc_agent/runs/test_conditions_part26.txt`) | part 24 | part 25 | part 26 |
 |---|---|---|---|
 | W1 walls | 0.993 | 0.968 | 0.993 |
 | W2 inverted | 0.975 | 0.862 | 0.975 |
@@ -1572,10 +1579,10 @@ beside the switch.
 
 - **The attended keys are now readable:** for W1, W4 and W5 the most attended key of each direction is the cell
   ahead (for "up", ("at", 0, −3)).
-- **The 25 games, fast setting** (`runs/p26_fast_cv.json`; 122 s): 2 levels, the same as parts 24 and 25 (ar25 L1 in
+- **The 25 games, fast setting** (`arc_agent/runs/p26_fast_cv.json`; 122 s): 2 levels, the same as parts 24 and 25 (ar25 L1 in
   23 actions, ft09 L1 in 101); mean 0.0015; no crashes. In the games the most attended key is the unconditional one
   (610 of 807 records).
-- **The PFC's meta-learning test** (`runs/test_pfc_part26.txt`):
+- **The PFC's meta-learning test** (`arc_agent/runs/test_pfc_part26.txt`):
   - PERSIST's errors per episode fall from 0.53 (episodes 1–3) to 0.00 (episodes 10–12): ratio 0.00 (part 24b: 0.25).
     RESET: 0.67 → 0.53.
   - The PFC learned θ = 3.5 for its own state. Where the region has no model yet, it attends to the region's size
@@ -1602,7 +1609,7 @@ beside the switch.
 
 **Why:**
 - **The user:** build the competing situation features, in the agent.
-- **What it fixes:** in `docs/HIDDEN_STATE.md` (sections 7–8), part 26's product similarity (every situation feature's
+- **What it fixes:** in `arc_agent/docs/HIDDEN_STATE.md` (sections 7–8), part 26's product similarity (every situation feature's
   θ multiplies every episode's weight down) either let noise erase the memory or, with a prior, ignored rare but
   decisive features.
 - **The hidden-state columns:** they move from the experiment scripts into the agent as ordinary `Column`s.
@@ -1680,7 +1687,7 @@ beside the switch.
 4. **The harness at first scored W14's follower only when it was planned with.** Without delay columns it is driven
    by its clock, so only the avatar was scored (0.989). Every active block is now scored, as pre-registered.
 
-**Main results** (3 seeds; `runs/test_conditions_part27*.json`, `runs/test_conditions_part26_hidden_worlds.txt`):
+**Main results** (3 seeds; `arc_agent/runs/test_conditions_part27*.json`, `arc_agent/runs/test_conditions_part26_hidden_worlds.txt`):
 
 | world | part 26 | part 27, no hidden-state area | part 27 in full |
 |---|---|---|---|
@@ -1702,7 +1709,7 @@ beside the switch.
 - **Which dimension leads:** on W11–W13 the graph column is the most weighted dimension for at least 3 of the 4 moves
   in 7 of 9 runs. On W14 the follower reads the 3-step delay column as its attended key, in every action and seed.
 - **The PFC's meta-learning test:** PERSIST 0.53 → 0.60 (ratio 1.12); RESET 0.67 → 0.53.
-- **The 25 games** (`runs/p27_fast_cv.json`): 2 levels (ar25 L1 in 23, ft09 L1 in 101), mean 0.0015; no crashes;
+- **The 25 games** (`arc_agent/runs/p27_fast_cv.json`): 2 levels (ar25 L1 in 23, ft09 L1 in 101), mean 0.0015; no crashes;
   115 s.
 - **Cost:** 14 worlds × 3 seeds in 167 s.
 
@@ -1757,7 +1764,7 @@ feature.
 **Apparatus:** each head's analytic θ gradient matches finite differences (6 decimals). On a toy switch-door stream,
 the switch head's θ reached 12 and its head led the weights (−29 against −95 to −97 for the others).
 
-| world (3 seeds; `runs/test_conditions_part27b.json`) | part 26 | part 27 | part 27b |
+| world (3 seeds; `arc_agent/runs/test_conditions_part27b.json`) | part 26 | part 27 | part 27b |
 |---|---|---|---|
 | W1 walls | 0.993 | 0.992 | 0.992 |
 | W2 inverted | 0.975 | 0.978 | 0.977 |
@@ -1774,8 +1781,8 @@ the switch head's θ reached 12 and its head led the weights (−29 against −9
 | W13 mode | 0.953 | 0.971 | 0.969 |
 | W14 replay | 0.229 | 0.955 | 0.952 |
 
-- **The PFC's meta-learning test** (`runs/test_pfc_part27b.txt`): PERSIST 0.53 → 0.00 (ratio 0.00); RESET 0.67 → 0.53.
-- **The 25 games** (`runs/p27b_fast_cv.json`): 2 levels (ar25 L1 in 23, ft09 L1 in 101), mean 0.0015; no crashes;
+- **The PFC's meta-learning test** (`arc_agent/runs/test_pfc_part27b.txt`): PERSIST 0.53 → 0.00 (ratio 0.00); RESET 0.67 → 0.53.
+- **The 25 games** (`arc_agent/runs/p27b_fast_cv.json`): 2 levels (ar25 L1 in 23, ft09 L1 in 101), mean 0.0015; no crashes;
   128 s.
 - **Cost:** 14 worlds × 3 seeds in 227 s.
 

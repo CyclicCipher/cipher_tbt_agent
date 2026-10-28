@@ -4,7 +4,7 @@ saying so, including by state that is not on the screen?
 The hand-built worlds of worlds.py. W1-W10: a 300-action random walk, accuracy over actions 101-300. W11-W14 (hidden
 state): 1,000 actions, accuracy over actions 501-1,000. Before each action the brain predicts the avatar's next position
 (W14: both blocks' next positions; a hit needs both right). Seeds and worlds run in parallel.
-    python -m arc_agent.test_conditions [--seeds 3] [--worlds W1,W11] [--no-hidden] [--uncond] [--out runs/x.json]
+    python -m arc_agent.test_conditions [--seeds 3] [--worlds W1,W11] [--no-hidden] [--uncond] [--out arc_agent/runs/x.json]
 (from experiments/symbolics, with venv312)
 """
 import json
@@ -40,7 +40,7 @@ def run(name, conditional=True, seed=0, hidden=True):
     w = World(name, rng)
     if "hidden" in Brain.__init__.__code__.co_varnames:
         brain = Brain(conditional=conditional, hidden=hidden)
-    else:                                               # an agent from before part 27, as a control arm
+    else:                                               # this agent at a commit before part 27, as a control arm
         brain = Brain(conditional=conditional)
     others = brain.others if hasattr(brain, 'others') else (lambda: {o.cid: o.state for o in brain.planning()})
     g = w.frame()

@@ -1,7 +1,7 @@
 # Columns as models over coordinate systems: a design note for the ARC agent
 
 **Status:** a thesis and a plan, 2026-10-27. Nothing in `src/tbt/` has changed on its basis. The evidence so far is in
-`../../docs/COORDINATES.md` (parts 1–9), and the next experiments are listed at the end.
+`../../legacy/docs/COORDINATES.md` (parts 1–9), and the next experiments are listed at the end.
 
 ## 1. The thesis (the user's, 2026-10-27)
 
@@ -18,7 +18,7 @@ how should an object be defined, learned and stored? The proposal is that the qu
 ## 2. Why: what failed, and what worked
 
 **What failed:** the two agents made opposite mistakes about objects.
-- **The symbolic agent (`../gemini/`, Gemini's) dodged the question by making colour the object.**
+- **The symbolic agent (`legacy/gemini_tbt_agent/`, Gemini's) dodged the question by making colour the object.**
   - `brain.py` builds 16 columns, one per colour.
   - Each column learns, for every colour its own colour touches, whether moving into it is free, blocked or shifted.
   - All of this runs over a hand-written motor map (ACTION1 = up, and so on).
@@ -143,7 +143,7 @@ What it keeps from TBT: a repeated, general-purpose circuit, and models built ov
 
 ## 7. Experiments
 
-**Done** (`../../docs/COORDINATES.md`): parts 1–9, mapped to the thesis in §2.
+**Done** (`../../legacy/docs/COORDINATES.md`): parts 1–9, mapped to the thesis in §2.
 
 **Next:**
 1. **Part 10, the thesis in miniature:** learn the geometry from repeated colours, compute its coordinates, then
@@ -166,7 +166,7 @@ The current `src/tbt/` object machinery (segmentation, recognition, object minti
 
 ## 8. Updates
 
-**2026-10-27, part 10** (`../../docs/COORDINATES.md`):
+**2026-10-27, part 10** (`../../legacy/docs/COORDINATES.md`):
 - **F2 is supported.** Content that is a function of a quotient is predicted at unvisited cells (0.87 against
   chance 0.17), and arbitrary content is not.
 - **Two corrections to the thesis as written:**
