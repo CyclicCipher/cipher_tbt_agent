@@ -11,6 +11,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 
 A0, ETA = 0.02, 0.1
+PRIOR = 0.0                     # Occam prior on theta, in normalised units (0 here; 0.3 in hidden_state_feel2)
 STEPS, LEVEL, SEEDS, PRESS = 3000, 50, 5, 0.2
 DIRS = [(0, -1), (0, 1), (-1, 0), (1, 0)]
 POS = [(dx, dy) for dy in (-1, 0, 1) for dx in (-1, 0, 1) if (dx, dy) != (0, 0)]
@@ -83,7 +84,7 @@ class Memory:
         g, P, a = self.grad(M, vals, y)
         if len(self.Y) and len(self.theta):
             self.rms = 0.9 * self.rms + 0.1 * g ** 2
-            self.theta = np.clip(self.theta + ETA * g / (np.sqrt(self.rms) + 1e-8), 0.0, 20.0)
+            self.theta = np.clip(self.theta + ETA * (g / (np.sqrt(self.rms) + 1e-8) - PRIOR), 0.0, 20.0)
         self.V = np.vstack([self.V, vals])
         self.Y = np.append(self.Y, y)
         self.L = np.vstack([self.L, np.log(P)])
