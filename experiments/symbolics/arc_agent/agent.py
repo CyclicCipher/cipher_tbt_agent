@@ -44,7 +44,9 @@ def kind_boost(draws):
 
 
 def library_specs(specs):
-    return [dict(s, theta=np.asarray(s["theta"], float), free=np.asarray(s["free"], bool)) for s in specs or []]
+    """Formula templates as the function finder takes them (from JSON, factors arrive as lists: make them tuples)."""
+    return [dict(s, theta=np.asarray(s["theta"], float), free=np.asarray(s["free"], bool),
+                 factors=tuple(tuple(f) for f in s["factors"])) for s in specs or []]
 
 
 def region_size(grid, x, y, cap=200):
