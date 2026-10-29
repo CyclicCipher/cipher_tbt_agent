@@ -14,6 +14,10 @@ replaying these memories into the cortex's frame.
 - **CA1:** maps a recalled place back into the cortex's places. It is not built yet, because nothing needs it.
 
 Each episode starts at the same place, its origin (P1). The bus says, for each input, whether it moves the place.
+
+**The end of an episode is observed (part 6):** on each sensor that gave nothing at the episode's last place, what came
+next there was the end, one fixed SDR (`end`), as every episode's origin is one fixed place. Without it, a place where
+episodes only ended has no recorded future, and so agrees with any place (P3's full form would merge them).
 """
 import numpy as np
 
@@ -26,17 +30,29 @@ class Hippocampus:
         self.start = SDR.random(d, w, np.random.default_rng((seed, 31)))
         self.followed = Associations(d, theta=w // 2)   # CA3: place -> (sensor, input) that came next
         self.transitions = Associations(d, theta=w // 2)   # CA3: next place -> (place, input)
+        self.end = SDR.random(d, w, np.random.default_rng((seed, 37)))
         self.place = self.start
+        self.sensors, self.heard = set(), set()         # the content sensors; those heard at the current place
 
     def begin(self):
-        self.place = self.start
+        self.place, self.heard = self.start, set()
+
+    def finish(self, learn=True):
+        """The episode ended: on each content sensor not heard at this place, the end came next."""
+        if learn:
+            for s in sorted(self.sensors - self.heard):
+                self.followed.store(self.place, (s, self.end))
 
     def step(self, x, sensor="symbols", moves=True, learn=True, content=True):
         """Take input x: remember it as content (if learning, and unless it is an efference copy) and, if it moves
         the place, move to the situation's place."""
         if learn and content:
             self.followed.store(self.place, (sensor, x))
+        if content:
+            self.sensors.add(sensor)
+            self.heard.add(sensor)
         if moves:
+            self.heard = set()
             nxt = self.dg(self.place, x)
             if learn:
                 self.transitions.store(nxt, (self.place, x))

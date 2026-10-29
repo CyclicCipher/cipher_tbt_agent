@@ -24,6 +24,15 @@ where the moves allow them.
   - A pooled displacement fills in moves never seen: from u, input y leads to d(x, y) applied to where x leads.
   - A displacement must stay a one-to-one map. An instance that would send one place to two places (or two places to
     one) refutes its pair, which is then not used. A pooling that would do so is not made.
+- **Generalize, then split (part 6).**
+  - **Per context:** once a pair is refuted, every pair is taken per context, a place's context being the input that
+    led into it. Across contexts, two displacements pool only where they agree on two places.
+  - **Constant moves:** an input that led from every place of a context to one place (the absorbing "× 0") leads there
+    from all of them, and names no displacement.
+  - **Shift classes:** where one shift per input contradicts the moves, phases are grouped into classes, each with its
+    own shifts. A phase that fits no class is left out of the coordinate.
+  - **The relation:** two classes are related by an automorphism x -> k x of the coordinate group, found from the
+    inputs both have seen and applied to the rest. For "+" and "−", k = −1.
 - **One coordinate for every place, and phases (part 5).** Each moving input is one shift of a coordinate shared
   by every place, wherever it is made (P4's regularity across the frame); the start's coordinate is found. Naming (the
   determined symbol that comes next names the place's position) is tested per input and accepted only if consistent;
@@ -53,7 +62,7 @@ table, in the order first met), so the rules run as array operations. The frame 
 - **Each component is checked for one-to-one.** A component with a conflict runs the sequential rule, instance by
   instance, so the result is the sequential algorithm's wherever the data is consistent.
 """
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -86,12 +95,15 @@ class Frame:
     declined: list = field(default_factory=list)        # [(orbit size, why no coordinates)]
     factored: object = None                             # part 5: a Factored, or None
     unfactored: str = None                              # why not, if not
+    split: int = 0                                      # part 6: the pairs P4 took per context (0: none refuted)
 
 
-def consolidate(transitions, contents, start, regularity=True, coordinates=None, factoring=True):
+def consolidate(transitions, contents, start, regularity=True, coordinates=None, factoring=True, end=None,
+                relate=True):
     """A Frame from the hippocampus's replay: transitions [(place, input, next place, times seen)] and contents
     [(place, sensor, input, times seen)], of episodes that start at start. coordinates = (d, w, seed), or None;
-    factoring: part 5's (phase, coordinate) factorization, where there are coordinates."""
+    factoring: part 5's (phase, coordinate) factorization, where there are coordinates; end: the hippocampus's SDR for
+    an episode's end, as content; relate: part 6's relation between shift classes."""
     places = same_future(transitions, contents)
     pid, P, xid, X = {}, [], {}, []
 
@@ -122,16 +134,20 @@ def consolidate(transitions, contents, start, regularity=True, coordinates=None,
     root = same_place(move, cont)                       # P3's full form
     if any(r != u for u, r in enumerate(root)):
         move, cont, P, places = _relabel(root, move, cont, P, places)
-    inferred, maps = regular(move) if regularity and U else (0, [])
+    ctx = contexts(move)
+    inferred, maps, split = regular(move, ctx) if regularity and U else (0, [], frozenset())
+    if regularity and U and split:                      # part 6: absorbing elements, where contexts differ
+        inferred += constant(move, ctx)
     us, xs = np.nonzero(move >= 0)
     moves = [(P[u], X[x], P[move[u, x]]) for u, x in zip(us.tolist(), xs.tolist())]
     content = [(P[u], s, X[x], int(n)) for u in range(len(P)) for s, c in cont[u].items() for x, n in c.items()]
-    disp = [{P[a]: P[b] for a, b in m} for m in maps]
+    disp = [{P[a]: P[b] for a, b in m} for _, m in maps]
     coords, declined, systems = coordinate(move, maps, P, X, coordinates) if coordinates and U else ([], [], [])
     fac, why = None, None
     if factoring and systems and places.get(start, start) in pid:
-        fac, why = factor(move, cont, pid[places.get(start, start)], P, X, systems)
-    return Frame(places.get(start, start), moves, content, places, inferred, disp, coords, declined, fac, why)
+        fac, why = factor(move, cont, pid[places.get(start, start)], P, X, systems, xid.get(end, -1), relate)
+    return Frame(places.get(start, start), moves, content, places, inferred, disp, coords, declined, fac, why,
+                 len(split))
 
 
 def same_future(transitions, contents=()):
@@ -184,17 +200,20 @@ class Pool:
     """P4's bookkeeping over integer place ids. Each ordered pair of inputs (x, z), as the integer x * nX + z, belongs
     to a displacement class. A class holds its map in both directions (fwd, bwd: -1 where unknown) and is refuted
     (bad) when it would stop being one-to-one. owner[s, t] names a class that takes s to t, so a second class claiming
-    the same place pair is pooled with it. Pooling relabels in place, so the class ids in `pair` and `owner` are
-    always live."""
+    the same place pair is pooled with it. Pooling links a class to the one it went into (`to`); ids in `pair` and
+    `owner` are resolved through those links when read (`live`), so a pooling costs nothing however many labels there
+    are."""
 
-    def __init__(self, nP, nX):
+    def __init__(self, nP, nX, nlabels=None):
         self.nP, self.nX, self.n = nP, nX, 0
-        self.pair = np.full(nX * nX, -1, np.int64)
+        self.cctx = {}                                  # class -> the contexts of its labels (part 6)
+        self.pair = np.full(nlabels or nX * nX, -1, np.int64)   # a label (a pair, maybe in a context) -> its class
         self.owner = np.full((nP, nP), -1, np.int64)
         self.fwd = np.full((0, nP), -1, np.int64)
         self.bwd = np.full((0, nP), -1, np.int64)
         self.bad = np.zeros(0, bool)
         self.to = np.zeros(0, np.int64)                 # a pooled class -> the class it went into
+        self.refused = set()                            # live classes whose maps conflict (maps only grow: for good)
 
     def new(self, k):
         if self.n + k > self.fwd.shape[0]:
@@ -214,14 +233,43 @@ class Pool:
             c = self.to[c]
         return c
 
+    def live(self, c):
+        """The live class of each id in c (-1 stays -1)."""
+        c = np.asarray(c, np.int64)
+        out = c.copy()
+        ok = out >= 0
+        if not ok.any():                                # no class (there may be none yet)
+            return out
+        while True:
+            nxt = np.where(ok, self.to[np.where(ok, out, 0)], -1)
+            if np.array_equal(nxt, out):
+                return out
+            out = nxt
+
+    def context(self, labels):
+        """The context of each label: -2 for a pair taken in every context, else the context it was split by."""
+        base = self.nX * self.nX
+        return np.where(labels < base, -2, labels // base - 2)
+
     def seed(self, pairs, S, T):
-        """The instances found before any filling: classes are the connected components of pairs and place pairs; a
-        component that is not one-to-one runs the sequential rule, instance by instance, in order."""
+        """The instances found before any filling, one context at a time: classes are the connected components of
+        pairs and place pairs, and a component that is not one-to-one runs the sequential rule, instance by instance.
+        Then classes of different contexts that claim the same place pair are offered for pooling."""
+        ctx = self.context(pairs)
+        clashes = []
+        for k in np.unique(ctx).tolist():
+            m = ctx == k
+            clashes += self._seed(pairs[m], S[m], T[m], k)
+        for a, b in clashes:
+            self.pool(a, b)
+
+    def _seed(self, pairs, S, T, k):
         nP = self.nP
         up, pinv = np.unique(pairs, return_inverse=True)
         ust, sinv = np.unique(S * nP + T, return_inverse=True)
         n1, n = up.size, up.size + ust.size
-        g = coo_matrix((np.ones(pinv.size, np.int8), (pinv, n1 + sinv)), shape=(n, n))
+        moving = S != T                                 # a fixed point (s -> s) identifies no displacement (part 6)
+        g = coo_matrix((np.ones(int(moving.sum()), np.int8), (pinv[moving], n1 + sinv[moving])), shape=(n, n))
         _, lab = connected_components(g, directed=False)
         comp = lab[pinv]
         trip = np.unique((comp * nP + S) * nP + T)
@@ -234,23 +282,33 @@ class Pool:
         comps = np.unique(tc[good])
         cid = np.full(badc.size, -1, np.int64)
         cid[comps] = self.new(comps.size)
+        for c in cid[comps].tolist():
+            self.cctx[c] = frozenset([k])
         c = cid[tc[good]]
         self.fwd[c, ts[good]] = tt[good]
         self.bwd[c, tt[good]] = ts[good]
-        self.owner[ts[good], tt[good]] = c
+        mv = ts[good] != tt[good]
+        o = self.live(self.owner[ts[good][mv], tt[good][mv]])
+        mine = o < 0                                    # a place pair another context's class already claims: a clash
+        self.owner[ts[good][mv][mine], tt[good][mv][mine]] = c[mv][mine]
+        clashes = list(set(zip(c[mv][~mine].tolist(), o[~mine].tolist())))
         pc = lab[:n1]
         ok = ~badc[pc]
         self.pair[up[ok]] = cid[pc[ok]]
         for i in np.flatnonzero(badc[comp]):
             self.add(pairs[i:i + 1], S[i:i + 1], T[i:i + 1])
+        return clashes
 
     def add(self, pairs, S, T):
         """Instances (pair: s -> t), taken together. A class they would make not one-to-one is refuted."""
-        c = self.pair[pairs]
+        c = self.live(self.pair[pairs])
         if (c < 0).any():                               # pairs never seen: one new class each
             new = np.unique(pairs[c < 0])
-            self.pair[new] = self.new(new.size)
-            c = self.pair[pairs]
+            ids = self.new(new.size)
+            self.pair[new] = ids
+            for i, k in zip(ids.tolist(), self.context(new).tolist()):
+                self.cctx[i] = frozenset([k])
+            c = self.live(self.pair[pairs])
         keep = ~self.bad[c]
         c, S, T = c[keep], S[keep], T[keep]
         if c.size == 0:
@@ -264,71 +322,158 @@ class Pool:
             c, S, T = c[keep], S[keep], T[keep]
         self.fwd[c, S] = T
         self.bwd[c, T] = S
-        o = self.owner[S, T]
+        mv = S != T                                     # fixed points are part of the map, not evidence of identity
+        c, S, T = c[mv], S[mv], T[mv]
+        if c.size == 0:
+            return
+        o = self.live(self.owner[S, T])
         free = np.flatnonzero(o < 0)
         if free.size:                                   # the first claim of a place pair owns it
             _, first = np.unique(S[free] * self.nP + T[free], return_index=True)
             fi = free[first]
             self.owner[S[fi], T[fi]] = c[fi]
-            o = self.owner[S, T]
+            o = self.live(self.owner[S, T])
         for a, b in set(zip(c[o != c].tolist(), o[o != c].tolist())):
             self.pool(a, b)
 
     def pool(self, a, b):
-        """Make two classes one, unless that would break one-to-one (then they are different displacements)."""
+        """Make two classes one, unless that would break one-to-one (then they are different displacements). Within a
+        context one shared place pair suffices (P4: one place determines a displacement). Across contexts, which may
+        carry different groups, two displacements are pooled only where they agree on at least two places: one
+        agreement can be a coincidence (a translation and a multiplication meet at one place)."""
         a, b = self.find(a), self.find(b)
-        if a == b or self.bad[a] or self.bad[b]:
+        if a == b or self.bad[a] or self.bad[b] or (min(a, b), max(a, b)) in self.refused:
             return
         fa, fb, ba, bb = self.fwd[a], self.fwd[b], self.bwd[a], self.bwd[b]
         if ((fa >= 0) & (fb >= 0) & (fa != fb)).any() or ((ba >= 0) & (bb >= 0) & (ba != bb)).any():
+            self.refused.add((min(a, b), max(a, b)))
             return
+        ca, cb = self.cctx.get(a, frozenset()), self.cctx.get(b, frozenset())
+        if not (ca & cb) and ((fa >= 0) & (fb >= 0) & (fa == fb)).sum() < 2:
+            return
+        self.cctx[a] = ca | cb
         self.fwd[a] = np.where(fa >= 0, fa, fb)
         self.bwd[a] = np.where(ba >= 0, ba, bb)
         self.to[b] = a
-        self.pair[self.pair == b] = a
-        self.owner[self.owner == b] = a
 
     def apply(self, c, s):
         """Where class c takes place s, or -1 if unknown or refuted."""
-        return -1 if c < 0 or self.bad[c] else int(self.fwd[c, s])
+        if c < 0:
+            return -1
+        c = self.find(c)
+        return -1 if self.bad[c] else int(self.fwd[c, s])
 
-    def maps(self):
+    def maps(self, family=lambda label: None):
+        """Each live class's map as (s, t) pairs, with its family: the set of contexts its labels carry."""
+        fam = defaultdict(set)
+        labels = np.flatnonzero(self.pair >= 0)
+        for label, c in zip(labels.tolist(), self.live(self.pair[labels]).tolist()):
+            fam[c].add(family(label))
         out = []
         for c in range(self.n):
             if self.to[c] == c and not self.bad[c]:
                 s = np.flatnonzero(self.fwd[c] >= 0)
                 if s.size:
-                    out.append(list(zip(s.tolist(), self.fwd[c, s].tolist())))
+                    out.append((frozenset(fam[c]), list(zip(s.tolist(), self.fwd[c, s].tolist()))))
         return out
 
 
-def regular(move):
+def contexts(move):
+    """Each place's context: the one input that leads into it, or -1 (none, or several)."""
+    ctx = np.full(move.shape[0], -1, np.int64)
+    us, xs = np.nonzero(move >= 0)
+    seen = {}
+    for x, v in zip(xs.tolist(), move[us, xs].tolist()):
+        seen.setdefault(v, set()).add(x)
+    for v, ins in seen.items():
+        if len(ins) == 1:
+            ctx[v] = ins.pop()
+    return ctx
+
+
+def regular(move, ctx=None):
     """P4 on the frame's move table (place, input -> place; -1 unknown), in place: fill in the moves the pooled
-    displacements imply, until nothing changes. Returns (moves inferred, the displacements' maps as (s, t) lists)."""
+    displacements imply, until nothing changes. Generalize, then split (part 6): a pair refuted as one displacement
+    is tried again as one displacement per context (the input that led to the place). The refutation says the
+    context matters, so every pair is then taken per context; displacements that agree across contexts still pool
+    through the place pairs they share. Once split, an input whose move is constant in a context (`constants`)
+    names no displacement there: where it leads is one place whatever the place it was made from, so a pair with it
+    would map one place to many, or many to one. Returns (moves inferred, the displacements' maps as (family, (s, t)
+    pairs), the pairs split)."""
+    nX = move.shape[1]
+    pairs, S, T = _instances(move)
+    const = constants(move, ctx) if ctx is not None else None
+    if ctx is not None and pairs.size and (_mismatch(pairs * move.shape[0] + S, T) |
+                                            _mismatch(pairs * move.shape[0] + T, S)).any():
+        # a pair whose own instances are not one-to-one is refuted whatever else is pooled: split at once
+        inferred, pool, split = _regular(move, ctx, frozenset(np.unique(pairs).tolist()), const)
+    else:
+        before = move.copy()
+        inferred, pool, split = _regular(move, ctx, frozenset())
+        labels = np.flatnonzero(pool.pair >= 0)
+        if ctx is not None and pool.bad[pool.live(pool.pair[labels])].any():   # every pair is tried per context
+            move[:] = before
+            inferred, pool, split = _regular(move, ctx, frozenset(labels.tolist()), const)
+    family = lambda label: None if label < nX * nX else int(label // (nX * nX)) - 2
+    return inferred, pool.maps(family), split
+
+
+def _instances(move, where=False):
+    """Every ordered pair of inputs seen at a place, as (pair x * nX + z, where x leads, where z leads[, the place])."""
+    nX = move.shape[1]
+    us, xs = np.nonzero(move >= 0)
+    cnt = np.bincount(us, minlength=move.shape[0])
+    first = np.concatenate([[0], np.cumsum(cnt)[:-1]])
+    out = [], [], [], []
+    for k in np.unique(cnt[cnt >= 2]).tolist():         # places with k inputs seen, all at once
+        rows = np.flatnonzero(cnt == k)
+        idx = first[rows][:, None] + np.arange(k)[None, :]
+        X = xs[idx]
+        i, j = np.nonzero(~np.eye(k, dtype=bool))
+        out[0].append((X[:, i] * nX + X[:, j]).ravel())
+        out[1].append(move[rows[:, None], X[:, i]].ravel())
+        out[2].append(move[rows[:, None], X[:, j]].ravel())
+        out[3].append(np.repeat(rows, i.size))
+    if not out[0]:
+        e = np.zeros(0, np.int64)
+        return (e, e, e, e) if where else (e, e, e)
+    res = tuple(np.concatenate(a) for a in out)
+    o = np.argsort(res[3], kind="stable")               # place by place, in the order a place lists them
+    res = tuple(a[o] for a in res)
+    return res if where else res[:3]
+
+
+def _regular(move, ctx, split, const=None):
     nP, nX = move.shape
-    pool = Pool(nP, nX)
-    pairs, S, T = [], [], []
-    for u in range(nP):                                 # every ordered pair of inputs seen at a place
-        xs = np.flatnonzero(move[u] >= 0)
-        if xs.size < 2:
-            continue
-        i, j = np.nonzero(~np.eye(xs.size, dtype=bool))
-        pairs.append(xs[i] * nX + xs[j])
-        S.append(move[u, xs[i]])
-        T.append(move[u, xs[j]])
-    if pairs:
-        pool.seed(np.concatenate(pairs), np.concatenate(S), np.concatenate(T))
+    base = nX * nX
+    sp = np.array(sorted(split), np.int64)
+    free = np.ones((nX + 1, nX), bool) if const is None else ~const   # [context + 1, input]: names displacements
+
+    def lab(u, pairs):                                  # a pair's label at place u: itself, or itself in u's context
+        if not sp.size:
+            return pairs
+        return np.where(np.isin(pairs, sp), base * (2 + ctx[u]) + pairs, pairs)
+
+    pool = Pool(nP, nX, base * (nX + 2) if sp.size else base)
+    pairs, S, T, U = _instances(move, True)
+    if const is not None and pairs.size:
+        k = ctx[U] + 1
+        keep = free[k, pairs // nX] & free[k, pairs % nX]
+        pairs, S, T, U = pairs[keep], S[keep], T[keep], U[keep]
+    if pairs.size:
+        pool.seed(np.where(np.isin(pairs, sp), base * (2 + ctx[U]) + pairs, pairs) if sp.size else pairs, S, T)
     inferred, changed, ar = 0, True, np.arange(nX)
     while changed:
         changed = False
         for u in range(nP):
-            xs = np.flatnonzero(move[u] >= 0)
+            ok = free[ctx[u] + 1] if ctx is not None else free[0]
+            xs = np.flatnonzero((move[u] >= 0) & ok)
             if xs.size == 0:
                 continue
-            cand = np.flatnonzero((pool.pair[xs[:, None] * nX + ar[None, :]] >= 0).any(0) & (move[u] < 0))
+            cand = np.flatnonzero((pool.pair[lab(u, xs[:, None] * nX + ar[None, :])] >= 0).any(0) & (move[u] < 0) & ok)
             for y in cand.tolist():
                 t = -1
-                for c, s in zip(pool.pair[xs * nX + y].tolist(), move[u, xs].tolist()):
+                for c, s in zip(pool.live(pool.pair[lab(u, xs * nX + y)]).tolist(), move[u, xs].tolist()):
                     t = pool.apply(c, s)
                     if t >= 0:
                         break
@@ -338,10 +483,38 @@ def regular(move):
                 inferred += 1
                 changed = True
                 tt = np.full(xs.size, t, np.int64)
-                pool.add(xs * nX + y, move[u, xs], tt)    # the new move's pairs with the moves known here
-                pool.add(y * nX + xs, tt, move[u, xs])
+                pool.add(lab(u, xs * nX + y), move[u, xs], tt)    # the new move's pairs with the moves known here
+                pool.add(lab(u, y * nX + xs), tt, move[u, xs])
                 xs = np.append(xs, y)
-    return inferred, pool.maps()
+    return inferred, pool, split
+
+
+def constants(move, ctx):
+    """[context + 1, input]: True where the input's move is constant in the context (part 6): from every place of the
+    context where it was seen (at least 2), it led to the same place. Context -1 (none, or several) has none."""
+    nX = move.shape[1]
+    out = np.zeros((nX + 1, nX), bool)
+    for k in sorted(set(ctx.tolist()) - {-1}):
+        M = move[ctx == k]
+        seen = M >= 0
+        hi = M.max(0)
+        lo = np.where(seen, M, np.iinfo(np.int64).max).min(0)
+        out[k + 1] = (seen.sum(0) >= 2) & (lo == hi)
+    return out
+
+
+def constant(move, ctx):
+    """Constant moves (part 6): an input that, from every place of one context where it was seen (at least 2), led to
+    the same place, leads there from every place of that context. Returns the moves filled in."""
+    filled = 0
+    const = constants(move, ctx)
+    for k, y in zip(*np.nonzero(const)):
+        U = np.flatnonzero(ctx == k - 1)
+        seen = move[U, y]
+        missing = U[seen < 0]
+        move[missing, y] = seen[seen >= 0][0]
+        filled += missing.size
+    return filled
 
 
 # ---- P3's full form ------------------------------------------------------------------------------------------------
@@ -454,34 +627,41 @@ def coordinate(move, maps, P, X, cfg):
     one code: the first one's characters, carried to the others by its generators' steps."""
     d, w, seed = cfg
     nP, nX = move.shape
-    gens = []                                           # (input id or None, permutation on its complete cycles)
+    unsplit = frozenset([None])
+    gens = []                                           # (input id or None, permutation on its complete cycles, family)
     for x in range(nX):
         arr = _cyclic(move[:, x])
         if (arr >= 0).any():
-            gens.append((x, arr))
-    for m in maps:
+            gens.append((x, arr, unsplit))
+    for fam, m in maps:
         arr = np.full(nP, -1, np.int64)
         arr[[a for a, _ in m]] = [b for _, b in m]
         arr = _cyclic(arr)
         if (arr >= 0).any():
-            gens.append((None, arr))
+            gens.append((None, arr, fam))
     if not gens:
         return [], [(0, "no move permutes a set of places")], []
-    rows = np.concatenate([np.flatnonzero(arr >= 0) for _, arr in gens])
-    cols = np.concatenate([arr[arr >= 0] for _, arr in gens])
-    g = coo_matrix((np.ones(rows.size, np.int8), (rows, cols)), shape=(nP, nP))
-    _, lab = connected_components(g, directed=False)
+    orbits = []                                         # (family, its place ids), per family's own components
+    for fam in sorted({f for _, _, f in gens}, key=lambda f: (f != unsplit, sorted(map(str, f)))):
+        mine = [arr for _, arr, f in gens if f == fam]
+        rows = np.concatenate([np.flatnonzero(arr >= 0) for arr in mine])
+        cols = np.concatenate([arr[arr >= 0] for arr in mine])
+        g = coo_matrix((np.ones(rows.size, np.int8), (rows, cols)), shape=(nP, nP))
+        _, lab = connected_components(g, directed=False)
+        for label in sorted(set(lab[rows].tolist()), key=lambda l: int(np.flatnonzero(lab == l)[0])):
+            orbits.append((fam, np.flatnonzero(lab == label)))
     out, declined, systems, shared = [], [], [], {}
     rng = np.random.default_rng((seed, 606))
-    for o, label in enumerate(sorted(set(lab.tolist()), key=lambda l: int(np.flatnonzero(lab == l)[0]))):
-        O = np.flatnonzero(lab == label)
+    for o, (fam, O) in enumerate(orbits):
         n = O.size
         if n < 2:
             continue
         loc = np.full(nP, -1, np.int64)
         loc[O] = np.arange(n)
         G, gin, key = [], [], []
-        for i, (x, arr) in enumerate(gens):
+        for i, (x, arr, f) in enumerate(gens):
+            if f != fam:
+                continue
             img = arr[O]
             if (img >= 0).all() and (loc[img] >= 0).all():
                 G.append(loc[img])
@@ -608,13 +788,17 @@ class Factored:
     phase: dict                         # frame place -> its phase
     start: tuple                        # (phase, coordinate code) where every episode starts
     trans: dict                         # (phase, input) -> the phase it leads to
-    shift: dict                         # input -> its shift (a code)
+    shift: dict                         # (shift class, input) -> its shift (a code)
     coord: dict                         # frame place -> its coordinate (a code)
     content: dict                       # (phase, sensor) -> ("const", symbol) or ("named", None)
     named: dict                         # coordinate code -> the symbol whose own position it is
     naming: list                        # the inputs whose naming was accepted
-    identities: list                    # the inputs whose shift is the identity
+    identities: list                    # the inputs whose shift is the identity in every class they shift in
     phases: int
+    cls: dict = field(default_factory=dict)          # part 6: phase -> its shift class (none: left out)
+    relation: dict = field(default_factory=dict)     # (class, class) -> k per module: x -> k x takes one to the other
+    left_out: list = field(default_factory=list)     # the phases whose moves contradict every class
+    related: list = field(default_factory=list)      # [(class, input)]: shifts given by a relation, never seen
 
 
 class _Forms:
@@ -651,49 +835,70 @@ class _Forms:
         return self.add((f[0], k), (tuple(h * x for x in g[0]), {p: h * v for p, v in g[1].items()}))
 
 
-def _solve(alg, E, N, C0, inputs):
+def _solve(alg, E, N, C0, inputs, check=False):
     """One coordinate per place and one shift per input with c(v) = c(u) + d(x) for every move (u, x, v) in E, and
     c(v) = c(w) for every naming pair (v, w) in N. C0: the coordinates known (an orbit's places, as forms). Where the
     data leave something free, the solution with the most identity shifts (MDL). Returns (C, D) as vectors, or None if
-    the moves contradict each other."""
-    C, D, cons, nparam = dict(C0), {}, [], [max([p for f in C0.values() for p in f[1]], default=-1) + 1]
+    the moves contradict each other; with check, only whether they do (True or None).
+    **Propagation:** a move is looked at again whenever one of its three unknowns becomes known, so each move costs a
+    few form additions however many there are."""
+    C, D, cons = dict(C0), {}, []
+    nparam = max([p for f in C0.values() for p in f[1]], default=-1) + 1
+    at, of = defaultdict(list), defaultdict(list)       # place -> its moves (i) and naming pairs (~j); input -> its moves
+    for i, (u, x, v) in enumerate(E):
+        at[u].append(i)
+        at[v].append(i)
+        of[x].append(i)
+    for j, (v, w) in enumerate(N):
+        at[v].append(~j)
+        at[w].append(~j)
+    done, ndone = bytearray(len(E)), bytearray(len(N))  # a move (a pair) whose constraint is recorded
+    queue = deque(list(range(len(E))) + [~j for j in range(len(N))])
+    rank = {x: i for i, x in enumerate(inputs)}
 
     def settle(f):
         if not alg.zero(f):
             cons.append(f)
 
-    def sweep():
-        changed = True
-        while changed:
-            changed = False
-            for u, x, v in E:
+    while True:
+        while queue:
+            i = queue.popleft()
+            if i >= 0:
+                u, x, v = E[i]
                 cu, dx, cv = C.get(u), D.get(x), C.get(v)
                 if cu is not None and dx is not None:
                     f = alg.add(cu, dx)
                     if cv is None:
-                        C[v], changed = f, True
-                    else:
+                        C[v] = f
+                        queue.extend(at[v])
+                    elif not done[i]:
+                        done[i] = 1
                         settle(alg.add(cv, f, -1))
                 elif cu is not None and cv is not None:
-                    D[x], changed = alg.add(cv, cu, -1), True
+                    D[x] = alg.add(cv, cu, -1)
+                    queue.extend(of[x])
                 elif dx is not None and cv is not None:
-                    C[u], changed = alg.add(cv, dx, -1), True
-            for v, w in N:
+                    C[u] = alg.add(cv, dx, -1)
+                    queue.extend(at[u])
+            else:
+                v, w = N[~i]
                 cv, cw = C.get(v), C.get(w)
                 if cv is not None and cw is None:
-                    C[w], changed = cv, True
+                    C[w] = cv
+                    queue.extend(at[w])
                 elif cw is not None and cv is None:
-                    C[v], changed = cw, True
-                elif cv is not None:
+                    C[v] = cw
+                    queue.extend(at[v])
+                elif cv is not None and not ndone[~i]:
+                    ndone[~i] = 1
                     settle(alg.add(cv, cw, -1))
-
-    while True:
-        sweep()
         count = Counter(x for u, x, v in E if x not in D and (u in C or v in C))
         if not count:
             break
-        D[max(count, key=lambda x: (count[x], -inputs.index(x)))] = alg.param(nparam[0])   # a free shift
-        nparam[0] += 1
+        x = max(count, key=lambda x: (count[x], -rank[x]))   # a free shift
+        D[x] = alg.param(nparam)
+        nparam += 1
+        queue.extend(of[x])
     for f in cons:                                      # any contradiction among the moves
         if not f[1] and any(f[0]):
             return None
@@ -711,18 +916,21 @@ def _solve(alg, E, N, C0, inputs):
         cons = [h for h in (alg.subst(h, i, g) for h in cons) if not alg.zero(h)]
         if any(not h[1] and any(h[0]) for h in cons):
             return None
-    theta = _choose(alg, D, cons)
+    theta = _choose(alg, {} if check else D, cons)
     if theta is None:
         return None
+    if check:
+        return True
     ev = lambda f: tuple((c + sum(k * theta.get(p, (0,) * len(alg.per))[m] for p, k in f[1].items())) % n
                          for m, (c, n) in enumerate(zip(f[0], alg.per)))
     return {u: ev(f) for u, f in C.items()}, {x: ev(f) for x, f in D.items()}
 
 
-def _choose(alg, D, cons, limit=200000):
+def _choose(alg, D, cons, limit=2000000):
     """Values for the free parameters: those satisfying the remaining constraints with the most inputs whose shift is
     the identity, by exhaustive search over each group of parameters that occur together (MDL). None if no values
-    satisfy the constraints."""
+    satisfy the constraints. The grid has one axis per parameter; a form is evaluated only on the axes of the
+    parameters it uses, and the scores are summed once (ties: the first assignment in grid order)."""
     params = sorted({p for f in list(D.values()) + cons for p in f[1]})
     if not params:
         return {}
@@ -742,39 +950,49 @@ def _choose(alg, D, cons, limit=200000):
         groups[find(p)].append(p)
     elems = np.stack(np.meshgrid(*[np.arange(n) for n in alg.per], indexing="ij"), -1).reshape(-1, len(alg.per))
     per = np.array(alg.per, np.int64)
+    ne, nm = len(elems), len(alg.per)
     theta = {}
     for ps in groups.values():
-        if len(elems) ** len(ps) > limit:
+        m = len(ps)
+        if ne ** m > limit:
             return None
-        grid = np.stack(np.meshgrid(*[np.arange(len(elems))] * len(ps), indexing="ij"), -1).reshape(-1, len(ps))
-        vals = elems[grid]                              # (assignments, params, modules)
+        axis = {p: i for i, p in enumerate(ps)}
+        inside = lambda f: f[1] and set(f[1]) <= set(ps)
 
-        def value(f):
-            v = np.array(f[0], np.int64)[None, :].repeat(len(vals), 0)
+        def zero(f):                                    # where f is zero, on the axes of its parameters
+            v = np.array(f[0], np.int64).reshape((1,) * m + (nm,))
             for p, k in f[1].items():
-                v = v + k * vals[:, ps.index(p), :]
-            return v % per
+                sh = [1] * m + [nm]
+                sh[axis[p]] = ne
+                v = v + k * elems.reshape(sh)
+            return ((v % per) == 0).all(-1)
 
-        ok = np.ones(len(vals), bool)
+        ok = np.ones((ne,) * m, bool)
         for f in cons:
-            if f[1] and set(f[1]) <= set(ps):
-                ok &= (value(f) == 0).all(1)
+            if inside(f):
+                ok = ok & zero(f)
         if not ok.any():
             return None
-        score = np.zeros(len(vals), np.int64)
+        parts = {}                                      # the scores of the forms on the same axes, summed
         for f in D.values():
-            if f[1] and set(f[1]) <= set(ps):
-                score += (value(f) == 0).all(1)
-        best = int(np.flatnonzero(ok)[np.argmax(score[ok])])
-        theta.update({p: tuple(int(x) for x in vals[best, i]) for i, p in enumerate(ps)})
+            if inside(f):
+                key = tuple(sorted(axis[p] for p in f[1]))
+                parts[key] = parts.get(key, 0) + zero(f).astype(np.int64)
+        score = np.zeros((ne,) * m, np.int64)
+        for part in parts.values():
+            score = score + part
+        best = np.unravel_index(int(np.argmax(np.where(ok, score, -1))), (ne,) * m)
+        theta.update({p: tuple(int(x) for x in elems[best[i]]) for i, p in enumerate(ps)})
     return theta
 
 
-def factor(move, cont, start, P, X, systems):
-    """Part 5: one coordinate for every place, and phases. Returns a Factored, or None (with why) if the frame can't
-    be factored."""
+def factor(move, cont, start, P, X, systems, end=-1, relate=True):
+    """Part 5: one coordinate for every place, and phases. Part 6: where one shift per input contradicts the moves,
+    shift classes, and (relate) the relation between them. end: the input id of an episode's end, if any. Returns a
+    Factored, or None (with why) if the frame can't be factored."""
     if not systems:
         return None, "no coordinates"
+    systems = sorted(systems, key=lambda s: -len(s[0]))  # the coordinate: the system that covers the most places
     O0, ph0, modules = systems[0]
     alg = _Forms(modules.periods)
     C0 = {}
@@ -785,8 +1003,9 @@ def factor(move, cont, start, P, X, systems):
             C0[u] = alg.const(ph[i]) if k == 0 else alg.add(alg.const(ph[i]), alg.param(k - 1))
     us, xs = np.nonzero(move >= 0)
     E = [(int(u), int(x), int(move[u, x])) for u, x in zip(us, xs)]
-    out_of = set(us.tolist())                           # a place with no observed future (the episode's end) has
-    E = [(u, x, v) for u, x, v in E if v in out_of or cont[v]]   # nothing for a coordinate to predict: left out
+    out_of = set(us.tolist())                           # a place whose only observed future is the episode's end has
+    ahead = lambda v: any(x != end for c in cont[v].values() for x in c)   # nothing for a coordinate to predict
+    E = [(u, x, v) for u, x, v in E if v in out_of or ahead(v)]           # left out
     inputs = sorted({x for _, x, _ in E})
     det = {u: {s: next(iter(c)) for s, c in cont[u].items() if len(c) == 1} for u in range(len(cont))}
     own = {x: int(move[start, x]) for x in inputs if move[start, x] >= 0}
@@ -795,14 +1014,21 @@ def factor(move, cont, start, P, X, systems):
         for s, sym in det.get(v, {}).items():
             if sym in own and own[sym] != v:
                 names.setdefault(y, set()).add((v, own[sym]))
-    accepted = [y for y, pairs in names.items() if len(pairs) >= 2 and _solve(alg, E, sorted(pairs), C0, inputs)]
-    sol = _solve(alg, E, sorted(p for y in accepted for p in names[y]), C0, inputs)
+    phase, block = _phases(E, len(P), systems, modules)
+    nX = len(X)
+    cls = {ph: 0 for ph in set(phase)}                  # step 3: one class, one shift per input everywhere
+    if _solve(alg, E, [], C0, inputs, check=True) is None:
+        cls = _classes(alg, E, phase, C0, nX)           # part 6: generalize, then split by phase
+    keyed = [(u, cls[phase[u]] * nX + x, v) for u, x, v in E if phase[u] in cls]
+    keys = sorted({k for _, k, _ in keyed})
+    accepted = [y for y, pairs in names.items() if len(pairs) >= 2 and _solve(alg, keyed, sorted(pairs), C0, keys)]
+    sol = _solve(alg, keyed, sorted(p for y in accepted for p in names[y]), C0, keys)
     if sol is None:
-        accepted, sol = [], _solve(alg, E, [], C0, inputs)
+        accepted, sol = [], _solve(alg, keyed, [], C0, keys)
     if sol is None:
         return None, "the moves are not one shift each"
     Cv, Dv = sol
-    phase, block = _phases(E, len(P), systems, modules)
+    relation, related = _relate(Dv, nX, modules.periods) if relate else ({}, [])
     rep = {}
     for u in range(len(P)):
         rep.setdefault(phase[u], u)
@@ -835,9 +1061,73 @@ def factor(move, cont, start, P, X, systems):
     if start not in Cv:
         return None, "the start has no coordinate"
     zero = tuple(0 for _ in modules.periods)
+    shifts = {(k // nX, X[k % nX]): code(v) for k, v in Dv.items()}
+    nonzero = {k % nX for k, v in Dv.items() if v != zero}
+    identities = [X[x] for x in dict.fromkeys(k % nX for k in Dv) if x not in nonzero]
+    left = sorted({rep[phase[u]] for u, _, _ in E if phase[u] not in cls})
     return Factored(modules, {P[u]: ph_sdr[u] for u in range(len(P))}, (ph_sdr[start], code(Cv[start])), trans,
-                    {X[x]: code(v) for x, v in Dv.items()}, coord, content, named, [X[y] for y in accepted],
-                    [X[x] for x, v in Dv.items() if v == zero], len(set(phase))), None
+                    shifts, coord, content, named, [X[y] for y in accepted], identities, len(set(phase)),
+                    {P[rep[ph]]: k for ph, k in cls.items()}, relation, [P[u] for u in left],
+                    [(k // nX, X[k % nX]) for k in related]), None
+
+
+def _classes(alg, E, phase, C0, nX):
+    """Shift classes (part 6): the phases, largest first (by the moves made from them), each joining the first class
+    whose shifts it shares, or else starting a class of its own; a phase whose moves contradict even a class of its
+    own is left out of the coordinate. Returns {phase: class}."""
+    moves = defaultdict(list)
+    for m in E:
+        moves[phase[m[0]]].append(m)
+    cls, kept, n = {}, [], 0
+    for ph in sorted(moves, key=lambda ph: (-len(moves[ph]), ph)):
+        for k in range(n + 1):
+            trial = kept + [(u, k * nX + x, v) for u, x, v in moves[ph]]
+            if _solve(alg, trial, [], C0, sorted({x for _, x, _ in trial}), check=True):
+                cls[ph], kept, n = k, trial, max(n, k + 1)
+                break
+    return cls
+
+
+def _relate(D, nX, periods):
+    """The relation between two shift classes (part 6): one automorphism of the coordinate group, x -> k x in each
+    module (k a unit), that takes every input's shift in one class to its shift in the other, for every input seen in
+    both. Found from those, and applied to the inputs seen in only one (in place, in D: class * nX + input -> shift).
+    Where the shared inputs leave k open, an image is given only if every k left gives the same one. Returns
+    ({(class, class): k per module, where one k per module is left}, the keys it gave)."""
+    classes = sorted({k // nX for k in D})
+    relation, given = {}, []
+    for i in classes:
+        for j in classes:
+            if j <= i:
+                continue
+            shared = [x for x in range(nX) if i * nX + x in D and j * nX + x in D]
+            if not shared:
+                continue
+            ks = []
+            for m, n in enumerate(periods):
+                units = np.array([k for k in range(1, n) if np.gcd(k, n) == 1], np.int64)
+                a = np.array([D[i * nX + x][m] for x in shared], np.int64)
+                b = np.array([D[j * nX + x][m] for x in shared], np.int64)
+                ks.append(units[((units[:, None] * a[None, :] - b[None, :]) % n == 0).all(1)])
+            if any(k.size == 0 for k in ks):
+                continue                                # no one automorphism: not related
+            if all(k.size == 1 for k in ks):
+                relation[(i, j)] = tuple(int(k[0]) for k in ks)
+            for src, dst, inverse in ((i, j, False), (j, i, True)):
+                for x in range(nX):
+                    if src * nX + x not in D or dst * nX + x in D:
+                        continue
+                    img = []
+                    for m, (n, k) in enumerate(zip(periods, ks)):
+                        kk = np.array([pow(int(q), -1, n) for q in k], np.int64) if inverse else k
+                        vals = np.unique(kk * D[src * nX + x][m] % n)
+                        if vals.size != 1:              # the data leave the image open
+                            break
+                        img.append(int(vals[0]))
+                    else:
+                        D[dst * nX + x] = tuple(img)
+                        given.append(dst * nX + x)
+    return relation, given
 
 
 def _phases(E, nP, systems, modules):

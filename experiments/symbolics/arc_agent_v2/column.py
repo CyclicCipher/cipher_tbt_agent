@@ -9,7 +9,8 @@ Each input arrives from the bus (bus.py), stamped, with its role for this column
 If L5 doesn't know the move, the column is lost until the next episode, and the brain falls back on the hippocampus.
 
 **Part 5:** where the frame is factored, the column also tracks (phase, coordinate). An input moves the phase by its
-transition and the coordinate by its shift. A prediction comes from the place where it has content, and otherwise from
+transition and the coordinate by its shift in the phase's shift class (part 6; a phase left out of the coordinate has
+none, and the column stops tracking). A prediction comes from the place where it has content, and otherwise from
 the phase: one symbol for the whole phase, or the symbol whose own position is the coordinate (naming).
 The column learns its frame from consolidation (`install`), not online. Online memory is the hippocampus's job.
 `stamp` is the bus's check that the column applied every message it was sent.
@@ -48,7 +49,7 @@ class Column:
             self.l6.place = self.l5.move(self.l6.place, x)
         if moves and self.l6.fac is not None:
             phase, coord = self.l6.fac
-            nxt, delta = self.fac.trans.get((phase, x)), self.fac.shift.get(x)
+            nxt, delta = self.fac.trans.get((phase, x)), self.fac.shift.get((self.fac.cls.get(phase), x))
             self.l6.fac = None if nxt is None or delta is None else (nxt, self.fac.modules.bind(coord, delta))
         self.stamp = stamp
 

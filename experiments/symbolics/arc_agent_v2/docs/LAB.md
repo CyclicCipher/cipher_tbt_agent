@@ -742,3 +742,190 @@ Every place with an observed future got a coordinate.
 - numbers of several digits;
 - division;
 - relations between classes that are not automorphisms (for × against +, the relation is the logarithm).
+
+### Part 6 amendments (2026-10-29, during the build, before the run)
+
+The build was developed on seed 0. Amendment 6 was found on seed 1 at p = 13, a pre-registered case, during the build.
+No other pre-registered case was looked at before the run.
+
+1. **The end of an episode is observed** (`hippocampus.finish`; a new innate assumption).
+   - **The rule:** on each content sensor that gave nothing at an episode's last place, what came next was the end,
+     one fixed SDR of the hippocampus (as every episode's start is one fixed place).
+   - **The problem it fixes:** at p = 13, training held one subtraction from 0, "0 − 12". So the place after "0 −"
+     had seen only "12" come next, and so had the place after "6 + 6 =", where the episode then ended. With the end
+     unrecorded, the two never disagreed, and P3's full form merged them. Every "0 − b" was then answered wrong
+     (− at 0.871).
+   - **Unchanged:** the walk worlds (their episodes end on a retina reading, and an efference copy is never content).
+   - **Part 5's leaf rule becomes:** a place whose only observed future is the end is left out of the coordinate.
+2. **Every pair is split once any is refuted** (replacing item 1's "only refuted pairs are split").
+   - Displacements that agree across contexts still pool through the place pairs they share.
+   - A1 and the walks have no refutation, so they are unchanged.
+   - **Why:** a pair not yet refuted can still mix contexts where it has few instances in one of them.
+3. **Refutation is detected first, cheaply.**
+   - A pair whose own instances are not one-to-one is refuted whatever else is pooled. When there is one, P4 goes
+     straight to the split pass.
+   - Otherwise P4 runs as before.
+   - **Why:** the unsplit pass ran instance by instance through components mixing +, − and ×, to be thrown away. P4 at
+     p = 97 took 39 s, about 10 s now.
+4. **Across contexts, two classes pool only where they agree on at least two places.**
+   - Within a context one shared place pair still suffices (P4).
+   - **Why:** a translation and a multiplication can meet at one place by coincidence.
+5. **A fixed point (s → s) belongs to a map, but is not evidence that two pairs are one displacement.**
+   - **Why:** under ×, every pair at the place after "0 ×" maps the result 0 to itself. That joined every × class into
+     one component.
+6. **Constant inputs name no displacement** (in the split pass).
+   - **The rule:** an input whose move is constant in a context (item 2's rule, on the moves observed) is left out of
+     the pairs at that context's places.
+   - **Why it follows:** where it leads is one place, whatever place it was made from. So a pair with it maps one place
+     to many, or many to one, which P4 forbids.
+   - **Found on seed 1, p = 13:**
+     - the pair (0, 9) in the × context was seen once (after "2 ×": result 0 to result 5);
+     - it was applied after "8 ×", where it filled "8 × 9" with 5, not 7;
+     - in all, 14 wrong moves, and × at 0.122.
+7. **The coordinate for factoring is the system whose orbits cover the most places.**
+   - **Why:** at p = 13, the multiplicative orbit (12 places) was listed first, ahead of the additive one (13).
+8. **Shift classes, made precise.**
+   - **Order:**
+     - step 3's one class is tried first;
+     - otherwise phases are taken in order of the moves made from them (seen and inferred), most first, ties by the
+       first met.
+   - **A phase "shares a class's shifts"** if its moves and the class's solve together, with the coordinates.
+   - **Naming** is tested on the moves keyed by class.
+9. **The relation, made precise.**
+   - **Found** for each pair of classes, as k per module among the units.
+   - **If the shared inputs leave several k,** a shift is given only where every remaining k gives the same image. k is
+     recorded only where one k per module remains.
+   - **Applied** after the MDL solve.
+   - **Side effect:** it also gives the other class shifts for "+", "−" and "=". They are never used from those phases.
+10. **The solver** (`_solve`, `_choose`).
+    - **Propagation is event-driven:** a move is looked at again when one of its unknowns becomes known.
+    - **MDL scores** each form on the axes of its own parameters.
+    - **The limit rises** from 200,000 to 2,000,000 assignments. A2 has 3 free parameters in one group: 97³ = 912,673.
+    - **Checked:** part 5's recorded one_fact (p = 97 seed 0, p = 105 seed 1, p = 13 seed 2) and withheld (p = 97
+      seed 0) come out identical.
+11. **P4's bookkeeping, sped up.**
+    - Pooled classes are resolved lazily.
+    - Refused poolings are remembered: a live class's map only grows, so a conflict is permanent.
+12. **G2's apparatus** (`test_a6.py`).
+    - **Labels:** every frame place is labelled with the world's state, by walking training prefixes over seen moves
+      only.
+    - **The check:** every move of the frame, seen or inferred, is checked against the world's table.
+    - **A place given two states** counts as a conflict (a wrong merge).
+
+## Part 6 results (2026-10-29; `runs/a6.txt`, `runs/a6.json`)
+
+**Built:**
+- **The hippocampus records an episode's end** (amendment 1).
+- **P4 per context** (`frameLearning.regular`):
+  - refutation detected first;
+  - every pair split once any is refuted;
+  - two agreeing places needed to pool across contexts;
+  - fixed points not taken as identity evidence;
+  - constant inputs name no displacement.
+- **Constant moves** (`constant`): the absorbing "× 0".
+- **Coordinates per family** of displacement classes.
+- **Shift classes** (`_classes`): generalize, then split by phase; a phase that contradicts every class is left out.
+- **The relation between classes** (`_relate`): an automorphism x ↦ k·x per module, found from the shared inputs and
+  applied to the rest.
+- **The column** moves its coordinate by the shift of its phase's class.
+- **`Brain(relation=False)`** turns the relation off (G5's control).
+
+**The first attempt crashed in G6:** an IndexError in `Pool.live`, which looked up a class when none existed yet (the
+box's split pass). Part 6's own runs had finished but weren't saved. The bug was fixed and the whole run repeated; the
+harness now saves part 6's results before the regression. The compute was about 3 min for the failed attempt and 4.4
+min for the run.
+
+**G1: held-out accuracy** (every seed):
+
+| p | + | − | × |
+|---|---|---|---|
+| 13 | 1.000, 1.000, 1.000 | 1.000, 1.000, 1.000 | 1.000, 1.000, 1.000 |
+| 97 | 1.000, 1.000, 1.000 | 1.000, 1.000, 1.000 | 1.000, 1.000, 1.000 |
+
+**G2: P4 splits, and every move is the world's** (identical in every seed):
+
+| p | pairs split | moves (inferred) | wrong | places with two states |
+|---|---|---|---|---|
+| 13 | 162 | 585 (253) | 0 | 0 |
+| 97 | 9,318 | 28,809 (14,113) | 0 | 0 |
+
+- **The table is complete:** 585 = 13 + 39 + 507 + 13 + 13. That is the start's moves, the operators after each digit,
+  every "a op b" (3p²), "=" and the answers.
+- **The split:** every pair seen, 13 · 12 digit pairs plus 3 · 2 operator pairs.
+
+**G3: coordinates per family** (every seed):
+- an additive orbit of all p results, chain [p];
+- a multiplicative orbit of the p − 1 nonzero results: chain (2, 3, 4) at p = 13, (2, 3, 4, 8, 16, 32) at p = 97.
+
+The coordinate on the multiplicative orbit is the discrete logarithm, found, not given. Result 0 lies outside it.
+
+**G4: factoring with classes** (every seed):
+
+| p | classes | left out | k | digits alike from the start and after "+" | negated after "−" | naming | identity shifts |
+|---|---|---|---|---|---|---|---|
+| 13 | {S, A, after "+", C}, {after "−"} | after "×" | 12 = −1 | 13/13 | 13/13 | "=" | "+", "−", "×", "=", "0" |
+| 97 | the same partition | after "×" | 96 = −1 | 97/97 | 97/97 | "=" | the same |
+
+- **Notation:** S is the start; A is after a digit; C is after "a op b".
+- **Seed 0 at p = 97:** the place after "−" came first in the greedy order, so the classes are numbered the other way:
+  {after "−", A, C}, {S, after "+"}. A and C make no digit moves, so they fit either class.
+
+**G5: the reversal** (subtractions by the digits never subtracted, seen only as added):
+
+| p | with the relation (k found) | without |
+|---|---|---|
+| 13 | 1.000, 1.000, 1.000 (k = 12) | 0.000, 0.000, 0.000 |
+| 97 | 1.000, 1.000, 1.000 (k = 96) | 0.000, 0.000, 0.000 |
+
+**G6: no regression.**
+- **Part 3:** reproduces exactly (p = 13 and 97, 3 seeds).
+- **Part 5:**
+  - F1–F2 reproduce exactly (p = 13, 97 and 105, 3 seeds);
+  - F3 reproduces exactly (p = 13 and 97, 3 seeds).
+- **Part 4's recorded file differs** only where part 5 already found differences, and identically:
+  - **A1, C2 instances** (12 → 156 at p = 13, and so on): part 4's checker bug;
+  - **A₅ in seeds 0 and 2:** now declines (part 5's generator correction);
+  - E1, E2 and both shortcut tests reproduce exactly.
+- **The box:**
+  - **Matches part 4 exactly.** Part 5's run recorded a reason-less decline, which part 5's post-run fix (fixed points
+    excluded) removed.
+  - **It is the one walk with a refutation:** a blocked move maps a place to itself. It splits 12 pairs in every seed,
+    against amendment 2's claim of no refutation in the walks.
+  - **The split changes nothing recorded.** The box infers no move either way.
+
+**G7: cost** (training and sleep, A2 at p = 97): 14.7 s, 16.0 s, 15.6 s (p = 13: 0.2 s).
+
+**Verdicts:** G1–G7 all confirmed in every seed. G6's box: the frame and checks are unchanged, but amendment 2's
+reasoning was wrong.
+
+**What this shows:**
+1. **One brain, three operations, one stream.**
+   - **Splitting by context:** P4 splits its pairs by the input that led to the place, so the operator just read
+     becomes the context of the next digit's move.
+   - **The absorbing 0:** a constant move. Once 0 is excluded from displacements, every inferred move is right.
+2. **The operators shift nothing.** "+", "−", "×" and "=" have identity shifts. An operator's meaning is the shift
+   class it leads into, that is, how the next digit moves, not a move of its own.
+3. **The converse is found.**
+   - **What comes out:** a digit's shift after "−" is k times its shift after "+", with k = −1, the same in every seed
+     and at both p.
+   - **The payoff:** subtracting a digit that was only ever added is answered at 1.0, against 0.0 with the relation
+     off.
+   - **What carries it:** the relation is found from the digits seen in both classes, and carries each addition fact
+     to its subtraction.
+4. **× has its own coordinates, the discrete logarithm, found from the moves.** They are not used yet. × is left out
+   of the factored coordinate, and its answers come from P4's table.
+
+**Limits:**
+1. **× generalizes only through P4.** Its answers come from the move table, not from a coordinate. With half the
+   equations the table is complete; with fewer it may not be. Relating × to + needs the logarithm, a relation between
+   classes that is not an automorphism (not in this step).
+2. **The MDL search is exhaustive per group of parameters.**
+   - **Today:** A2 puts 3 in one group (97³ = 912,673 assignments).
+   - **Next:** a fourth class would put 97⁴ ≈ 88 million in one group, above the limit, and the factoring would decline.
+   - **So:** A3 needs a better search.
+3. **The cost is seconds, not milliseconds:** about 15 s per run at p = 97, about 3 s of it training. Under the
+   profiler, which inflates them:
+   - P4's fill loop: about 10 s;
+   - the class trials: about 4 s;
+   - installing 28,809 moves into L5: about 4 s.
+4. **Chains are still out:** "+" after a result is a phase transition the data never show (§7).

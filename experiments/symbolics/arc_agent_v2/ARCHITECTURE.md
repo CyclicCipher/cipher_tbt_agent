@@ -245,7 +245,7 @@ in `docs/LAB.md`, built, run (about 10 minutes of compute at most), and recorded
 | milestone | what | status |
 |---|---|---|
 | A1 | addition mod p, from written equations | **done**: held-out accuracy 1.0 for p = 13 and 97 (part 3) |
-| A2 | +, − and × mod p, mixed | not started |
+| A2 | +, − and × mod p, mixed | **done**: held-out accuracy 1.0 on each, p = 13 and 97, 3 seeds; subtraction by digits only ever added 1.0 (k = −1 found), 0.0 without the relation (part 6) |
 | A3 | base-10 numbers of several digits, with carry | not started |
 | B1 | MNIST: V1 patches at innate places; IT learns the digits | not started |
 | B2 | MNIST in the digit's own learned frame | not started |
@@ -258,13 +258,18 @@ in `docs/LAB.md`, built, run (about 10 minutes of compute at most), and recorded
 | 1 | A1: the hippocampus, the column's layers, consolidation by P3 and P4 | part 3 | **done** |
 | 2 | coordinates learned from the frame; the bus and efference copies | part 4 | **done** |
 | 3 | one fact, two uses: one coordinate for every place, factored into (phase, coordinate) | part 5 | **done** |
-| A2 | three operations mixed; subtraction from addition facts (the reversal) | part 6 | pre-registered |
+| A2 | three operations mixed; subtraction from addition facts (the reversal) | part 6 | **done** |
+| chains | chained expressions ("a + b + c ="): research first (below) | — | not started |
 
 **Next, proposed in the order the goal needs (for the user to confirm, 2026-10-29).** Analogy and the reversal curse
 are folded in where the goal uses them:
-1. **A2:**
-   - competing structure hypotheses (COORDINATES parts 2–4): subtraction is a quasigroup, × has an absorbing 0;
-   - the reversal curse, as subtraction learned from addition facts.
+1. **A2 (done, part 6):**
+   - P4 split by context, and a constant move for the absorbing 0;
+   - shift classes, related by k = −1: the reversal curse, as subtraction learned from addition facts.
+
+   **Left open:**
+   - × gets its own coordinates (the discrete logarithm) but generalizes only through P4's table;
+   - the MDL search would not survive a fourth class (LAB part 6, limits).
 2. **Chained expressions** ("a + b + c ="). The phase automaton must generalize to "+" after a result, which the data
    never show. The user (2026-10-29) expects this to need, very likely:
    1. **Working short-term memory.**

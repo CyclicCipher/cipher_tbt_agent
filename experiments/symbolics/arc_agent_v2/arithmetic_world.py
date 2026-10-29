@@ -15,6 +15,8 @@ to find. A brain that scores well above chance on its held-out equations is read
   Every value still occurs as an operand.
 - **`permute=True`:** every answer is relabelled by a fixed random permutation of the digits that is not a
   translation, so the answer no longer names where the sum is.
+- **`reverse=True` (part 6):** S, a random third of the digits, is never subtracted. Every "a - b" with b in S is left
+  out of training, the rest are split as usual, and the test is every subtraction by a digit in S.
 
 A1: addition mod p. The p * p equations are split at random: train_frac of them are shown in training, the rest are
 held out. The test shows a held-out equation up to "=", asks for the brain's prediction of the next SDR, and decodes
@@ -30,7 +32,8 @@ OPS = {"+": lambda a, b, p: (a + b) % p,
 
 
 class ArithmeticWorld:
-    def __init__(self, p=13, ops=("+",), train_frac=0.5, d=2048, w=40, seed=0, withhold=False, permute=False):
+    def __init__(self, p=13, ops=("+",), train_frac=0.5, d=2048, w=40, seed=0, withhold=False, permute=False,
+                 reverse=False):
         self.p, self.ops = p, tuple(ops)
         enc = CategoryEncoder(d, w, seed)
         self.symbols = [str(i) for i in range(p)] + list(self.ops) + ["="]
@@ -48,8 +51,15 @@ class ArithmeticWorld:
                     break
             self.perm = pi
         eqs = [(op, a, b) for op in self.ops for a in range(p) for b in range(p)]
-        self.withheld = set()
-        if withhold:
+        self.withheld, self.never_subtracted = set(), set()
+        if reverse:
+            self.never_subtracted = set(np.random.default_rng((seed, 9)).choice(p, p // 3, replace=False).tolist())
+            test = lambda e: e[0] == "-" and e[2] in self.never_subtracted
+            free = [e for e in eqs if not test(e)]
+            order = np.random.default_rng(seed).permutation(len(free))
+            self.train = [free[i] for i in order[:int(round(train_frac * len(free)))]]
+            self.held_out = [e for e in eqs if test(e)]
+        elif withhold:
             self.withheld = set(np.random.default_rng((seed, 7)).choice(p, p // 3, replace=False).tolist())
             free = [e for e in eqs if self.answer(*e) not in self.withheld]
             order = np.random.default_rng(seed).permutation(len(free))
