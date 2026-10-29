@@ -1,6 +1,6 @@
 # Arc agent v2: a brain of columns whose layers are the requirements for learning a general function
 
-Started 2026-10-29 (the user). **This is the one agent under development.**
+Started 2026-10-29 (the user). **This is the one agent under development.** **Progress, and what comes next: §7.**
 
 - **v1** (`../arc_agent/`) is frozen. It is reference machinery: read it for pieces v2 needs and copy them across;
   never import it.
@@ -223,38 +223,60 @@ operation.
 | B1 | V1 columns sense patches at innate 2-D places; IT learns the digits as content at places | 100 clusters ≥ 0.90; 10 clusters ≥ 0.60 |
 | B2 | the digit in its own learned frame: shift, scale and slant become L5 transformations between the retinal frame and the digit's ("the transform is the difference") | 10 clusters ≥ 0.80 |
 
-## 7. Build order
+## 7. Progress and build order (the one place to track where v2 is)
 
-Vertical slices. Nothing counts until it is wired into the brain and exercised by a test.
-1. **A1: done** (`docs/LAB.md` part 3).
-   - **Built:** the hippocampus's DG and CA3, a column with L6, L4, L5 and L2/3, a one-region brain, consolidation by
-     P3 and P4, and the memorizing control.
-   - **Result:** held-out accuracy 1.0 for p = 13 and p = 97, and the rings were found.
-2. **Coordinate learning** (the user, 2026-10-29: "the natural next one").
-   - **The goal:** place codes in which each learned move is one fixed operation on the code, the same at every
-     place, instead of a row in a table.
-   - **The candidate substrate:** a move as a fixed permutation of the code's bits. Block-code offset addition is its
-     commutative special case.
-   - **The constraint:** the codes come from the moves the frame found, never from a value given from outside (§0).
-     The exact line is to be pre-registered for the user to check.
-3. **One fact, two uses:** the symbol read as content names the place its move reaches from the start, so A1's two
-   rings (after "a", and after "a + b") become one.
-4. **Analogical mapping as a native ability** (the user, 2026-10-29: "highly desirable").
-   - An analogy is a map between two frames that carries moves to moves.
-   - With coordinates it is one change of coordinates, found from one aligned pair (Kanerva's "What's the Dollar of
-     Mexico?"; Gayler & Levy 2009). Step 3 is its first case.
-5. **The reversal curse** (the user, 2026-10-29: the same logic should overcome it).
-   - **Why it should:** a fact is a move between places, moves are one-to-one (P4), and the frame holds each map in
-     both directions. So the converse is the same fact read backwards.
-   - **Relations that aren't one-to-one:** the converse is the transpose, not the inverse
-     (`experiments/intelligent_constraints/`).
-   - **A test world, not designed yet:**
-     - facts "A r B" over random SDRs;
-     - some also shown as "B r′ A";
-     - held-out facts shown forward only, queried as "B r′ ?".
-6. **A2, then A3.**
-7. **B1:** a V1 sheet of columns, the bus, the spatial pooler, IT.
-8. **The hippocampus's CA1, and its attractor recall,** when something needs them.
-9. **B2.**
+**The goal (the user, 2026-10-29):** one model that, by unsupervised and self-supervised learning only:
+- predicts MNIST digits;
+- does all arithmetic.
 
-Each step: pre-register in `docs/LAB.md`, build, run (about 10 minutes of compute at most), record.
+Then back to the ARC-AGI-3 public games.
+
+**Where things are written:**
+- **This section:** what is done and what comes next.
+- **§6:** the milestones' success criteria.
+- **`docs/LAB.md`:** the lab book. One "part" per experiment: its pre-registration (before the code), then its results.
+- **`runs/`:** the run outputs (not committed).
+
+Vertical slices: nothing counts until it is wired into the brain and exercised by a test. Each step is pre-registered
+in `docs/LAB.md`, built, run (about 10 minutes of compute at most), and recorded.
+
+**Milestones** (§6):
+
+| milestone | what | status |
+|---|---|---|
+| A1 | addition mod p, from written equations | **done**: held-out accuracy 1.0 for p = 13 and 97 (part 3) |
+| A2 | +, − and × mod p, mixed | not started |
+| A3 | base-10 numbers of several digits, with carry | not started |
+| B1 | MNIST: V1 patches at innate places; IT learns the digits | not started |
+| B2 | MNIST in the digit's own learned frame | not started |
+
+**Steps:**
+
+| step | what | lab part | status |
+|---|---|---|---|
+| 0 | the SDR library, the config; the hard rule; A1's world | parts 1–2 | done |
+| 1 | A1: the hippocampus, the column's layers, consolidation by P3 and P4 | part 3 | **done** |
+| 2 | coordinates learned from the frame; the bus and efference copies | part 4 | **done** |
+| 3 | one fact, two uses: one coordinate for every place, factored into (phase, coordinate) | part 5 | pre-registered |
+
+**Next, proposed in the order the goal needs (for the user to confirm, 2026-10-29).** Analogy and the reversal curse
+are folded in where the goal uses them:
+1. **A2:**
+   - competing structure hypotheses (COORDINATES parts 2–4): subtraction is a quasigroup, × has an absorbing 0;
+   - the reversal curse, as subtraction learned from addition facts.
+2. **Chained expressions** ("a + b + c ="). This needs the phase automaton to generalize: "+" after a result.
+3. **A3:** place value as the group's chain of quotients (part 4, finding 3).
+4. **B1:** a V1 sheet of columns, a frame per receptive field, the spatial pooler, IT.
+5. **B2:** the digit in its own frame. Analogical mapping as aligning a digit's frame to a stored one.
+6. **The hippocampus's CA1 and attractor recall,** when something needs them.
+7. **Back to the ARC-AGI-3 public games.**
+
+**Recorded direction (the user, 2026-10-29):**
+- **Analogical mapping as a native ability:** an analogy is a map between two frames that carries moves to moves.
+  With coordinates it is one change of coordinates, found from one aligned pair (Kanerva's "What's the Dollar of
+  Mexico?"; Gayler & Levy 2009).
+- **The reversal curse should fall to the same logic:**
+  - a fact is a move between places, moves are one-to-one (P4), and the frame holds each map in both directions, so
+    the converse is the same fact read backwards;
+  - for relations that aren't one-to-one, the converse is the transpose, not the inverse
+    (`experiments/intelligent_constraints/`).

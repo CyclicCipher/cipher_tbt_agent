@@ -458,3 +458,103 @@ it.
 3. **Aliased labels:** P3's full form makes no false merges with repeated labels, and so it finds no places either.
    Part 8's geometry hypotheses are the next step there.
 4. **Codes for non-commuting frames** (permutation representations) are not built.
+
+## Part 5: one fact, two uses (step 3; pre-registered 2026-10-29, before the code)
+
+**Why (the user):** a symbol's meaning is the move it makes.
+- **Its position on the axis** is where that move takes the hand from the start ("argument 1 turns the hand to
+  itself").
+- **Its use as an argument** is moving the hand from wherever it is ("argument 2 turns it by itself").
+- **These are one fact.**
+
+**Where A1's frame stands:** it holds them apart. The ring after "a" and the ring after "a + b" are two orbits with
+separate codes, and every answer is a content memorized at its own place.
+
+**What "one" cannot mean:** the two rings can't become one place. The place after "3" is followed by "+", the place
+after "1 + 2" by "=", so P3 rightly keeps them apart. They are the same number in different phases of the equation.
+So step 3 is a factorization: each place becomes (phase, coordinate). Then:
+- one coordinate system covers every place;
+- each moving input is one shift of it wherever it is made;
+- the phases form a small automaton.
+
+### The change (`frameLearning.py`, the column)
+
+1. **One coordinate for every place** (a potential over the frame's moves):
+   - **Shared codes:** coordinated orbits that the same displacements act on share one code (one `Modules`), each
+     with an unknown offset.
+   - **Each moving input is one shift δ,** the same wherever it is made (P4's regularity, extended across the frame).
+     So every move (u, x, v) says c(v) = c(u) ⊕ δ_x.
+   - **Naming, a hypothesis tested per input y:**
+     - **The hypothesis:** "the symbol that comes next, and is determined, at the places y leads to names where you
+       are". That is, its own position (where its move leads from the start) has the place's coordinate.
+     - **Accepted** only if it is consistent at every place where it applies, and it pins the offsets.
+     - **Rejected** otherwise, for example when the answers are relabelled.
+   - **Solving:**
+     - propagate from the first orbit (offset 0) through moves and accepted namings;
+     - where something is still free, the fewest inputs that shift: try each undetermined input as the identity
+       shift, and keep the consistent solution with the most identity shifts (MDL: a move that changes nothing costs
+       nothing);
+     - every move is then checked;
+     - any contradiction, and the step declines (the frame keeps part 4's form).
+   - **Generators, corrected:** a P4 displacement map that permutes one set of places is a generator there even if
+     it is partial elsewhere. This matters when some sums are never seen.
+2. **Phases:** the coordinate group's action extends to every place with a coordinate (the place reached by the same
+   moves from a shifted place). Its orbits are the phases: in A1, the start, "after a digit", "after +", "after the
+   second digit", "after =", "after the answer".
+3. **Phase-level moves and content:**
+   - **Moves:** each input's phase transition, (phase, x) → phase. It holds at every coordinate of the phase (P4 at
+     the phase level).
+   - **Content:** a phase's content is either one symbol for the whole phase ("+", "=") or, where naming was
+     accepted, the symbol whose own position is the coordinate.
+4. **The column's state becomes (phase, coordinate)** wherever the frame is factored:
+   - **A move:** phase' = the transition; coordinate' = coordinate ⊕ δ_x.
+   - **A prediction:** the phase's content.
+   - **Places never visited are reached this way:** (after "+", 3) moved by "4" is (after the second digit, 7), even
+     if no equation ever summed to 7.
+   - **Where a phase transition is unknown,** the column falls back to part 4's places.
+
+### The line between innate and learned (for the user to check)
+
+- **New innate assumptions:**
+  - **MDL:** of the solutions the data allow, the one with the fewest inputs that shift.
+  - **Naming,** as a hypothesis: the determined symbol that comes next names the place's position. It is accepted only
+    by consistency over every place it covers.
+- **Learned:**
+  - every shift;
+  - which inputs shift at all;
+  - the phases, and their transitions;
+  - which phase's content is named;
+  - where the hand starts. The start's coordinate comes out as the identity digit's position, derived, not set.
+- **Never used:** a symbol's value or label. "+", "=" and "0" are found to be identity shifts, not told.
+
+### Worlds
+
+- **A1:** as part 3, train fraction 0.5. p = 13, 97 and 105, 3 seeds.
+- **A1, answers withheld (new):** a random set H of ⌊p/3⌋ values never occurs as an answer. Every equation whose sum
+  is in H is removed from training. Half of the rest is the training set; the test is every equation whose sum is in
+  H. Every value still occurs as an operand. p = 13 and 97, 3 seeds.
+- **A1, answers relabelled (control, new):** each answer is replaced by π(a + b), with π a fixed random permutation of
+  the digits that is not a translation. Naming should be refused. Same splits as above.
+- **The walk worlds:** labels are not moves, so naming never applies, and nothing should change.
+
+### Predictions
+
+| # | prediction |
+|---|---|
+| F1 | A1 (p = 13, 97, 105; every seed): every place gets a coordinate. The place after "a + b" has the same coordinate as the place after the digit z = a + b, for all p² pairs (100%). The phases number exactly 6 |
+| F2 | the digit's two uses: each digit's shift from the start equals its shift from the places after "+" (every move consistent, 100%). Exactly one digit's shift is the identity: the world's "0", checked with labels in the harness only. "+" and "=" come out as identity shifts. The start's coordinate equals the identity digit's position |
+| F3 | answers withheld (p = 13 and 97): accuracy on equations whose answer never occurred ≥ 0.99. Part 4's brain on the same split: ≤ 0.05 |
+| F4 | answers relabelled: naming refused in every seed; the zero-shot test of F3 ≤ 0.05; ordinary held-out accuracy (answers seen, relabelled) still ≥ 0.99, since P3 and P4 don't need naming |
+| F5 | no regression: part 3's M1–M4 and part 4's C1–C8 reproduce; the walk worlds' results are unchanged |
+| F6 | cost: all of part 5 under 60 s |
+
+**What would refute the step:**
+- **F1 or F2 failing:** the moves aren't one shift each across phases, or MDL picks the wrong gauge.
+- **F3 failing with F1 and F2 holding:** the factored column doesn't use its coordinates.
+- **F4 failing:** naming is assumed, not earned.
+
+**Not in this step:**
+- chains ("a + b + c ="): they need the phase automaton to generalize, "+" after a result, which P3 and the data don't
+  give;
+- several operations (A2);
+- numbers of several digits (A3).
