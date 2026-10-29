@@ -1900,3 +1900,240 @@ with no clock head leading).
 - **K6:**
   - ratio 0.00 and mean 0.0015 confirmed;
   - cost refuted for the worlds (434 s > 360 s); confirmed for the games (224 s).
+
+# Part 29: an inverse model and viability, without roles (pre-registered 2026-10-28, before the code)
+
+**Why (the user):** put the earlier progress into the arc agent.
+- **Part 17's inverse model:** navigate, and move an object by inverting contact. It replaced 30-step joint searches.
+- **Part 19's viability drive:** keep the goal reachable. It cut stuck steps by 65% in push games.
+
+Both were written for the predecessor scripts, with hand-assigned roles ("body", "push", "solid"). The arc agent has no
+roles, so both are rebuilt from what its columns learn (`arc_agent/inverse.py`, used by `executive.py`).
+
+**The changes:**
+1. **Navigation.** Breadth-first search over one column's own states (at most 600), each step predicted by that
+   column's learned model with every other column held still. Predictions are cached per (state, action) within a
+   decision. A step that would enter another column's cells is not allowed.
+2. **Contact, learned: what moved column B by d.**
+   - **Recording:** whenever a planned translation column B moves by d under an action, the brain records the action,
+     each other planned translation column A, and A's position relative to B. Counts, kept across levels.
+   - **To move B toward a goal:** Dijkstra over B's positions (at most 300 expanded):
+     - for each recorded (action, A, relative position), A navigates to that position relative to B, with B in place;
+     - the action is taken, and B's and A's next states are predicted by their own models with A placed there;
+     - the cost is the route plus one step.
+3. **Which goals:** the 4 most probable single-column goal hypotheses ("on" a colour, "at" a state). A column that
+   keys move directly gets a navigation plan; a column moved only by others gets a contact plan. Each plan competes in
+   `decide` with the search's plans, scored the same way (its probability of a WIN, by the goal posterior, and its
+   length).
+4. **Viability.**
+   - **V(state):** the posterior mass of the 4 most probable single-column goal hypotheses still attainable from that
+     state. Attainable means some column of that kind can reach a state where the hypothesis holds: by navigation, or
+     by contact moves, relaxed by ignoring whether the mover can get behind it.
+   - **The charge:** a plan whose end state loses goal mass pays lost × (actions since the level began + its length) /
+     25 in drive. That is the hunger of redoing the level: in ARC a stuck object needs a RESET.
+   - **Cost bound:** computed only for the candidates whose drive could still win.
+
+**New goal worlds (`arc_agent/goal_worlds.py`; harness `arc_agent/test_planning.py`, the full ArcAgent driven like the
+engine). Boards of 3-pixel cells; 2 levels each, new layouts per level; 250 actions per level, then the run ends:**
+- **G1, push:** walls (colour 5) around a room with a few inside; a box (12) and a target cell (3). The level is won
+  when the box is on the target. Layouts are solvable (checked by search at generation), and a box pushed into a
+  corner off the target is stuck.
+- **G2, lock and exit:** W12's lock (ACTION5 arms, ACTION7 opens). A wall of doors (8) separates the avatar from an
+  exit cell (3). The level is won when the avatar is on the exit.
+
+**Arms:** full; no inverse model; no viability. 3 seeds each.
+
+| # | prediction |
+|---|---|
+| I1 | G1: the full agent wins ≥ 3 of 6 levels; without the inverse model ≤ half as many |
+| I2 | G1: steps with the box stuck fall by ≥ 50% with viability (full vs no viability) |
+| I3 | G2: the full agent wins ≥ 3 of 6 levels (part 28's hidden-state planning: the planner must foresee the doors opening) |
+| I4 | the 25 games (fast): ≥ 2 levels, mean ≥ 0.0015, ≤ 6 minutes. W1–W16 and the PFC test are not re-run: their code path doesn't change |
+
+# Part 30: a learned frame, contents permuted among fixed cells (pre-registered 2026-10-28, before the code)
+
+**Why:**
+- **The user:** put the earlier progress into the arc agent: COORDINATES.md's learned coordinates, and part 24's
+  open item.
+- **The game:** lp85 shifts tile contents around loops. That is neither a rigid motion nor a colour map, so no frame
+  holds it. lp85 was solved in part 23 and lost since part 24.
+
+**The change:**
+1. **A frame learned from data, `frames.Permute`:**
+   - **State:** the colours of a fixed set of cells.
+   - **Operator:** a permutation of those cells (cell i takes the colour cell op[i] held).
+   - **Learning an operator from one observation:** a permutation seen before is used if it maps the old state to the
+     new one. Otherwise unchanged cells stay put, and each changed cell takes the nearest changed cell that held its
+     colour: a minimum-distance assignment per colour, which keeps part 9's repeated labels apart by position.
+   - **Its coordinates:** the cycles of its permutations. Applied k times, a permutation shifts each cycle by k: the
+     cyclic group's characters (COORDINATES parts 6 and 9). Planning applies the operator; nothing else needs them.
+2. **Recruitment:**
+   - **When:** a changed site whose colours are not one colour map, but whose colour multiset is preserved, becomes a
+     Permute column. Today such a site gets no column.
+   - **Growth:** a later change that overlaps a Permute column's cells and is again a permutation of the union grows
+     the column. A ring's cells that did not change (equal neighbours) are thereby added: the frame learns its own
+     support. The operators already learned are extended to the new cells as fixed points.
+
+**Tests:**
+- **A new world W17 (ring):** 8 tiles on a ring (two colours repeat); ACTION5 shifts the contents one step around
+  the ring; the avatar moves with 1–4. 300 steps, scored on the ring's predicted state at the ACTION5 steps, steps
+  101–300.
+- **The games:** the fast 25-game run.
+
+| # | prediction |
+|---|---|
+| L1 | W17: the ring's state is predicted correctly at ≥ 90% of ACTION5 steps (3 seeds); part 29's agent: ≤ 50% |
+| L2 | the 25 games (fast): lp85 level 1 is solved again; ≥ 3 levels in all |
+| L3 | no regression: W1–W16 each ≥ part 28 − 0.01 (only sites no current frame explains are affected) |
+
+## Part 29 results (2026-10-28)
+
+**Build check: making the goal worlds runnable surfaced five problems.** Each was fixed before the main run.
+
+1. **A pushed object was never seen as one thing moving.**
+   - When the avatar pushes, it steps into the box's old cells, so those cells are already explained as the avatar.
+     The leftover change is only the box's new cells, which got explained as a recolour of fixed cells.
+   - **Fix (`brain._translation`):** the sources a displacement is voted from are every changed cell, including one
+     another column now covers. Only the destinations must still be unexplained (occlusion by the pusher).
+2. **The PFC held the box's recolour rival responsible.**
+   - The rivals were scored on cells another moving column (the avatar) crossed.
+   - They were also charged per cell: one confidently wrong step, before the box's model had learned that a push needs
+     contact, cost about −83. That erased the box model's whole level-1 lead.
+   - **Fix (`brain._group_evidence`):**
+     - cells a moving column outside the group covers, before or after, are that column's to explain;
+     - a step is one outcome, right or wrong over the claimed cells (log 0.99 or log 0.01), since the cells of one
+       prediction are not independent observations.
+   - The PFC test was re-run: PERSIST ratio still 0.00.
+3. **"Self-propelled" misclassified the box** (its most common operator under ACTION4 was a move, because every push
+   it saw was under ACTION4).
+   - **Fix:** common fate. A column is self-propelled if it has moved in a step where no other planned column moved
+     (`brain.solo`).
+4. **The contact record compared the columns' states.** A state is an offset from the column's own template, so the
+   mover's position relative to the box was nonsense.
+   - **Fix:** screen positions of the columns' first cells.
+5. **Navigation discarded every uncertain step.**
+   - **Fix:** a route takes each step's most probable outcome (`model_step(..., argmax=True)`). Commitment and surprise
+     already check each step.
+6. **Addition:** when RESET is allowed, the inverse model also plans from the level's start, with RESET first. That
+   is the way out of a dead end.
+
+**Results** (`arc_agent/runs/test_planning_part29.json`; 3 seeds; 274 s):
+
+| world | arm | levels won | box stuck (steps) | inverse plans chosen |
+|---|---|---|---|---|
+| G1 push | full | 1 of 6 | 169 of 795 | 24, 59, 55 |
+| G1 push | no inverse model | 1 of 6 | 145 of 777 | 0 |
+| G1 push | no viability | 1 of 6 | 169 of 795 | 24, 59, 55 |
+| G2 lock and exit | full | **2 of 6** | – | 31, 37, 44 |
+| G2 lock and exit | no inverse model | 0 of 6 | – | 0 |
+| G2 lock and exit | no viability | 2 of 6 | – | 31, 37, 44 |
+
+**Verdicts:**
+- **I1 refuted:** G1 1 of 6 in every arm.
+- **I2 refuted:** viability changed no decision; the no-viability runs are identical to the full ones.
+- **I3 refuted:** G2 2 of 6. But it's the inverse model that wins G2's levels (0 of 6 without it).
+- **I4:** see below.
+
+**Why G1 fails, from a trace:**
+- **One direction learned:** by the end of a run the box's model predicts a push to the right with the avatar beside
+  it at 0.74, attending to the cell beside the avatar. The contact condition is learned, not given.
+- **The others are not:** pushes left, up and down were each seen 0–2 times, so their models have not learned it.
+  Each action's model learns alone, and nothing tells "push left" what "push right" taught.
+- **Consequences:**
+  - no push plan exists except to the right;
+  - viability's reachability, built from the same learned pushes, finds almost no goal attainable, so there is never
+    mass to lose.
+- **What it needs:** generalisation across actions, by the frame's own symmetry. A push left is a push right,
+  conjugated by the half-turn that maps one direction to the other: the user's square-and-parallelogram point, where
+  the transform between two things encodes how they differ. This joins part 31.
+
+# Part 31: the transform is the difference: goals from displayed copies, and actions lent across directions (pre-registered 2026-10-28, before the code)
+
+**Why (the user's square and parallelogram):** the coordinate transform that makes one figure look like another does
+not erase either concept; it encodes exactly how they differ. Two uses in the agent:
+
+1. **Goals from displayed copies (`Brain.displayed`, the goal type "match").**
+   - **The search:** for each planned translation column, where the screen shows its shape again:
+     - up to a quarter-turn;
+     - under one colour map that keeps its distinct colours distinct;
+     - as a delineated object, with no colour running on across its edge;
+     - outside the column itself.
+   - **The hypotheses:** each copy names the pose that would put the column on it: the shift and turn from the column
+     to the copy. That pose is a goal hypothesis of a new type, "match", with its own type prior (the overhypothesis,
+     like the other types).
+   - **More than 6 copies** of one shape say nothing and are dropped.
+   - **Planning:** the inverse model plans to a match pose as to any named state.
+2. **Actions lent across directions by the frame's symmetry (`Column.experts`).**
+   - **A key's direction** is the move it gives the most self-propelled column (its efference copy).
+   - **The lent model:** if quarter-turns R take key a′'s direction onto key a's, a's model can be predicted by asking
+     a′'s model about the world turned by R⁻¹ (the content at offset o read at R·o, about the column's centre) and
+     turning its answer back by R.
+   - **Choosing:** each such lent model is an expert with prequential evidence, beside a's own model, and the
+     prediction mixes them by posterior. Experts more than 5 nats behind are not asked.
+   - **What it should fix:** part 29's G1, where a push learned to the right can't be used to the left.
+
+**Test world (`goal_worlds.py`), G3, copy the pose:** an L-shaped piece moves with keys 1–4 and turns a quarter with
+ACTION5. A copy of its shape (colour 14) is drawn at another place and turn, and a level is won when the piece covers it
+exactly. 2 levels, 250 actions each.
+
+| # | prediction |
+|---|---|
+| T1 | G3 (3 seeds): ≥ 4 of 6 levels won; with "match" off (part 30's agent) ≤ 2 |
+| T2 | G1 (3 seeds): ≥ 3 of 6 levels with the lent models (part 29: 1 of 6) |
+| T3 | the 25 games (fast): ≥ the levels before this part; W1–W17 each ≥ before − 0.01 |
+
+# Part 32: a reward model across games, as a column (pre-registered 2026-10-28, before the code)
+
+**Why (the user):** a predictive model of rewards: columns that learn what sort of situation leads to winning across a
+wide range of games.
+
+**What exists:** goal hypotheses refuted one by one, with a prior over their types (on-rare, on-common, at, joint,
+match) that is learned across games but unconditional (part 22's overhypothesis).
+
+**The change:**
+- **The goal column:** the type prior becomes a column's prediction, an ordinary Column over a Choice frame of the
+  types, learning as every column does (as part 24's PFC column does).
+- **Its context is the game's situation:**
+  - is there a self-propelled column;
+  - are displayed copies on screen;
+  - the number of planned columns (capped at 4);
+  - the number of colours (3 buckets);
+  - are clicks available;
+  - the number of keys.
+- **Learning:** at every WIN it learns (situation → the type of the WIN's most probable cause). Warm-up WINs on other
+  games are its first lessons (cross-validated by fold, as the other priors).
+- **The prior used:** the column's prediction, mixed with the overhypothesis by the column's count of observations
+  (the overhypothesis while it has seen nothing).
+
+| # | prediction |
+|---|---|
+| R1 | on the warm-up's WINs, by held-out fold: the goal column's probability of the true type ≥ the unconditional overhypothesis's, on average (log loss lower) |
+| R2 | the 25 games (fast, cross-validated priors): ≥ the levels of part 31 |
+
+## Part 29 regression and the freeze (2026-10-29)
+
+**Regression of part 29** (`runs/test_conditions_part29.txt`, `runs/p29_fast_cv.txt`):
+
+| test | result |
+|---|---|
+| W1–W16 (3 seeds) | identical to part 28, every world and seed |
+| the 25 games (fast, cross-validated priors) | 1 level, against part 28's 2 |
+
+**The 25 games lost a level because three games crashed:**
+- **ar25** (part 28 solved a level there): the JEPA latent column's input vector grew past its weight matrix after the
+  fit.
+- **g50t and m0r0:** the inverse model planned through a state astronomically far off the screen (a formula's
+  extrapolation), and placing the column there overflowed.
+
+**Fixes, applied and untested:**
+- `Jepa.code` uses the overlap of the input and the weights;
+- `Translation.inside` rejects far-off states before placing them;
+- `Inverse.one` and `Inverse.pair` return None for a state off the screen.
+
+The re-run of the three games was stopped by the user.
+
+**I4:** not tested.
+
+**v1 frozen.** The user started a new agent, `../arc_agent_v2/`: SDRs throughout, and the column's layers as the
+requirements for learning a general function (DESIGN.md §1a). This agent is kept as reference machinery and is no
+longer developed. Parts 30–32 were pre-registered above but never applied; their drafts are in `../unapplied/`.

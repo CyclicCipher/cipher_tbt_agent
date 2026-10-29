@@ -15,6 +15,84 @@ how should an object be defined, learned and stored? The proposal is that the qu
 - **Some coordinate systems are present at birth,** like the retinotopic map of visual cortex. Others are learned.
   This says concretely how evolution puts priors into a brain: as geometries.
 
+## 1a. What each layer of the column does: the requirements for learning a general function (the user, 2026-10-29)
+
+**The missing piece:** the thesis said why TBT was only partly right, but not what each layer of the column does in
+the new theory. It can be deduced:
+1. From first principles and evidence, work out what learning a general function requires.
+2. Map those requirements onto Hawkins' proposed roles for the layers. This is an analogy, not a claim about the
+   anatomy.
+
+**The worked example: modular arithmetic.**
+- Draw the number line in polar coordinates: a dial, as on a clock.
+- Modular addition adds one angle to another: it is a rotation.
+- Argument 1 turns the hand to itself; argument 2 then turns the hand by itself.
+- If you know that base-10 digits are a polar coordinate system, one per digit, the rule is trivial (4 + 3 is a
+  rotation). But that assumes the answer. Pretend you don't know it: from a few memorized sums, how would you derive
+  the rule that solves 4 + 3?
+
+**What generalizing is:**
+- **The general rule is the trait the examples share.**
+  - That trait predicts examples outside the training distribution (OOD).
+  - Finding it reduces complexity and discards information.
+  - The question is therefore: how do we know what information to discard?
+- **An analogy: morality.** Many people were taught, or derived by mistake, an incoherent definition of morality,
+  memorized from examples. One evil act the definition doesn't cover refutes it. The general rule (the NAP, the
+  non-aggression principle) is what the examples share. What do modular addition and the NAP have in common?
+- **How to tell generalizing from memorizing every example:** use inputs where memorizing would need almost
+  infinitely many examples. For instance, use floating-point values (a rotation by any angle) rather than integers.
+- **The observation that set this off:** after the softmax fix (arXiv 2610.31642), generalization proceeds smoothly,
+  governed by a ratio between weight decay and an optimizer quantity (the user didn't recall which). What that means
+  semantically is unclear, because it is continuous computation that can't be put into words. Hence the analogy.
+
+**The derivation:**
+1. **To discard the specific examples, you must already know how to recognize place, content and operation.** You
+   cannot discard them before you know what those are.
+2. **Without massive scale that is impossible.** You need the abstraction of places and content before you can learn
+   the operation. This is what the no-free-lunch theorem requires: no learner generalizes without a prior.
+3. **The evidence:** networks that grok modular addition build a coordinate system first (the circle / Fourier
+   representation). The operation is then a rotation in it.
+   - The same in this project: grokking mod 105 takes 12 epochs with the residue coordinates handed over, and 88
+     without (§2).
+4. **So the column's structure is the prior that the no-free-lunch theorem requires for learning a general function.**
+   It assumes every problem splits into four parts:
+   - a coordinate grid;
+   - a set of arguments (slots);
+   - content that goes in the slots;
+   - transformations (functions) between input and output.
+   It works because it leaks the task's structure to the model.
+5. **It also explains why the neocortex is not the home of episodic or recent memory.** It is very poorly suited to
+   memorizing, so it delegates that to the hippocampus.
+
+**The layers, by analogy with Hawkins' roles.** This is also Gary Marcus's algebraic mind (*The Algebraic Mind*,
+2001): variables, operations over variables, and instances bound to variables. The coordinate system the variables
+live in is added.
+
+| layer | Hawkins (TBT) | this theory: the requirement it meets | in the arc agent (`ARCHITECTURE.md` §3) |
+|---|---|---|---|
+| L6 | location on the object | **the coordinate system** | the frame (`frames.py`): its addresses and its group of operators |
+| L4 | sensory feature at a location | **place: the argument slots** (the user marked this one "?") | the column's state (its address in the frame) and the context the operator reads (contents at positions relative to the column, other columns' states) |
+| L5 | displacement, motor output | **the operation: the displacement between input and output** | the operator model per action (`Column.keys`, one `ConditionalOps` per action key; `frame.apply(state, op)`) |
+| L2/3 | the object, settled by voting | **content: what fills the slots** | the content memory (`Column.content`, a Spotlight lattice: a translation column's template colours) |
+| hippocampus | — | **memorization, which the column is bad at** | `Brain.hc` (part 28): (level, joint state) × action → next joint state |
+
+**How the agent answers "what information to discard?" today:**
+- **The screen position is discarded by construction.** An action's operator is keyed by (action, column), not by
+  where the column is, so what an action does carries to every place (part 16).
+- **Context features are discarded by evidence.** Each situation feature has its own head with a learned sharpness
+  θ_f, weighted by its prequential evidence (part 27b). A feature that doesn't predict loses weight and is in effect
+  discarded.
+- **Open:** discarding examples before the frame exists, which is the no-free-lunch step. The agent is given a menu
+  of frame types and doesn't yet learn new ones from scratch (part 30's Permute frame is the first learned one).
+
+**A note (Claude):**
+- **The no-free-lunch theorem says:** averaged over every possible target function, no learner beats another. So any
+  learner that generalizes has a prior.
+- **So the claim is not that this prior is the only one possible.** It is that the world's tasks (and ARC's) do
+  factor into place × content × operation, so this prior is the one that matches them.
+- **What would refute it:** a task family that doesn't factor this way, on which the column's prior loses to a
+  structure-free learner of the same size.
+
 ## 2. Why: what failed, and what worked
 
 **What failed:** the two agents made opposite mistakes about objects.
@@ -98,6 +176,7 @@ single blurred map reinforces its own errors.
 | combining columns | voting among columns | routing: the PFC selects and composes geometries |
 | objects | primitive | derived: frames that move as a unit |
 | where priors live | not specified | in the innate geometries |
+| the layers (§1a) | L6 location, L4 feature at location, L5 displacement and motor output, L2/3 object | L6 coordinate system, L4 place (argument slots), L5 operation, L2/3 content; memorizing is the hippocampus's job |
 
 What it keeps from TBT: a repeated, general-purpose circuit, and models built over reference frames.
 

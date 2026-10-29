@@ -180,7 +180,8 @@ class Jepa:
         if self.params is None:
             return 0
         W = self.params["W"]
-        h = W[:, :len(c)] @ c
+        n = min(W.shape[1], len(c))                     # the context grew since the fit: the part the fit saw
+        h = W[:, :n] @ c[:n]
         return int(sum(1 << d for d in range(DH) if h[d] > 0))
 
 

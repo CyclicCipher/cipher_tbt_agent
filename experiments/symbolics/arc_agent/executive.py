@@ -26,6 +26,7 @@ from collections import deque
 import numpy as np
 
 from arc_agent.frames import H, W
+from arc_agent.inverse import Inverse
 from arc_agent.overhypothesis import Overhypothesis
 
 ALPHA, THETA, STEP_BITS = 0.5, 0.05, 0.02
@@ -34,6 +35,7 @@ BUDGET = 0.3                                            # seconds per search: an
 LOG_EPS = math.log(0.01)
 TYPES, RARE, EFFORT = ("on-rare", "on-common", "at", "joint"), 4, 50
 FIXED_HUNGER = None                                     # ablation: a constant hunger instead of a growing one
+INVERSE, VIABLE = True, True                            # part 29: the inverse model's plans; viability's charge
 
 
 def h2(p):
@@ -109,6 +111,27 @@ class Goals:
                     num += math.exp(b + LOG_EPS * e - m)
         return num / z if z > 0 else 0.0
 
+    def top(self, k):
+        """The k most probable single-column goal hypotheses, [(hypothesis, posterior mass)]: "on" a colour, or "at"
+        a named state (part 29)."""
+        w_on, base = self._weights()
+        bj = self._bj
+        cand = [(w, ("on",) + key) for key, w in w_on.items()]
+        for kk, b in base.items():
+            cand += [(b + LOG_EPS * e, ("at", kk, s)) for s, e in self.at[kk].items()]
+        if not cand:
+            return []
+        m = max([w for w, _ in cand] + [b + LOG_EPS * self.at_rest[kk] for kk, b in base.items()]
+                + [bj + LOG_EPS * self.joint_rest])
+        z = (JOINT_STATES - len(self.joint)) * math.exp(bj + LOG_EPS * self.joint_rest - m)
+        z += sum(math.exp(bj + LOG_EPS * e - m) for e in self.joint.values())
+        z += sum(math.exp(w - m) for w in w_on.values())
+        for kk, b in base.items():
+            z += (AT_STATES - len(self.at[kk])) * math.exp(b + LOG_EPS * self.at_rest[kk] - m)
+            z += sum(math.exp(b + LOG_EPS * e - m) for e in self.at[kk].values())
+        cand.sort(key=lambda x: -x[0])
+        return [(h, math.exp(w - m) / z) for w, h in cand[:k]]
+
     def no_win(self, held):
         for h in held:
             if h[0] == "on" and (h[1], h[2]) in self.on:
@@ -170,6 +193,7 @@ class Executive:
         self.kind_of_plan = None
         self.start_grid = None                          # the level's first screen: where RESET returns
         self.can_reset = False
+        self.inverse = Inverse(brain, self.goals)       # part 29: plans read off the inverted model; viability
 
     # ---- what holds in a joint state -----------------------------------------------------------------------------
     def held(self, states, static):
@@ -289,28 +313,63 @@ class Executive:
         if self.plan:
             return self.plan.pop(0)
         cands = self.search(available)
+        static = self.brain.static_scene()
+        start = dict(self.brain.joint())
+        inverse = []
+        if INVERSE or VIABLE:
+            self.inverse.begin(static)
+        if INVERSE:                                     # part 29: plans read off the inverted model compete too
+            keys = [(a, None, None) for a in available if a not in (0, 6)]
+            inverse = self.inverse.plans(start, keys, lambda st: self.held(st, static))
+            if self.can_reset and self.start_grid is not None:   # and from the level's start, after a RESET (its
+                rs = self.reset_states()                         # effect is known): the way out of a dead end
+                restart = {cid: rs.get(cid, s) for cid, s in start.items()}
+                inverse += [([((0, None, None), None)] + path, pwin, info)
+                            for path, pwin, info in self.inverse.plans(restart, keys, lambda st: self.held(st, static))]
+            cands = cands + inverse
         if not cands:
             return None
         hunger = FIXED_HUNGER if FIXED_HUNGER is not None else (self.since + 30) / 25
         u0 = max(c[2] for c in cands)
 
-        def drive(c):                                   # part 17's DE17: deviations weighted by urgency
+        def drive(c, extra=0.0):                        # part 17's DE17: deviations weighted by urgency
             path, pwin, info = c
-            dp = 0.0 if pwin >= ALPHA else (1 - pwin) * hunger
+            dp = (0.0 if pwin >= ALPHA else (1 - pwin) * hunger) + extra   # part 29: + the hunger lost goals add
             du = 0.0 if u0 < THETA else max(0.0, u0 - info - THETA) / u0
             de = len(path) / EFFORT
             return (dp ** 3 + du ** 3 + de ** 3) ** 0.5
 
-        best = min(cands, key=lambda c: (round(drive(c), 12), len(c[0])))
+        order = sorted(cands, key=lambda c: (round(drive(c), 12), len(c[0])))
+        best = order[0]
+        if VIABLE and self.brain.contact:               # part 19's viability: goal mass a plan makes unattainable
+            v0, bestkey = self.inverse.viable(start), None
+            if v0 > 0:                                  # costs a RESET and the level so far (it only adds, so stop
+                for c in order:                         # once the drive without it is already worse)
+                    if bestkey is not None and round(drive(c), 12) > bestkey[0]:
+                        break
+                    lost = max(0.0, v0 - self.inverse.viable(self.end_of(c[0], start)))
+                    key = (round(drive(c, lost * (self.since + len(c[0])) / 25), 12), len(c[0]))
+                    if bestkey is None or key < bestkey:
+                        best, bestkey = c, key
         if best[1] <= 0 and best[2] < THETA:
             return None
         path = best[0]
         kind = "satisfice" if best[1] >= ALPHA else "explore" if best[2] >= THETA else "approach"
+        if any(best is c for c in inverse):
+            kind = "inverse " + kind
         self.plan, self.kind_of_plan = list(path), kind
         chosen = next(c for c in cands if c[0] is path)
         self.last_choice = dict(kind=kind, length=len(path), pwin=round(chosen[1], 4), info=round(chosen[2], 3),
                                 candidates=len(cands), leaf=path[-1][1] is None)
         return self.plan.pop(0)
+
+    @staticmethod
+    def end_of(path, start):
+        """The joint state a plan expects to end in (its last expected state; the start if none)."""
+        for _, key in reversed(path):
+            if key is not None:
+                return dict(key)
+        return start
 
     def fallback(self, available):
         """No plan of any kind: the action whose outcome is most uncertain here, else an untried click, else None."""

@@ -1,13 +1,30 @@
 # CLAUDE.md — Cipher's TBT Agent
 
-## ⚠ THE ONLY PROJECT (user rule, 2026-10-28) — the arc agent, `experiments/symbolics/arc_agent/`
-Work only on the arc agent unless the user explicitly decides otherwise. **START HERE:**
-`experiments/symbolics/arc_agent/ARCHITECTURE.md` (the design) and `experiments/symbolics/arc_agent/docs/AGENT.md`
-(the lab book; parts 20 onward are this agent). Everything else in `experiments/symbolics/` is in `legacy/`: never
-imported, run or worked on — including Gemini's TBT agent (`legacy/gemini_tbt_agent/`). It must never be possible to
-refer to two different agents or projects. Every change and test goes into the agent and runs through its own harness
-(`arc_agent/test_conditions.py`, `arc_agent/test_pfc.py`, `arc_agent/kaggle/harness.py`), with `venv312`, from
-`experiments/symbolics`. The sections below describe other lines of work, which are NOT to be worked on.
+## ⚠ THE ONLY PROJECT (user rule, 2026-10-29) — arc agent v2, `experiments/symbolics/arc_agent_v2/`
+Work only on **arc_agent_v2** unless the user explicitly decides otherwise. **START HERE:**
+`experiments/symbolics/arc_agent_v2/ARCHITECTURE.md`.
+
+**What v2 is:** a brain built of columns whose layers are the requirements for learning a general function:
+- L6 = coordinate system;
+- L4 = place / argument slots;
+- L5 = operation;
+- L2/3 = content;
+- memorizing goes to the hippocampus.
+
+Every representation is an SDR (sparse binary vector, d = 2048 by default), never a token. The theory is in
+`arc_agent/docs/DESIGN.md` §1a.
+
+**The predecessor, `experiments/symbolics/arc_agent/` (v1), is FROZEN (2026-10-29):**
+- It is reference machinery: read it for pieces v2 needs, copy them across, and never import from it or develop it.
+- Its lab book: `arc_agent/docs/AGENT.md` (parts 20–29).
+- Its unapplied drafts of parts 30–32: `arc_agent/unapplied/`.
+
+**Legacy:** everything else in `experiments/symbolics/` is in `legacy/`: never imported, run or worked on.
+
+**Never two confusable agents:** say "v2" or "v1", never "the arc agent". Every change and test of v2 goes into v2 and
+runs through v2's own tests, with `venv312`, from `experiments/symbolics`.
+
+The sections below describe other lines of work, which are NOT to be worked on.
 
 ## (Previous) CURRENT FOCUS (since 2026-10-03) — the Neural Turing Architecture experiment
 **START HERE:** `experiments/neural_turing_architecture/STATUS.md` — the handoff: what the experiment is, the user's

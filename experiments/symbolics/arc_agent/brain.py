@@ -208,7 +208,9 @@ class Brain:
         self.last_kind = None
         self.cache = {}                                 # planning: contexts per joint state
         self.last_evidence, self.last_cells = {}, {}     # part 24: the last step's same-cell evidence per candidate
-        self.hc_n, self.hc_calls, self.hc_hits = {}, 0, 0   # part 28: writes per hippocampal cell; planner recalls                           # M1's kind of the last action
+        self.hc_n, self.hc_calls, self.hc_hits = {}, 0, 0   # part 28: writes per hippocampal cell; planner recalls
+        self.contact = {}                               # part 29: B -> {B's operator: Counter((action, A, A - B))}
+        self.solo = Counter()                           # part 29: steps each column moved while no other planned one did                           # M1's kind of the last action
 
     # ---- the joint state and the columns used for planning ------------------------------------------------------
     def active(self):
@@ -383,6 +385,7 @@ class Brain:
         others = self.others()
         learned = []                                    # part 27: what each visible column saw, for the hidden-state area
         planned = set(others)                           # (only the models in use: the PFC's rivals are not evidence)
+        olds, moved = {c.cid: c.state for c in self.active()}, {}   # part 29: for the contact record
         ctxs = {c.cid: self.context(c, c.state, before, others, self.v1.under_at) for c in self.active()}
         painted, claimed = {}, {}                       # part 24: each grouped column's prediction of its cells
         for c in self.active():
@@ -439,6 +442,18 @@ class Brain:
                 c.state = new
             if op != f.identity:
                 report["moved"].append(c.cid)
+                if f.kind == "translation" and c.cid in planned:
+                    moved[c.cid] = op
+        trans = {c.cid: c for c in self.active() if c.frame.kind == "translation" and c.cid in planned}
+        if len(moved) == 1:                             # part 29: moved alone, so self-propelled (common fate)
+            self.solo[next(iter(moved))] += 1
+        for b, op in moved.items():                     # part 29: what moved B by op (the inverse of contact): where
+            pb = trans[b].frame.place(olds[b])[0]       # each other mover stood, screen position relative to B's
+            for a in trans:
+                if a != b:
+                    pa = trans[a].frame.place(olds[a])[0]
+                    rel = (int(pa[0] - pb[0]), int(pa[1] - pb[1]))
+                    self.contact.setdefault(b, {}).setdefault(op, Counter())[(action, a, rel)] += 1
         if self.hidden is not None and self.hidden.observe(self.t, action[0], kind if kind is not None
                                                            else ("key", action[0]),
                                                            [(m, b) for m, b in learned
@@ -446,7 +461,9 @@ class Brain:
             self.restate()
         residual = render != after
         report["unexplained"] = int(residual.sum())
-        self.pfc.observe(self._group_evidence(painted, claimed, before, after), self.last_act)   # part 24
+        occupied = {c.cid: set(map(tuple, c.frame.place(olds[c.cid]).tolist())) | set(map(tuple, c.frame.place(c.state).tolist()))
+                    for c in self.active() if c.frame.kind == "translation" and c.cid in olds}
+        self.pfc.observe(self._group_evidence(painted, claimed, before, after, occupied), self.last_act)   # part 24
         if residual.any():
             self._recruit(before, after, residual, action, report)
         # M1: did this action change anything beyond the clocks?
@@ -581,9 +598,11 @@ class Brain:
                 out[(x, y)] = int(v)
         return out, set(out)
 
-    def _group_evidence(self, painted, claimed, before, after):
+    def _group_evidence(self, painted, claimed, before, after, occupied=None):
         """Part 24: the rivals in a group are scored on the SAME cells, every cell any of them claims. Each predicts
-        the cells it doesn't model as unchanged. Returns {cid: log predictive probability of what was seen}."""
+        the cells it doesn't model as unchanged. Part 29: a cell a moving column outside the group covers, before or
+        after the step, is that column's to explain, not evidence between the rivals; and a step scores once, right or
+        wrong over those cells. Returns {cid: log predictive probability of what was seen}."""
         lp, hit, miss = {}, math.log(0.99), math.log(0.01)
         self.last_cells = {}
         for g in self.pfc.groups.values():
@@ -591,10 +610,11 @@ class Brain:
             cells = set()
             for c in members:
                 cells |= claimed[c]
-            cells = [(x, y) for x, y in cells if 0 <= x < W and 0 <= y < H]
-            for c in members:
+            ex = set().union(*[v for cid, v in (occupied or {}).items() if cid not in g["members"]]) if occupied else set()
+            cells = [(x, y) for x, y in cells if 0 <= x < W and 0 <= y < H and (x, y) not in ex]
+            for c in members:                           # part 29: one step is one outcome (the cells of one
                 n = sum(1 for x, y in cells if painted[c].get((x, y), int(before[y, x])) == int(after[y, x]))
-                lp[c] = n * hit + (len(cells) - n) * miss
+                lp[c] = hit if n == len(cells) else miss  # prediction are not independent observations)
                 self.last_cells[c] = len(cells)
         self.last_evidence = lp
         return lp
@@ -675,9 +695,11 @@ class Brain:
     def _translation(self, before, after, residual, ground):
         """The displacement most changed cells agree on (old colour at p, the same colour at p + d), and the rigid set
         that moved by it: grown from the changed cells through same-coloured neighbours that also moved by d, minus
-        unchanged cells nothing covers after the move."""
+        unchanged cells nothing covers after the move. The sources are every changed cell, also one another column now
+        covers (part 29: a pusher steps into the box's old cells); only the destinations must still be unexplained."""
         ys, xs = np.nonzero(residual)
-        old = [(x, y, before[y, x]) for x, y in zip(xs, ys) if before[y, x] != ground]
+        cy, cx = np.nonzero(before != after)
+        old = [(x, y, before[y, x]) for x, y in zip(cx, cy) if before[y, x] != ground]
         new = {}
         for x, y in zip(xs, ys):
             if after[y, x] != ground:
@@ -758,9 +780,10 @@ class Brain:
                     g[y, x] = self.v1.under_at(x, y)
         return g
 
-    def model_step(self, states, action, static):
+    def model_step(self, states, action, static, argmax=False):
         """Predicted next states of the planning columns ({cid: state}) and the bits an uncertain outcome is worth
-        (part 18: the entropy of the predicted OUTCOME). bits > 0 means the outcome here is not known."""
+        (part 18: the entropy of the predicted OUTCOME). bits > 0 means the outcome here is not known; argmax (part 29)
+        moves every column to its most probable outcome even then (for a route, where commitment checks each step)."""
         key = tuple(sorted(states.items()))
         self.hc_calls += 1                              # part 28: recall where every visit here agreed
         w = self.hc.read((self.level, key), action)
@@ -810,6 +833,7 @@ class Brain:
             ns, q = max(outcomes.items(), key=lambda kv: kv[1])
             if q < 1 - PMIN:
                 bits = max(bits, min(1.0, -sum(x * math.log2(x) for x in outcomes.values() if x > 0)))
-                continue
+                if not (argmax and not (isinstance(ns, tuple) and ns[:1] == ("unknown",))):
+                    continue
             new[cid] = ns
         return new, bits

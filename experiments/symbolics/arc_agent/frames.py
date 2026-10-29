@@ -46,6 +46,8 @@ class Translation:
         return (state[0] + op[0], state[1] + op[1], (state[2] + op[2]) % 4)
 
     def inside(self, state):
+        if abs(state[0]) > 2 * W or abs(state[1]) > 2 * H:   # far off the screen (a formula's extrapolation)
+            return False
         p = self.place(state)
         return bool(np.all((p[:, 0] >= 0) & (p[:, 0] < W) & (p[:, 1] >= 0) & (p[:, 1] < H)))
 

@@ -1,6 +1,9 @@
 # The arc agent: columns as models over reference frames, built from a brain blueprint
 
-Written 2026-10-27, before the code. **This is the only agent in `experiments/symbolics`, and the only one we work on**
+**FROZEN 2026-10-29: reference only.** The agent under development is `../arc_agent_v2/` (the user, 2026-10-29). This
+one (v1) is kept as reference machinery: read it for pieces v2 needs, copy them across, and don't develop it further.
+
+Written 2026-10-27, before the code. **This was the only agent in `experiments/symbolics`**
 (the user, 2026-10-28). Everything else in the folder is in `legacy/`: kept for reference, never imported, never
 worked on. That includes Gemini's TBT agent (`legacy/gemini_tbt_agent/`), which this agent replaced, and the
 experiments that led to it (`legacy/claude_predecessor_experiments/`; `legacy/docs/COORDINATES.md`; parts 1–19 of
@@ -15,6 +18,24 @@ instead a reusable model over a reference frame (a coordinate system), either in
 together represent the task's structure. Structure (the frame and how actions move addresses in it) is stored apart
 from content (what is at an address). Objects are derived: a set of cells that one transformation moves together.
 A prefrontal router, later, chooses and composes frames for a task.
+
+**What each layer does (the user, 2026-10-29; DESIGN.md §1a).** Learning a general function needs four things:
+- a coordinate system;
+- argument slots;
+- the content that fills them;
+- the operation between input and output.
+
+The column's layers are, by analogy with Hawkins' roles, that prior, which the no-free-lunch theorem says any learner
+that generalizes must have:
+
+| layer | what it is | in this agent |
+|---|---|---|
+| L6 | the coordinate system | the frame |
+| L4 | place: the argument slots | the column's state and the context its operator reads |
+| L5 | the operation | the operator model per action |
+| L2/3 | content | the content memory |
+
+Memorizing is what the column is bad at, so it is delegated to the hippocampus (`Brain.hc`, part 28).
 
 ## 2. The blueprint (`blueprint.py`)
 
