@@ -258,6 +258,7 @@ in `docs/LAB.md`, built, run (about 10 minutes of compute at most), and recorded
 | 1 | A1: the hippocampus, the column's layers, consolidation by P3 and P4 | part 3 | **done** |
 | 2 | coordinates learned from the frame; the bus and efference copies | part 4 | **done** |
 | 3 | one fact, two uses: one coordinate for every place, factored into (phase, coordinate) | part 5 | **done** |
+| A2 | three operations mixed; subtraction from addition facts (the reversal) | part 6 | pre-registered |
 
 **Next, proposed in the order the goal needs (for the user to confirm, 2026-10-29).** Analogy and the reversal curse
 are folded in where the goal uses them:

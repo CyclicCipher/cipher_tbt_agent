@@ -656,3 +656,89 @@ Every place with an observed future got a coordinate.
 2. **One coordinate system per frame:** the first group's.
 3. **The MDL search is exhaustive per group of free parameters,** which is fine for 2 parameters (11,025 assignments
    at p = 105) and would not scale to many.
+
+## Part 6: A2, three operations mixed, and subtraction from addition facts (pre-registered 2026-10-29, before the code)
+
+**Why:**
+- **Milestone A2:** +, − and × mod p, mixed in one stream, ≥ 0.95 on each.
+- **The agreed order puts the reversal curse here,** as subtraction learned from addition facts.
+
+**What breaks today:**
+- **P4** names a displacement by a pair of inputs. Under "+", the pair (3, 5) means "2 further"; under "×", it means
+  "5/3 times". Mixed in one stream, the pair's instances contradict each other, and P4 would refute the pair
+  everywhere.
+- **Step 3's one shift per input fails too:** under "−" a digit shifts backwards, and under "×" it doesn't shift at
+  all.
+
+### The change: generalize, then split where refuted
+
+1. **P4 per context, on refutation.**
+   - **Unchanged first:** P4 runs as before.
+   - **On refutation:** a pair refuted as one displacement is tried again as one displacement per context, where a
+     place's context is the input that led to it (the operator just read).
+   - **Only refuted pairs are split,** so A1 and the walks are unchanged.
+2. **Constant moves (absorbing elements).** An input that, from every place of one context where it was seen (at
+   least 2), led to the same place, leads there from every place of that context, until refuted. This is "× 0" always
+   giving 0, and it is the case where the move is determined by where it takes one place because it takes every
+   place there.
+3. **Coordinates per family.** The displacements of a split context are their own family, and each family's orbits
+   get their own code. A place can lie in orbits of several families.
+4. **Shifts per phase class, generalize then split.**
+   - **First:** step 3's one shift per input everywhere is tried.
+   - **Where it contradicts:** step 3's phases are grouped greedily, largest first. A phase joins the first class whose
+     shifts it shares. Otherwise it starts a class of its own. If its moves contradict any shifts, it is left out of
+     the coordinate (its moves are still known from P4).
+5. **Relating classes: the reversal, and analogy as a change of coordinates.**
+   - **The relation:** two classes in which the same inputs shift are related by one automorphism of the coordinate
+     group: x ↦ k·x in each module, k a unit.
+   - **Found** from the inputs seen in both classes, and **applied** to the inputs seen in only one.
+   - **Accepted** only if one k holds for every input seen in both.
+
+### The line between innate and learned (for the user to check)
+
+- **New innate assumptions:**
+  - generalize, then split on refutation, by the input that led to the place;
+  - constant moves;
+  - classes related by an automorphism of their coordinate group.
+- **Learned:**
+  - which pairs split;
+  - which contexts differ;
+  - the families and their codes;
+  - the classes;
+  - the automorphism. For subtraction it should come out as k = −1, the converse, found, not given.
+
+### Worlds
+
+- **A2:**
+  - **The equations:** "a op b = c", op ∈ {+, −, ×}, mod p, every symbol a random SDR, the operators included.
+  - **The stream:** one equation per episode, the three operations mixed.
+  - **The split:** train on half of the 3p² equations, test on the other half.
+  - p = 13 and 97, 3 seeds.
+- **Reversal:**
+  - **The equations:** {+, −}, with S a random third of the digits.
+  - **Training:** every subtraction "a − b" with b ∈ S is withheld. The rest are split in half for training, as usual.
+  - **The test:** every subtraction by b ∈ S. Those digits are seen as the second argument only of additions.
+  - p = 13 and 97, 3 seeds.
+
+### Predictions
+
+| # | prediction |
+|---|---|
+| G1 | A2, held-out accuracy in every seed: + ≥ 0.99, − ≥ 0.99, × ≥ 0.95 |
+| G2 | P4 splits the pairs shared across operators; every move it infers is correct (checked against the world's tables) |
+| G3 | coordinates per family: an additive orbit of the results with the chain [p]; and under ×, an orbit of the p − 1 nonzero results with the chain of the multiplicative group, [2, 3, 4] for p = 13 and [2, 3, 4, 8, 16, 32] for p = 97 (discrete-log coordinates, found, not given; 0 is outside it, absorbing) |
+| G4 | factoring with classes: the digits shift alike from the start and after "+"; after "−" they shift by the negated amounts, related by k = −1; "×" is left out of the coordinate; naming for "=" |
+| G5 | the reversal: subtractions by b ∈ S ≥ 0.99. With the class relation off: ≤ 0.05 |
+| G6 | no regression: part 3 (A1), part 5 (F1–F3) and the walk worlds reproduce |
+| G7 | cost: training and sleep for A2 at p = 97 under 30 s per run |
+
+**What would refute the step:**
+- **G1's × below 0.95:** splitting and constant moves don't recover the absorbing 0 and the ratios.
+- **G5 failing:** the relation isn't found, or isn't used.
+- **G6 failing:** splitting changed the single-operation worlds.
+
+**Not in this step:**
+- chains;
+- numbers of several digits;
+- division;
+- relations between classes that are not automorphisms (for × against +, the relation is the logarithm).
