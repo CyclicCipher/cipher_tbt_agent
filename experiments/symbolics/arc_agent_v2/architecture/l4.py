@@ -3,7 +3,7 @@
 The input arrives here, at the column's current place, and meets the prediction L2/3 made for it. A surprise is an
 input the prediction didn't match (less than half its bits). The count of surprises is the column's prediction error.
 """
-from arc_agent_v2.HDClibrary import overlap
+from arc_agent_v2.architecture.HDClibrary import overlap
 
 
 class L4:

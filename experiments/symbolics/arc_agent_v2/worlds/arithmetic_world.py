@@ -24,7 +24,7 @@ that prediction to the nearest symbol (here, in the world).
 """
 import numpy as np
 
-from arc_agent_v2.HDClibrary import CategoryEncoder, ItemMemory
+from arc_agent_v2.architecture.HDClibrary import CategoryEncoder, ItemMemory
 
 OPS = {"+": lambda a, b, p: (a + b) % p,
        "-": lambda a, b, p: (a - b) % p,

@@ -1,9 +1,9 @@
 """Tests of config: every preset is consistent. Run from experiments/symbolics:
-    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/test_config.py -q
+    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/tests/test_config.py -q
 """
 import pytest
 
-from arc_agent_v2.config import PRESETS, BrainConfig, Region
+from arc_agent_v2.config.config import PRESETS, BrainConfig, Region
 
 
 def test_presets_are_consistent():

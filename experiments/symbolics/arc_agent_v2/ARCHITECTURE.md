@@ -100,9 +100,9 @@ Every representation is an **SDR**, a sparse binary vector:
 - **Synapses:** HTM permanences with Hebbian learning;
 - **SpatialPooler:** HTM's learned encoder.
 
-All of it is tested in `test_hdc.py`.
+All of it is tested in `tests/test_hdc.py`.
 
-## 3. Configuration (`config.py`, BUILT)
+## 3. Configuration (`config/config.py`, BUILT)
 
 `BrainConfig` holds the SDR's dimensions and the **regions of the neocortex**. Each region has:
 - a number of columns;
@@ -121,19 +121,31 @@ Hyperparameters are added to the config as the parts that use them are built.
 
 ## 4. The files
 
+**The folders** (the user, 2026-10-29):
+- `architecture/` holds the brain.
+- `config/` holds the config.
+- `worlds/` holds the environments. The brain never imports them (§0; `tests/test_rule.py` checks every module in
+  `architecture/` and the config).
+- `tests/` holds the tests and the pre-registered harnesses.
+- `docs/` holds the lab book and the research notes.
+- `runs/` holds the run outputs (not committed).
+
+The brain's files are all in `architecture/` except the config.
+
 | file | what it owns | status |
 |---|---|---|
-| `HDClibrary.py` | the SDR and every operation on it | **built** (16 tests) |
-| `config.py` | hyperparameters; the regions | **built** (2 tests) |
-| `brain.py` | builds the regions, columns, bus and hippocampus from a config; runs one step (sense → bus → columns → bus → act) | not designed yet |
-| `bus.py` | the thalamocortical bus: carries SDRs between regions (feedforward drivers, feedback); later the PFC's gating | not designed yet |
-| `column.py` | the coordinator: owns one column's four layers and passes SDRs between them in a fixed order each step | not designed yet |
-| `l6.py` | the coordinate system: the column's frame and its place in it (a block code); moving the place by a displacement (path integration) | proposal below |
-| `l4.py` | the argument slots: the place(s) the current input sits at; feedforward input arrives here | proposal below |
-| `l5.py` | the operation: which displacement or transformation of L6's frame turns the input into the output; the column's output to the bus | proposal below |
-| `l23.py` | content: what is at each place (place ⊗ content, recalled by overlap); lateral voting between columns | proposal below |
-| `hippocampus.py` | episodes: fast, one-shot memory of what happened, for what the columns can't generalize | **not designed yet** (§5, question 3) |
-| `frameLearning.py` | learning coordinate systems, transformations and functions from examples | proposal below |
+| `HDClibrary.py` | the SDR and every operation on it | **built** |
+| `config/config.py` | hyperparameters; the regions; efference copies | **built** |
+| `brain.py` | builds the regions, columns, bus and hippocampus from a config; awake steps; sleep (consolidation) | **built** (parts 3–6) |
+| `bus.py` | the thalamocortical bus: stamped, exactly-once delivery of every input by receptive field; efference copies | **built** (part 4) |
+| `thalamus.py` | the active gate on the bus: holding, gating and routing values into argument slots (`docs/CHAINS.md` §6) | not designed yet |
+| `column.py` | the coordinator: owns one column's four layers and passes SDRs between them in a fixed order each step | **built** |
+| `l6.py` | the coordinate system: the column's place, and its (phase, coordinate) | **built** |
+| `l4.py` | the argument slots: the place(s) the current input sits at; feedforward input arrives here | **built** (sensing only) |
+| `l5.py` | the operation: the moves and shifts that take a place to the next | **built** |
+| `l23.py` | content: what is at each place | **built** |
+| `hippocampus.py` | episodes: fast, one-shot memory of what happened (DG and CA3; CA1 not built), and episode ends | **built** |
+| `frameLearning.py` | consolidation: P3, P4 (per context), coordinates, factoring, shift classes and their relation | **built** (parts 3–6) |
 
 **The layers on milestone A** (a direction, to be pre-registered in detail with the code, `docs/LAB.md` part 3). The
 input is the written equation, "a + b = c", one random SDR per symbol, one equation per episode. The brain's only task
@@ -259,7 +271,7 @@ in `docs/LAB.md`, built, run (about 10 minutes of compute at most), and recorded
 | 2 | coordinates learned from the frame; the bus and efference copies | part 4 | **done** |
 | 3 | one fact, two uses: one coordinate for every place, factored into (phase, coordinate) | part 5 | **done** |
 | A2 | three operations mixed; subtraction from addition facts (the reversal) | part 6 | **done** |
-| chains | chained expressions ("a + b + c ="): research first (below) | — | not started |
+| chains | chained expressions ("a + b + c ="): the research is `docs/CHAINS.md` | — | researched; awaiting the user's choices (CHAINS.md §6) |
 
 **Next, proposed in the order the goal needs (for the user to confirm, 2026-10-29).** Analogy and the reversal curse
 are folded in where the goal uses them:
@@ -281,7 +293,10 @@ are folded in where the goal uses them:
    3. **How brains solve chained expressions.**
    4. **How these interact** to solve chained expressions without exponential blowups anywhere.
 
-   To be researched before this step is designed.
+   **Researched** (`docs/CHAINS.md`, 2026-10-29). Two proposals:
+   - **A:** loops in the phase automaton, by P3 lifted to phases, with the coordinate as the running result.
+   - **B:** a held second value for precedence, through a `thalamus.py` that holds, gates and routes values into
+     argument slots: the complement to `bus.py`, as the user suggested.
 3. **A3:** place value as the group's chain of quotients (part 4, finding 3).
 4. **B1:** a V1 sheet of columns, a frame per receptive field, the spatial pooler, IT.
 5. **B2:** the digit in its own frame. Analogical mapping as aligning a digit's frame to a stored one.

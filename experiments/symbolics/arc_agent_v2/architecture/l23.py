@@ -3,7 +3,7 @@
 The content at a place is what came next there, by sensor: counts of the inputs, keyed by the place's SDR. It is the
 column's prediction of the next input from a sensor (P2): the input of that sensor that most often came next here.
 """
-from arc_agent_v2.HDClibrary import Associations
+from arc_agent_v2.architecture.HDClibrary import Associations
 
 
 class L23:

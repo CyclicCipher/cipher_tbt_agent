@@ -1,6 +1,6 @@
 """Part 5: one fact, two uses (docs/LAB.md part 5). Run from experiments/symbolics:
-    ../../venv312/Scripts/python.exe -m arc_agent_v2.test_a5 [--out arc_agent_v2/runs/a5.json]   (the pre-registered runs)
-    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/test_a5.py -q                           (a fast check)
+    ../../venv312/Scripts/python.exe -m arc_agent_v2.tests.test_a5 [--out arc_agent_v2/runs/a5.json]   (the pre-registered runs)
+    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/tests/test_a5.py -q                           (a fast check)
 
 **The checks:**
 - **F1:** one coordinate across the rings.
@@ -19,13 +19,13 @@ import time
 
 import numpy as np
 
-from arc_agent_v2.arithmetic_world import ArithmeticWorld
-from arc_agent_v2.brain import Brain
-from arc_agent_v2.config import ARITHMETIC, BrainConfig
-from arc_agent_v2.test_a1 import run as run_a1
-from arc_agent_v2.test_a4 import EXCURSION, KINDS, a1 as a4_a1, shortcut, summarize, walk_checks
+from arc_agent_v2.worlds.arithmetic_world import ArithmeticWorld
+from arc_agent_v2.architecture.brain import Brain
+from arc_agent_v2.config.config import ARITHMETIC, BrainConfig
+from arc_agent_v2.tests.test_a1 import run as run_a1
+from arc_agent_v2.tests.test_a4 import EXCURSION, KINDS, a1 as a4_a1, shortcut, summarize, walk_checks
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # arc_agent_v2/
 SEEDS = (0, 1, 2)
 
 

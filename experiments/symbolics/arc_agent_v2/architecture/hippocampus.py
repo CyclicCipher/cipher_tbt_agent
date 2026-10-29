@@ -21,7 +21,7 @@ episodes only ended has no recorded future, and so agrees with any place (P3's f
 """
 import numpy as np
 
-from arc_agent_v2.HDClibrary import SDR, Associations, Conjunction
+from arc_agent_v2.architecture.HDClibrary import SDR, Associations, Conjunction
 
 
 class Hippocampus:

@@ -1,11 +1,11 @@
 """Tests of the arithmetic world: it shows only structureless SDRs, splits cleanly, and its scorer is sound (an oracle
 scores 1, a guess scores chance). Run from experiments/symbolics:
-    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/test_arithmetic_world.py -q
+    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/tests/test_arithmetic_world.py -q
 """
 import numpy as np
 
-from arc_agent_v2.arithmetic_world import ArithmeticWorld
-from arc_agent_v2.HDClibrary import SDR, overlap, thin
+from arc_agent_v2.worlds.arithmetic_world import ArithmeticWorld
+from arc_agent_v2.architecture.HDClibrary import SDR, overlap, thin
 
 
 def test_symbols_are_structureless_sdrs():

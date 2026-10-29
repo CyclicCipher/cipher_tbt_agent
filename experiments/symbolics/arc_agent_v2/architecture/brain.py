@@ -16,11 +16,11 @@ lived through.
 **Not built yet:** one frame per receptive field (regions that receive different sensors would need their own
 consolidation). A1's and the walk worlds' configs have one region.
 """
-from arc_agent_v2.bus import Bus
-from arc_agent_v2.column import Column
-from arc_agent_v2.config import ARITHMETIC
-from arc_agent_v2.frameLearning import consolidate
-from arc_agent_v2.hippocampus import Hippocampus
+from arc_agent_v2.architecture.bus import Bus
+from arc_agent_v2.architecture.column import Column
+from arc_agent_v2.config.config import ARITHMETIC
+from arc_agent_v2.architecture.frameLearning import consolidate
+from arc_agent_v2.architecture.hippocampus import Hippocampus
 
 
 class Brain:

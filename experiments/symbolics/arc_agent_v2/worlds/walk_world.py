@@ -23,7 +23,7 @@ from itertools import permutations
 
 import numpy as np
 
-from arc_agent_v2.HDClibrary import SDR, CategoryEncoder
+from arc_agent_v2.architecture.HDClibrary import SDR, CategoryEncoder
 
 KINDS = ("E1 torus", "E2 cycle", "O1 A5", "O2 box")
 EXCURSION = {"E1 torus": (5, 9), "E2 cycle": (20, 8)}  # k in 1..K steps of action 0, m in 1..M of action 2

@@ -1,9 +1,9 @@
 """Tests of HDClibrary: each checks a property the library's docstrings claim. Run from experiments/symbolics:
-    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/test_hdc.py -q
+    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/tests/test_hdc.py -q
 """
 import numpy as np
 
-from arc_agent_v2.HDClibrary import (SDR, Associations, Blocks, CategoryEncoder, Conjunction, GridEncoder,
+from arc_agent_v2.architecture.HDClibrary import (SDR, Associations, Blocks, CategoryEncoder, Conjunction, GridEncoder,
                                      ItemMemory, Modules, Permutation,
                                      ScalarEncoder, SpatialPooler, Synapses, bundle, cdt, chance_overlap, jaccard,
                                      kwta, overlap, shift, thin, union)

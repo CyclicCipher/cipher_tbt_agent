@@ -69,7 +69,7 @@ import numpy as np
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
-from arc_agent_v2.HDClibrary import Modules
+from arc_agent_v2.architecture.HDClibrary import Modules
 
 
 @dataclass

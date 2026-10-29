@@ -1,6 +1,6 @@
 """Part 4: coordinates learned from the frame (docs/LAB.md part 4, with its amendments). Run from experiments/symbolics:
-    ../../venv312/Scripts/python.exe -m arc_agent_v2.test_a4 [--out arc_agent_v2/runs/a4.json]   (the pre-registered runs)
-    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/test_a4.py -q                           (a fast check)
+    ../../venv312/Scripts/python.exe -m arc_agent_v2.tests.test_a4 [--out arc_agent_v2/runs/a4.json]   (the pre-registered runs)
+    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/tests/test_a4.py -q                           (a fast check)
 
 **The checks:**
 - **C1–C3:** A1's frames: the module chain on the ring after "a + b"; a move found from one instance; overlap as
@@ -19,14 +19,14 @@ import time
 
 import numpy as np
 
-from arc_agent_v2.arithmetic_world import ArithmeticWorld
-from arc_agent_v2.brain import Brain
-from arc_agent_v2.config import ARITHMETIC, WALK, BrainConfig
-from arc_agent_v2.HDClibrary import overlap
-from arc_agent_v2.test_a1 import place_after, run as run_a1
-from arc_agent_v2.walk_world import EXCURSION, KINDS, WalkWorld
+from arc_agent_v2.worlds.arithmetic_world import ArithmeticWorld
+from arc_agent_v2.architecture.brain import Brain
+from arc_agent_v2.config.config import ARITHMETIC, WALK, BrainConfig
+from arc_agent_v2.architecture.HDClibrary import overlap
+from arc_agent_v2.tests.test_a1 import place_after, run as run_a1
+from arc_agent_v2.worlds.walk_world import EXCURSION, KINDS, WalkWorld
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # arc_agent_v2/
 SEEDS = (0, 1, 2)
 STEPS, TRIALS, EXPLORE = 1000, 20, 40
 

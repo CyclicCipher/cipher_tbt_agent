@@ -1,6 +1,6 @@
 """A1: arithmetic with no operation given (docs/LAB.md part 3). Run from experiments/symbolics:
-    ../../venv312/Scripts/python.exe -m arc_agent_v2.test_a1 [--out arc_agent_v2/runs/a1.json]   (the pre-registered runs)
-    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/test_a1.py -q                           (a fast check)
+    ../../venv312/Scripts/python.exe -m arc_agent_v2.tests.test_a1 [--out arc_agent_v2/runs/a1.json]   (the pre-registered runs)
+    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/tests/test_a1.py -q                           (a fast check)
 
 Each run:
 1. builds a world (addition mod p, a random split of the equations) and a brain;
@@ -20,11 +20,11 @@ import sys
 import time
 import numpy as np
 
-from arc_agent_v2.arithmetic_world import ArithmeticWorld
-from arc_agent_v2.brain import Brain
-from arc_agent_v2.config import ARITHMETIC, BrainConfig
+from arc_agent_v2.worlds.arithmetic_world import ArithmeticWorld
+from arc_agent_v2.architecture.brain import Brain
+from arc_agent_v2.config.config import ARITHMETIC, BrainConfig
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # arc_agent_v2/
 
 
 def run(p, frac, seed, arm, op="+"):

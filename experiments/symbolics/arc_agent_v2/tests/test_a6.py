@@ -1,7 +1,7 @@
 """Part 6: A2, three operations mixed, and subtraction from addition facts (docs/LAB.md part 6). Run from
 experiments/symbolics:
-    ../../venv312/Scripts/python.exe -m arc_agent_v2.test_a6 [--out arc_agent_v2/runs/a6.json]   (the pre-registered runs)
-    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/test_a6.py -q                           (a fast check)
+    ../../venv312/Scripts/python.exe -m arc_agent_v2.tests.test_a6 [--out arc_agent_v2/runs/a6.json]   (the pre-registered runs)
+    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/tests/test_a6.py -q                           (a fast check)
 
 **The checks:**
 - **G1:** A2's held-out accuracy per operation.
@@ -22,11 +22,11 @@ import time
 
 import numpy as np
 
-from arc_agent_v2.arithmetic_world import OPS, ArithmeticWorld
-from arc_agent_v2.brain import Brain
-from arc_agent_v2.config import ARITHMETIC, BrainConfig
+from arc_agent_v2.worlds.arithmetic_world import OPS, ArithmeticWorld
+from arc_agent_v2.architecture.brain import Brain
+from arc_agent_v2.config.config import ARITHMETIC, BrainConfig
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # arc_agent_v2/
 SEEDS = (0, 1, 2)
 CHAIN = {13: (2, 3, 4), 97: (2, 3, 4, 8, 16, 32)}   # the multiplicative group's chain of quotients (G3)
 
@@ -131,9 +131,9 @@ def reversal(p, seed):
 
 def regression():
     """G6: parts 3, 4 and 5 against their recorded runs."""
-    from arc_agent_v2.test_a1 import run as run_a1
-    from arc_agent_v2.test_a4 import EXCURSION, a1 as a4_a1, shortcut, walk_checks
-    from arc_agent_v2.test_a5 import answers, one_fact
+    from arc_agent_v2.tests.test_a1 import run as run_a1
+    from arc_agent_v2.tests.test_a4 import EXCURSION, a1 as a4_a1, shortcut, walk_checks
+    from arc_agent_v2.tests.test_a5 import answers, one_fact
     res = {}
     base3 = {(r["p"], r["seed"]): r for r in json.load(open(os.path.join(HERE, "runs", "a1.json")))
              if r["arm"] == "full" and r["op"] == "+" and r["frac"] == 0.5}

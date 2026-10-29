@@ -1,11 +1,11 @@
 """Tests of the bus's guarantees for efference copies and receptive fields (bus.py). Run from experiments/symbolics:
-    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/test_bus.py -q
+    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/tests/test_bus.py -q
 """
 import numpy as np
 
-from arc_agent_v2.brain import Brain
-from arc_agent_v2.config import WALK, BrainConfig, Region
-from arc_agent_v2.walk_world import WalkWorld
+from arc_agent_v2.architecture.brain import Brain
+from arc_agent_v2.config.config import WALK, BrainConfig, Region
+from arc_agent_v2.worlds.walk_world import WalkWorld
 
 TWO = BrainConfig(WALK.sdr, ("motor", "retina"),
                   (Region("assoc", 3, "learned", ("motor", "retina"), moves=("motor",)),

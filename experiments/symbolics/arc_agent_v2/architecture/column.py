@@ -15,10 +15,10 @@ the phase: one symbol for the whole phase, or the symbol whose own position is t
 The column learns its frame from consolidation (`install`), not online. Online memory is the hippocampus's job.
 `stamp` is the bus's check that the column applied every message it was sent.
 """
-from arc_agent_v2.l23 import L23
-from arc_agent_v2.l4 import L4
-from arc_agent_v2.l5 import L5
-from arc_agent_v2.l6 import L6
+from arc_agent_v2.architecture.l23 import L23
+from arc_agent_v2.architecture.l4 import L4
+from arc_agent_v2.architecture.l5 import L5
+from arc_agent_v2.architecture.l6 import L6
 
 
 class Column:

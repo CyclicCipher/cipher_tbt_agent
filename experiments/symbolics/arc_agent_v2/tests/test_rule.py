@@ -1,20 +1,23 @@
 """The hard rule (ARCHITECTURE.md section 0), checked on the brain's own source: no module of the brain imports a
 world, or reads a label, a value or a written symbol. The worlds and the tests may; the brain may not.
-    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/test_rule.py -q
+    ../../venv312/Scripts/python.exe -m pytest arc_agent_v2/tests/test_rule.py -q
 """
 import ast
 import os
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-BRAIN = ("brain", "bus", "column", "l4", "l5", "l6", "l23", "hippocampus", "frameLearning", "config")
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # arc_agent_v2/
+# every module of the brain (architecture/, and the config), except the SDR library, which also serves the worlds
+BRAIN = sorted(os.path.join(HERE, "architecture", f) for f in os.listdir(os.path.join(HERE, "architecture"))
+               if f.endswith(".py") and f not in ("__init__.py", "HDClibrary.py")) +         [os.path.join(HERE, "config", "config.py")]
 ENCODERS = {"CategoryEncoder", "ScalarEncoder", "GridEncoder"}   # the data-to-SDR boundary: the worlds' side
-WORLDS = ("arithmetic_world", "walk_world")
+WORLDS = ("worlds", "arithmetic_world", "walk_world")
 LABEL_NAMES = {"symbols", "written", "answer", "decode", "labels", "OPS", "sdr_of", "held_out", "train"}
 
 
 def test_brain_never_sees_a_world_or_a_label():
+    assert len(BRAIN) >= 10
     for name in BRAIN:
-        tree = ast.parse(open(os.path.join(HERE, name + ".py"), encoding="utf-8").read())
+        tree = ast.parse(open(name, encoding="utf-8").read())
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 mods = [a.name for a in node.names] + ([node.module] if isinstance(node, ast.ImportFrom) else [])

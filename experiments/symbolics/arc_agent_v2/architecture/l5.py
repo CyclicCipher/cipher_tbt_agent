@@ -16,7 +16,7 @@ where an input has led, or must lead, from each place.
 """
 from collections import deque
 
-from arc_agent_v2.HDClibrary import Associations, Conjunction
+from arc_agent_v2.architecture.HDClibrary import Associations, Conjunction
 
 ROUTE_STATES = 20000
 
