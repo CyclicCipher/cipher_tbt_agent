@@ -76,6 +76,24 @@ def frame_checks(world, brain, op="+"):
                 eq_one_to_one=len(set(eq_move.values()) - {None}) == len(C) and None not in eq_move.values())
 
 
+def positions(p, frac=0.5, seed=0, arm="full"):
+    """The brain's prediction at every position of the held-out equations, not only after "=": the fraction right
+    after k symbols, k = 0..4 (what comes next: a, "+", b, "=", c). Positions 0 and 2 are the world's free choices;
+    1, 3 and 4 are determined by what came before."""
+    world = ArithmeticWorld(p=p, train_frac=frac, seed=seed)
+    brain = Brain(BrainConfig(ARITHMETIC.sdr, ARITHMETIC.sensors, ARITHMETIC.regions, seed),
+                  consolidation=(arm == "full"))
+    for ep in world.epoch(np.random.default_rng(seed)):
+        brain.episode(ep)
+    brain.sleep()
+    hits = np.zeros(5)
+    for eq in world.held_out:
+        ep, written = world.episode(*eq), world.written(*eq)
+        for k in range(5):
+            hits[k] += world.decode(brain.predict_after(ep[:k])) == written[k]
+    return (hits / len(world.held_out)).round(3).tolist()
+
+
 PLAN = ([(13, 0.5), (97, 0.5)], [(13, 0.3), (97, 0.1)])  # M1/M2; M3 (full only)
 CONTROL = [(13, 0.5), (97, 0.5)]                            # the apparatus check: "?", a random table (full only)
 

@@ -120,3 +120,80 @@ or any value.
 **What would refute the design:**
 - **M1 failing with M4 holding:** the frame is found but not used for prediction (a wiring fault).
 - **M4 failing:** P3 and P4 are not enough to find the ring from half the table.
+
+## Part 3 results (2026-10-29)
+
+**Build check: the first run was killed after minutes.** The cost was my implementation, not the architecture.
+- **The memories were quadratic:** every store scanned all items.
+- **`Conjunction` used dense 2048 × 2048 projections.**
+- **A wasted loop in P4's fill:** it scanned every pair at a place, not only the new move's.
+- **`SDR !=` ran a numpy array comparison.**
+- **A 14-process pool.**
+
+All fixed (commit `11039a7`), and the outputs are identical to before on every consistent configuration. A run at
+p = 97 now takes about 4 s with scoring; p = 13 takes 54 ms end to end.
+
+**Results** (`runs/a1.txt`, `runs/a1.json`; 3 seeds each; 83 s for all 24 runs):
+
+| p | train fraction | arm | held-out accuracy | training accuracy | seconds per run |
+|---|---|---|---|---|---|
+| 13 | 0.5 | full | 1.0, 1.0, 1.0 | 1.0 ×3 | 0.1 |
+| 13 | 0.5 | memorize-only | 0.0, 0.0, 0.0 | 1.0 ×3 | 0.0 |
+| 97 | 0.5 | full | 1.0, 1.0, 1.0 | 1.0 ×3 | 3.9–4.1 |
+| 97 | 0.5 | memorize-only | 0.0, 0.0, 0.0 | 1.0 ×3 | 1.9–2.0 |
+| 13 | 0.3 | full | 1.0, 1.0, 1.0 | 1.0 ×3 | 0.1 |
+| 97 | 0.1 | full | 1.0, 1.0, 1.0 | 1.0 ×3 | 4.1–4.2 |
+| 13 | 0.5 | full, "?" control | 0.012, 0.024, 0.024 (chance 0.077) | 1.0 ×3 | 0.1 |
+| 97 | 0.5 | full, "?" control | 0.0002, 0.0, 0.0 (chance 0.010) | 1.0 ×3 | 6.8–6.9 |
+
+**The learned frame (M4), identical in every seed:**
+
+| p | fraction | moves inferred | held-out equations | places after "a + b =" | displacements | full permutations of the places after "a + b" | their order |
+|---|---|---|---|---|---|---|---|
+| 13 | 0.5 | 85 | 85 | 13 | 12 | 12 | 13 |
+| 13 | 0.3 | 118 | 118 | 13 | 12 | 12 | 13 |
+| 97 | 0.5 | 4705 | 4705 | 97 | 96 | 96 | 97 |
+| 97 | 0.1 | 8468 | 8468 | 97 | 96 | 96 | 97 |
+
+**The prediction at every position of the held-out equations** (seed 0; what comes next after k symbols):
+
+| p | arm | a | "+" | b | "=" | c |
+|---|---|---|---|---|---|---|
+| 13 | full | 0.035 | 1.0 | 0.0 | **1.0** | **1.0** |
+| 13 | memorize-only | 0.035 | 1.0 | 0.0 | 0.0 | 0.0 |
+| 97 | full | 0.008 | 1.0 | 0.0 | **1.0** | **1.0** |
+| 97 | memorize-only | 0.008 | 1.0 | 0.0 | 0.0 | 0.0 |
+
+- **Positions a and b are the world's free choices.** b scores 0 by construction: the brain predicts a b seen after
+  "a +" in training, and a held-out b never was.
+
+**Verdicts:**
+- **M1 holds:** held-out accuracy is 1.0 for p = 13 and p = 97.
+- **M2 holds:** memorize-only scores 0.0 on held-out equations and 1.0 on training ones.
+- **M3 holds:** 1.0 at train fractions 0.3 (p = 13) and 0.1 (p = 97).
+- **M4 (a) holds:** exactly p places after "a + b =".
+- **M4 (b) holds, with a deviation:** it was measured on the places after "a + b", where the displacements act; no
+  place offers two inputs leading to the places after "=". There, every displacement but staying is a full
+  permutation of order exactly p: the ring was found, not given.
+- **M4 (c) is not measurable as pre-registered,** for the same reason. In its place, "=" carries the ring one-to-one
+  onto the places after "=" in every run.
+- **M5 holds:** about 4 s per run at p = 97.
+- **Apparatus check:** on the random table there is no full permutation, and held-out accuracy is at or below
+  chance. There is no leak.
+
+**What this shows:**
+- **The meaning of each digit was learned as the move it makes.** No symbol, value, role or operation was given:
+  "=" included, which the brain now anticipates on equations it never saw.
+- **The generalization is P4.** Moves are pooled by the place pairs they share, until each digit's relative move is
+  a full permutation of the ring. Exactly the held-out moves were inferred, with no spurious ones.
+- **Memorizing alone generalizes nothing.**
+
+**Limits:**
+1. **One operation, one fixed format, numbers of a single symbol.**
+2. **P4 holds exactly for a group,** so 1.0 is what an exact learner should reach. A2 (several operations) and A3
+   (multi-digit numbers with carry) are the real tests.
+3. **On the random table P4 still infers some wrong moves** (19–112), and nothing retracts them: "generalize, then
+   correct" has no correction yet.
+4. **The ring after "a" and the ring after "a + b" are different places.** The same displacements act on both, but
+   the brain does not yet know that "the place 7 takes you to from the start" is "the place a sum of 7 reaches".
+   That is the other half of "one fact, two uses".
