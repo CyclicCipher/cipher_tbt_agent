@@ -24,6 +24,11 @@ where the moves allow them.
   - A pooled displacement fills in moves never seen: from u, input y leads to d(x, y) applied to where x leads.
   - A displacement must stay a one-to-one map. An instance that would send one place to two places (or two places to
     one) refutes its pair, which is then not used. A pooling that would do so is not made.
+- **One coordinate for every place, and phases (part 5).** Each moving input is one shift of a coordinate shared
+  by every place, wherever it is made (P4's regularity across the frame); the start's coordinate is found. Naming (the
+  determined symbol that comes next names the place's position) is tested per input and accepted only if consistent;
+  where the data leave shifts free, the solution with the fewest inputs that shift (MDL). The coordinate group's orbits
+  on the places are the phases; a block of inputs leads from a phase to one phase.
 - **Coordinates (part 4; COORDINATES.md parts 1, 5 and 6).**
   - **The generators:** the moves and displacements that permute a set of places. The places they connect form
     orbits.
@@ -79,11 +84,14 @@ class Frame:
     displacements: list = field(default_factory=list)   # each a {place: place} map, not refuted
     coords: list = field(default_factory=list)          # [Orbit]
     declined: list = field(default_factory=list)        # [(orbit size, why no coordinates)]
+    factored: object = None                             # part 5: a Factored, or None
+    unfactored: str = None                              # why not, if not
 
 
-def consolidate(transitions, contents, start, regularity=True, coordinates=None):
+def consolidate(transitions, contents, start, regularity=True, coordinates=None, factoring=True):
     """A Frame from the hippocampus's replay: transitions [(place, input, next place, times seen)] and contents
-    [(place, sensor, input, times seen)], of episodes that start at start. coordinates = (d, w, seed), or None."""
+    [(place, sensor, input, times seen)], of episodes that start at start. coordinates = (d, w, seed), or None;
+    factoring: part 5's (phase, coordinate) factorization, where there are coordinates."""
     places = same_future(transitions, contents)
     pid, P, xid, X = {}, [], {}, []
 
@@ -119,8 +127,11 @@ def consolidate(transitions, contents, start, regularity=True, coordinates=None)
     moves = [(P[u], X[x], P[move[u, x]]) for u, x in zip(us.tolist(), xs.tolist())]
     content = [(P[u], s, X[x], int(n)) for u in range(len(P)) for s, c in cont[u].items() for x, n in c.items()]
     disp = [{P[a]: P[b] for a, b in m} for m in maps]
-    coords, declined = coordinate(move, maps, P, X, coordinates) if coordinates and U else ([], [])
-    return Frame(places.get(start, start), moves, content, places, inferred, disp, coords, declined)
+    coords, declined, systems = coordinate(move, maps, P, X, coordinates) if coordinates and U else ([], [], [])
+    fac, why = None, None
+    if factoring and systems and places.get(start, start) in pid:
+        fac, why = factor(move, cont, pid[places.get(start, start)], P, X, systems)
+    return Frame(places.get(start, start), moves, content, places, inferred, disp, coords, declined, fac, why)
 
 
 def same_future(transitions, contents=()):
@@ -416,33 +427,51 @@ def _relabel(root, move, cont, P, places):
 
 
 # ---- coordinates ---------------------------------------------------------------------------------------------------
+def _cyclic(col):
+    """A map (place -> place, -1 where undefined) restricted to the places on its complete cycles, where it is a
+    permutation; -1 elsewhere (part 5: a map can permute one set of places while being partial elsewhere)."""
+    n = col.size
+    out, state = np.full(n, -1, np.int64), np.zeros(n, np.int8)
+    for s in range(n):
+        if col[s] < 0 or state[s]:
+            continue
+        path, u = [], s
+        while u >= 0 and state[u] == 0:
+            state[u] = 1
+            path.append(u)
+            u = int(col[u])
+        if u >= 0 and state[u] == 1:                    # closed a cycle (a fixed point carries no structure)
+            cyc = path[path.index(u):]
+            if len(cyc) > 1:
+                out[cyc] = col[cyc]
+        state[path] = 2
+    return out
+
+
 def coordinate(move, maps, P, X, cfg):
-    """Coordinates for every orbit whose moves commute (module codes), and the orbits declined, with why."""
+    """Coordinates for every orbit whose moves commute (module codes), the orbits declined with why, and the systems
+    for factor(): [(orbit's place ids, phases (n x modules), Modules)]. Orbits acted on by the same generators share
+    one code: the first one's characters, carried to the others by its generators' steps."""
     d, w, seed = cfg
     nP, nX = move.shape
-    gens = []                                           # (input id or None, permutation as a full-length array)
+    gens = []                                           # (input id or None, permutation on its complete cycles)
     for x in range(nX):
-        col = move[:, x]
-        dom = np.flatnonzero(col >= 0)
-        if dom.size and np.array_equal(np.sort(col[dom]), dom):
-            gens.append((x, col))
+        arr = _cyclic(move[:, x])
+        if (arr >= 0).any():
+            gens.append((x, arr))
     for m in maps:
-        s, t = np.array([a for a, _ in m]), np.array([b for _, b in m])
-        if np.array_equal(np.sort(s), np.sort(t)):
-            arr = np.full(nP, -1, np.int64)
-            arr[s] = t
+        arr = np.full(nP, -1, np.int64)
+        arr[[a for a, _ in m]] = [b for _, b in m]
+        arr = _cyclic(arr)
+        if (arr >= 0).any():
             gens.append((None, arr))
     if not gens:
-        return [], [(0, "no move permutes a set of places")]
-    rows, cols = [], []
-    for _, arr in gens:
-        dom = np.flatnonzero(arr >= 0)
-        rows.append(dom)
-        cols.append(arr[dom])
-    g = coo_matrix((np.ones(sum(r.size for r in rows), np.int8), (np.concatenate(rows), np.concatenate(cols))),
-                   shape=(nP, nP))
+        return [], [(0, "no move permutes a set of places")], []
+    rows = np.concatenate([np.flatnonzero(arr >= 0) for _, arr in gens])
+    cols = np.concatenate([arr[arr >= 0] for _, arr in gens])
+    g = coo_matrix((np.ones(rows.size, np.int8), (rows, cols)), shape=(nP, nP))
     _, lab = connected_components(g, directed=False)
-    out, declined = [], []
+    out, declined, systems, shared = [], [], [], {}
     rng = np.random.default_rng((seed, 606))
     for o, label in enumerate(sorted(set(lab.tolist()), key=lambda l: int(np.flatnonzero(lab == l)[0]))):
         O = np.flatnonzero(lab == label)
@@ -451,28 +480,34 @@ def coordinate(move, maps, P, X, cfg):
             continue
         loc = np.full(nP, -1, np.int64)
         loc[O] = np.arange(n)
-        G, gin = [], []
-        for x, arr in gens:
+        G, gin, key = [], [], []
+        for i, (x, arr) in enumerate(gens):
             img = arr[O]
             if (img >= 0).all() and (loc[img] >= 0).all():
                 G.append(loc[img])
                 gin.append(x)
+                key.append(i)
         why = _check(G, n)
         if why:
             declined.append((n, why))
             continue
-        chars = _characters(np.stack(G), n, rng)
-        if chars is None:
-            declined.append((n, "its moves' eigenvectors are not characters"))
-            continue
-        kept = _chain(*chars, n)
-        if kept is None:
-            declined.append((n, "the characters don't separate its places"))
-            continue
-        periods = tuple(int(k) for k, _ in kept)
-        R = max(1, min(d // sum(periods), -(-w // len(periods))))
-        modules = Modules(d, periods, R, seed + o)
-        phases = np.stack([ph for _, ph in kept], 1)
+        key = tuple(key)
+        phases = _carry(shared[key], G, n) if key in shared else None
+        if phases is not None:
+            modules = shared[key][0]
+        else:
+            chars = _characters(np.stack(G), n, rng)
+            kept = None if chars is None else _chain(*chars, n)
+            if kept is None:
+                declined.append((n, "its moves' eigenvectors are not characters" if chars is None
+                                 else "the characters don't separate its places"))
+                continue
+            periods = tuple(int(k) for k, _ in kept)
+            R = max(1, min(d // sum(periods), -(-w // len(periods))))
+            modules = Modules(d, periods, R, seed + o)
+            phases = np.stack([ph for _, ph in kept], 1)
+            per = np.array(periods, np.int64)
+            shared.setdefault(key, (modules, [(phases[gl[0]] - phases[0]) % per for gl in G]))
         code = [modules.code(phases[i]) for i in range(n)]
         shifts = {}
         for x, gl in zip(gin, G):
@@ -481,8 +516,29 @@ def coordinate(move, maps, P, X, cfg):
             delta = modules.unbind(code[gl[0]], code[0])
             if all(modules.bind(code[i], delta) == code[gl[i]] for i in range(n)):
                 shifts[X[x]] = delta
-        out.append(Orbit(modules, {P[O[i]]: code[i] for i in range(n)}, shifts, periods, P[O[0]], n))
-    return out, declined
+        out.append(Orbit(modules, {P[O[i]]: code[i] for i in range(n)}, shifts, modules.periods, P[O[0]], n))
+        systems.append((O, phases, modules))
+    return out, declined, systems
+
+
+def _carry(system, G, n):
+    """An orbit's phases in an earlier orbit's code: from its base, each generator adds the step it adds there. None if
+    that is inconsistent."""
+    modules, steps = system
+    per = np.array(modules.periods, np.int64)
+    ph = np.full((n, len(per)), -1, np.int64)
+    ph[0] = 0
+    queue = [0]
+    while queue:
+        u = queue.pop()
+        for gl, st in zip(G, steps):
+            v, want = gl[u], (ph[u] + st) % per
+            if ph[v, 0] < 0:
+                ph[v] = want
+                queue.append(v)
+            elif not np.array_equal(ph[v], want):
+                return None
+    return ph if (ph >= 0).all() else None
 
 
 def _check(G, n):
@@ -542,3 +598,289 @@ def _chain(j, orders, n):
             if distinct == n:
                 return kept
     return None
+
+
+# ---- one coordinate for every place, and phases (part 5) -------------------------------------------------------------
+@dataclass
+class Factored:
+    """A frame factored into (phase, coordinate). Codes are of `modules`; a phase is named by its first place met."""
+    modules: object
+    phase: dict                         # frame place -> its phase
+    start: tuple                        # (phase, coordinate code) where every episode starts
+    trans: dict                         # (phase, input) -> the phase it leads to
+    shift: dict                         # input -> its shift (a code)
+    coord: dict                         # frame place -> its coordinate (a code)
+    content: dict                       # (phase, sensor) -> ("const", symbol) or ("named", None)
+    named: dict                         # coordinate code -> the symbol whose own position it is
+    naming: list                        # the inputs whose naming was accepted
+    identities: list                    # the inputs whose shift is the identity
+    phases: int
+
+
+class _Forms:
+    """Affine forms over free parameters in a group of vectors mod `periods`: (constant, {parameter: coefficient})."""
+
+    def __init__(self, periods):
+        self.per = tuple(int(n) for n in periods)
+
+    def const(self, v):
+        return (tuple(int(x) % n for x, n in zip(v, self.per)), {})
+
+    def param(self, i):
+        return ((0,) * len(self.per), {i: 1})
+
+    def add(self, a, b, s=1):
+        c = tuple((x + s * y) % n for x, y, n in zip(a[0], b[0], self.per))
+        k = dict(a[1])
+        for p, v in b[1].items():
+            k[p] = k.get(p, 0) + s * v
+            if all(k[p] % n == 0 for n in self.per):
+                del k[p]
+        return (c, k)
+
+    def zero(self, f):
+        return not f[1] and not any(f[0])
+
+    def subst(self, f, i, g):
+        """f with parameter i replaced by the form g."""
+        if i not in f[1]:
+            return f
+        h = f[1][i]
+        k = dict(f[1])
+        del k[i]
+        return self.add((f[0], k), (tuple(h * x for x in g[0]), {p: h * v for p, v in g[1].items()}))
+
+
+def _solve(alg, E, N, C0, inputs):
+    """One coordinate per place and one shift per input with c(v) = c(u) + d(x) for every move (u, x, v) in E, and
+    c(v) = c(w) for every naming pair (v, w) in N. C0: the coordinates known (an orbit's places, as forms). Where the
+    data leave something free, the solution with the most identity shifts (MDL). Returns (C, D) as vectors, or None if
+    the moves contradict each other."""
+    C, D, cons, nparam = dict(C0), {}, [], [max([p for f in C0.values() for p in f[1]], default=-1) + 1]
+
+    def settle(f):
+        if not alg.zero(f):
+            cons.append(f)
+
+    def sweep():
+        changed = True
+        while changed:
+            changed = False
+            for u, x, v in E:
+                cu, dx, cv = C.get(u), D.get(x), C.get(v)
+                if cu is not None and dx is not None:
+                    f = alg.add(cu, dx)
+                    if cv is None:
+                        C[v], changed = f, True
+                    else:
+                        settle(alg.add(cv, f, -1))
+                elif cu is not None and cv is not None:
+                    D[x], changed = alg.add(cv, cu, -1), True
+                elif dx is not None and cv is not None:
+                    C[u], changed = alg.add(cv, dx, -1), True
+            for v, w in N:
+                cv, cw = C.get(v), C.get(w)
+                if cv is not None and cw is None:
+                    C[w], changed = cv, True
+                elif cw is not None and cv is None:
+                    C[v], changed = cw, True
+                elif cv is not None:
+                    settle(alg.add(cv, cw, -1))
+
+    while True:
+        sweep()
+        count = Counter(x for u, x, v in E if x not in D and (u in C or v in C))
+        if not count:
+            break
+        D[max(count, key=lambda x: (count[x], -inputs.index(x)))] = alg.param(nparam[0])   # a free shift
+        nparam[0] += 1
+    for f in cons:                                      # any contradiction among the moves
+        if not f[1] and any(f[0]):
+            return None
+    while True:                                         # eliminate parameters with a +-1 coefficient
+        pick = next(((f, i) for f in cons for i, k in f[1].items()
+                     if all(k % n == 1 for n in alg.per) or all(k % n == n - 1 for n in alg.per)), None)
+        if pick is None:
+            break
+        f, i = pick
+        s = 1 if all(f[1][i] % n == 1 for n in alg.per) else -1
+        rest = (f[0], {p: v for p, v in f[1].items() if p != i})
+        g = (tuple(-s * x for x in rest[0]), {p: -s * v for p, v in rest[1].items()})
+        C = {u: alg.subst(h, i, g) for u, h in C.items()}
+        D = {x: alg.subst(h, i, g) for x, h in D.items()}
+        cons = [h for h in (alg.subst(h, i, g) for h in cons) if not alg.zero(h)]
+        if any(not h[1] and any(h[0]) for h in cons):
+            return None
+    theta = _choose(alg, D, cons)
+    if theta is None:
+        return None
+    ev = lambda f: tuple((c + sum(k * theta.get(p, (0,) * len(alg.per))[m] for p, k in f[1].items())) % n
+                         for m, (c, n) in enumerate(zip(f[0], alg.per)))
+    return {u: ev(f) for u, f in C.items()}, {x: ev(f) for x, f in D.items()}
+
+
+def _choose(alg, D, cons, limit=200000):
+    """Values for the free parameters: those satisfying the remaining constraints with the most inputs whose shift is
+    the identity, by exhaustive search over each group of parameters that occur together (MDL). None if no values
+    satisfy the constraints."""
+    params = sorted({p for f in list(D.values()) + cons for p in f[1]})
+    if not params:
+        return {}
+    parent = {p: p for p in params}
+
+    def find(p):
+        while parent[p] != p:
+            p = parent[p]
+        return p
+
+    for f in list(D.values()) + cons:
+        ps = list(f[1])
+        for p in ps[1:]:
+            parent[find(p)] = find(ps[0])
+    groups = defaultdict(list)
+    for p in params:
+        groups[find(p)].append(p)
+    elems = np.stack(np.meshgrid(*[np.arange(n) for n in alg.per], indexing="ij"), -1).reshape(-1, len(alg.per))
+    per = np.array(alg.per, np.int64)
+    theta = {}
+    for ps in groups.values():
+        if len(elems) ** len(ps) > limit:
+            return None
+        grid = np.stack(np.meshgrid(*[np.arange(len(elems))] * len(ps), indexing="ij"), -1).reshape(-1, len(ps))
+        vals = elems[grid]                              # (assignments, params, modules)
+
+        def value(f):
+            v = np.array(f[0], np.int64)[None, :].repeat(len(vals), 0)
+            for p, k in f[1].items():
+                v = v + k * vals[:, ps.index(p), :]
+            return v % per
+
+        ok = np.ones(len(vals), bool)
+        for f in cons:
+            if f[1] and set(f[1]) <= set(ps):
+                ok &= (value(f) == 0).all(1)
+        if not ok.any():
+            return None
+        score = np.zeros(len(vals), np.int64)
+        for f in D.values():
+            if f[1] and set(f[1]) <= set(ps):
+                score += (value(f) == 0).all(1)
+        best = int(np.flatnonzero(ok)[np.argmax(score[ok])])
+        theta.update({p: tuple(int(x) for x in vals[best, i]) for i, p in enumerate(ps)})
+    return theta
+
+
+def factor(move, cont, start, P, X, systems):
+    """Part 5: one coordinate for every place, and phases. Returns a Factored, or None (with why) if the frame can't
+    be factored."""
+    if not systems:
+        return None, "no coordinates"
+    O0, ph0, modules = systems[0]
+    alg = _Forms(modules.periods)
+    C0 = {}
+    for k, (O, ph, m) in enumerate(systems):
+        if m is not modules:
+            continue
+        for i, u in enumerate(O.tolist()):              # each orbit of the first system, with a free offset
+            C0[u] = alg.const(ph[i]) if k == 0 else alg.add(alg.const(ph[i]), alg.param(k - 1))
+    us, xs = np.nonzero(move >= 0)
+    E = [(int(u), int(x), int(move[u, x])) for u, x in zip(us, xs)]
+    out_of = set(us.tolist())                           # a place with no observed future (the episode's end) has
+    E = [(u, x, v) for u, x, v in E if v in out_of or cont[v]]   # nothing for a coordinate to predict: left out
+    inputs = sorted({x for _, x, _ in E})
+    det = {u: {s: next(iter(c)) for s, c in cont[u].items() if len(c) == 1} for u in range(len(cont))}
+    own = {x: int(move[start, x]) for x in inputs if move[start, x] >= 0}
+    names = {}                                          # input y -> naming pairs (place after y, the content's own place)
+    for u, y, v in E:
+        for s, sym in det.get(v, {}).items():
+            if sym in own and own[sym] != v:
+                names.setdefault(y, set()).add((v, own[sym]))
+    accepted = [y for y, pairs in names.items() if len(pairs) >= 2 and _solve(alg, E, sorted(pairs), C0, inputs)]
+    sol = _solve(alg, E, sorted(p for y in accepted for p in names[y]), C0, inputs)
+    if sol is None:
+        accepted, sol = [], _solve(alg, E, [], C0, inputs)
+    if sol is None:
+        return None, "the moves are not one shift each"
+    Cv, Dv = sol
+    phase, block = _phases(E, len(P), systems, modules)
+    rep = {}
+    for u in range(len(P)):
+        rep.setdefault(phase[u], u)
+    ph_sdr = {u: P[rep[phase[u]]] for u in range(len(P))}
+    trans, seen = {}, {}
+    for u, x, v in E:
+        seen.setdefault((phase[u], block[x]), set()).add(phase[v])
+    for (pu, b), targets in seen.items():
+        if len(targets) == 1:
+            t = targets.pop()
+            for x in inputs:
+                if block[x] == b:
+                    trans[(P[rep[pu]], X[x])] = P[rep[t]]
+    code = lambda v: modules.code(np.array(v, np.int64))
+    coord = {P[u]: code(v) for u, v in Cv.items()}
+    named = {}
+    for x, u in own.items():
+        if u in Cv:
+            named.setdefault(code(Cv[u]), []).append(X[x])
+    named = {c: xs[0] for c, xs in named.items() if len(xs) == 1}
+    content = {}
+    for ph in set(phase):
+        members = [u for u in range(len(P)) if phase[u] == ph]
+        for s in {s for u in members for s in det.get(u, {})}:
+            syms = [(u, det[u][s]) for u in members if s in det.get(u, {})]
+            if len({sym for _, sym in syms}) == 1 and len(syms) == sum(1 for u in members if s in cont[u]):
+                content[(P[rep[ph]], s)] = ("const", X[syms[0][1]])
+            elif accepted and all(sym in own and own[sym] in Cv and u in Cv and Cv[own[sym]] == Cv[u] for u, sym in syms):
+                content[(P[rep[ph]], s)] = ("named", None)
+    if start not in Cv:
+        return None, "the start has no coordinate"
+    zero = tuple(0 for _ in modules.periods)
+    return Factored(modules, {P[u]: ph_sdr[u] for u in range(len(P))}, (ph_sdr[start], code(Cv[start])), trans,
+                    {X[x]: code(v) for x, v in Dv.items()}, coord, content, named, [X[y] for y in accepted],
+                    [X[x] for x, v in Dv.items() if v == zero], len(set(phase))), None
+
+
+def _phases(E, nP, systems, modules):
+    """Phases: each orbit of the coordinate system is one; then, until nothing changes, inputs that lead from one
+    place to one phase are one block, and the places a block leads to from one phase are one phase."""
+    parent = list(range(nP))
+
+    def find(u):
+        while parent[u] != u:
+            parent[u] = parent[parent[u]]
+            u = parent[u]
+        return u
+
+    for O, ph, m in systems:
+        if m is modules:
+            for u in O[1:].tolist():
+                parent[find(u)] = find(int(O[0]))
+    xs = sorted({x for _, x, _ in E})
+    bpar = {x: x for x in xs}
+
+    def bfind(x):
+        while bpar[x] != x:
+            x = bpar[x]
+        return x
+
+    changed = True
+    while changed:
+        changed = False
+        by_place = defaultdict(dict)
+        for u, x, v in E:
+            by_place[u].setdefault(find(v), []).append(x)
+        for targets in by_place.values():
+            for group in targets.values():
+                for x in group[1:]:
+                    a, b = bfind(group[0]), bfind(x)
+                    if a != b:
+                        bpar[b], changed = a, True
+        lead = defaultdict(list)
+        for u, x, v in E:
+            lead[(find(u), bfind(x))].append(v)
+        for vs in lead.values():
+            for v in vs[1:]:
+                a, b = find(vs[0]), find(v)
+                if a != b:
+                    parent[b], changed = a, True
+    return [find(u) for u in range(nP)], {x: bfind(x) for x in xs}

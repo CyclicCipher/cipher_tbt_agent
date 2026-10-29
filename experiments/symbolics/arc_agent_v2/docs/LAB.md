@@ -558,3 +558,101 @@ So step 3 is a factorization: each place becomes (phase, coordinate). Then:
   give;
 - several operations (A2);
 - numbers of several digits (A3).
+
+### Part 5 amendments (2026-10-29, during the build, before the run)
+
+1. **Places with no observed future are left out of the coordinate.**
+   - **The problem:** P3 rightly merges every place after an answer (the episode's end) into one place. Then "answer
+     z leads from the place after '=' to the end" can't be one shift per digit: the end would have to sit at every 2z
+     at once. The first build therefore declined every A1 frame.
+   - **The rule:** a place with no content and no move out of it has nothing for a coordinate to predict, so the moves
+     into it don't constrain the coordinate.
+2. **MDL is computed exactly:**
+   - the constraints first eliminate every free parameter they pin down (those with coefficient ±1);
+   - each group of parameters that occur together is then searched exhaustively for the most identity shifts.
+
+   This replaces "try each undetermined input as the identity", which is order-dependent: picking digit 5 first gives
+   a consistent solution with fewer identities.
+
+## Part 5 results (2026-10-29; `runs/a5.txt`, `runs/a5.json`)
+
+**Built:**
+- **`frameLearning.factor`:**
+  - one coordinate for every place, solved as affine forms over free parameters;
+  - elimination of what the constraints pin down;
+  - an exact MDL search over each group of free parameters;
+  - naming tested per input;
+  - phases (the coordinate group's orbits, with blocks of inputs);
+  - phase-level moves and content.
+- **`coordinate` corrected:**
+  - a map that permutes some cycles counts as a generator there even if partial elsewhere;
+  - orbits of one group share one code.
+- **The column tracks (phase, coordinate) beside its place,** and predicts from it where the place has no content.
+- **Two world variants:** answers withheld, and answers relabelled.
+
+**F1–F2: one fact, two uses** (A1, every seed):
+
+| p | factored | phases | after "a + b" = after the digit a + b | each digit's shift as argument = its shift from the start | identity shifts found | naming accepted | the start is "0"'s position |
+|---|---|---|---|---|---|---|---|
+| 13 | yes | 6 | 169/169 | 169/169 | "+", "0", "=" | "=" | yes |
+| 97 | yes | 6 | 9,409/9,409 | 9,409/9,409 | "+", "0", "=" | "=" | yes |
+| 105 | yes | 6 | 11,025/11,025 | 11,025/11,025 | "+", "0", "=" | "=" | yes |
+
+Every place with an observed future got a coordinate.
+
+**F3–F4: answers never seen as answers, and the relabelling control** (3 seeds each, identical in every seed):
+
+| world | p | step 3 | part 4's brain | namings accepted |
+|---|---|---|---|---|
+| answers withheld | 13 | 1.000 | 0.000 | "=" |
+| answers withheld | 97 | 1.000 | 0.000 | "=" |
+| answers relabelled | 13, 97 | 1.000 | 1.000 | none |
+| relabelled and withheld | 13, 97 | 0.000 | 0.000 | none |
+
+**F5: no regression.**
+- **Part 3:** reproduces exactly (p = 13 and 97, 3 seeds).
+- **Part 4:** E1, E2 and the shortcut test (all 120 trials) reproduce exactly. Three differences, explained below.
+
+**Verdicts:**
+- **F1, F2, F3, F4: confirmed** in every seed.
+- **F5: confirmed,** with the differences below.
+- **F6: refuted.**
+  - Part 5's runs took 102 s, against 60 s, plus 63 s for the regression.
+  - The checks dominate: F1–F2 walk all p² prefixes twice per seed, about 20,000 walks at p = 97.
+  - The brain's own training and sleep at p = 97 take about 3 s.
+
+**Part 4's differences, found by this run:**
+1. **A bug in part 4's C2 checker.**
+   - **What it did:** the checker took the first orbit whose code layout fit, which was the ring after "a", not the ring
+     after "a + b". So it checked one coincidental instance per map: "12/12" at p = 13 was 12 maps, one instance each.
+   - **Now:** both rings share one code, and the same check covers every instance: 156/156, 9,312/9,312,
+     10,920/10,920 and 6,480/6,480, all matched.
+   - **So:** C2's conclusion holds, but part 4 had verified it on far less than it claimed.
+2. **O1 (A₅) now declines in every seed:** "its moves don't connect its places". The pre-registered generator
+   correction made the involution's 2-cycles part of one connected set, which the only complete generator can't
+   connect. Part 4's C6 prediction (decline) now holds in all seeds, where it held in one.
+3. **O2 (the box) declined without a reason.**
+   - **Why:** a blocked move maps a place to itself, a cycle of length 1, and that counted as a generator connecting
+     nothing.
+   - **The fix (after the run, recorded here):** fixed points are excluded, since they carry no structure.
+   - **Checked:** the box declines again with "no move permutes a set of places" in all 3 seeds. E1 is unchanged and
+     the tests pass. No code was installed before or after.
+
+**What this shows:**
+1. **A digit's position and its use as an argument are one learned fact.**
+   - Each digit is one shift of a single coordinate, the same from the start and from after "+".
+   - The places after "a + b" sit at the coordinate of the digit a + b.
+   - "+", "=" and "0" come out as moves that change nothing. The hand moves only by digits, as the user's dial has
+     it.
+   - The start's position comes out as "0"'s. Nothing about any of this was given.
+2. **The answer names the result's position.** Naming is accepted only where it is consistent everywhere, and refused
+   when the answers are relabelled.
+3. **The payoff:** a learner that has seen a value only as an operand answers equations whose answer is that value,
+   1.0 against 0.0. That comes from the factored state (phase, coordinate), which reaches places never visited.
+
+**Limits:**
+1. **Chains** ("a + b + c =") still need "+" after a result, a phase transition the data never show. See ARCHITECTURE.md
+   §7 for what that needs.
+2. **One coordinate system per frame:** the first group's.
+3. **The MDL search is exhaustive per group of free parameters,** which is fine for 2 parameters (11,025 assignments
+   at p = 105) and would not scale to many.

@@ -257,14 +257,25 @@ in `docs/LAB.md`, built, run (about 10 minutes of compute at most), and recorded
 | 0 | the SDR library, the config; the hard rule; A1's world | parts 1–2 | done |
 | 1 | A1: the hippocampus, the column's layers, consolidation by P3 and P4 | part 3 | **done** |
 | 2 | coordinates learned from the frame; the bus and efference copies | part 4 | **done** |
-| 3 | one fact, two uses: one coordinate for every place, factored into (phase, coordinate) | part 5 | pre-registered |
+| 3 | one fact, two uses: one coordinate for every place, factored into (phase, coordinate) | part 5 | **done** |
 
 **Next, proposed in the order the goal needs (for the user to confirm, 2026-10-29).** Analogy and the reversal curse
 are folded in where the goal uses them:
 1. **A2:**
    - competing structure hypotheses (COORDINATES parts 2–4): subtraction is a quasigroup, × has an absorbing 0;
    - the reversal curse, as subtraction learned from addition facts.
-2. **Chained expressions** ("a + b + c ="). This needs the phase automaton to generalize: "+" after a result.
+2. **Chained expressions** ("a + b + c ="). The phase automaton must generalize to "+" after a result, which the data
+   never show. The user (2026-10-29) expects this to need, very likely:
+   1. **Working short-term memory.**
+   2. **The thalamus as an active gate:**
+      - how and why it gates the brain;
+      - where the cortical columns' modules plug into it;
+      - how the PFC does its job and influences the rest of the brain mechanically: what wiring, to where, lets it do
+        something; what it selects for; what commands it issues, and how.
+   3. **How brains solve chained expressions.**
+   4. **How these interact** to solve chained expressions without exponential blowups anywhere.
+
+   To be researched before this step is designed.
 3. **A3:** place value as the group's chain of quotients (part 4, finding 3).
 4. **B1:** a V1 sheet of columns, a frame per receptive field, the spatial pooler, IT.
 5. **B2:** the digit in its own frame. Analogical mapping as aligning a digit's frame to a stored one.

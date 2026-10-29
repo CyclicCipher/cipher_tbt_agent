@@ -9,6 +9,13 @@ computes the answers with integer arithmetic: it is the ground truth, not part o
 The operation "?" is a control, not arithmetic: a random table of answers (drawn once per world), with no structure
 to find. A brain that scores well above chance on its held-out equations is reading something it shouldn't.
 
+**Two variants (part 5):**
+- **`withhold=True`:** a random set H of floor(p/3) values never occurs as an answer. The equations with an answer in H
+  are left out of training, half of the rest are trained on, and the test is every equation whose answer is in H.
+  Every value still occurs as an operand.
+- **`permute=True`:** every answer is relabelled by a fixed random permutation of the digits that is not a
+  translation, so the answer no longer names where the sum is.
+
 A1: addition mod p. The p * p equations are split at random: train_frac of them are shown in training, the rest are
 held out. The test shows a held-out equation up to "=", asks for the brain's prediction of the next SDR, and decodes
 that prediction to the nearest symbol (here, in the world).
@@ -23,7 +30,7 @@ OPS = {"+": lambda a, b, p: (a + b) % p,
 
 
 class ArithmeticWorld:
-    def __init__(self, p=13, ops=("+",), train_frac=0.5, d=2048, w=40, seed=0):
+    def __init__(self, p=13, ops=("+",), train_frac=0.5, d=2048, w=40, seed=0, withhold=False, permute=False):
         self.p, self.ops = p, tuple(ops)
         enc = CategoryEncoder(d, w, seed)
         self.symbols = [str(i) for i in range(p)] + list(self.ops) + ["="]
@@ -32,14 +39,31 @@ class ArithmeticWorld:
         for s in self.symbols:
             self._memory.add(self.sdr_of[s])
         self.table = np.random.default_rng((seed, 99)).integers(0, p, (p, p))   # the "?" control's answers
+        self.perm = None
+        if permute:                                     # a relabelling of the answers that is not a translation
+            r = np.random.default_rng((seed, 8))
+            while True:
+                pi = r.permutation(p)
+                if len({int(pi[x] - x) % p for x in range(p)}) > 1:
+                    break
+            self.perm = pi
         eqs = [(op, a, b) for op in self.ops for a in range(p) for b in range(p)]
-        order = np.random.default_rng(seed).permutation(len(eqs))
-        n = int(round(train_frac * len(eqs)))
-        self.train = [eqs[i] for i in order[:n]]
-        self.held_out = [eqs[i] for i in order[n:]]
+        self.withheld = set()
+        if withhold:
+            self.withheld = set(np.random.default_rng((seed, 7)).choice(p, p // 3, replace=False).tolist())
+            free = [e for e in eqs if self.answer(*e) not in self.withheld]
+            order = np.random.default_rng(seed).permutation(len(free))
+            self.train = [free[i] for i in order[:int(round(train_frac * len(free)))]]
+            self.held_out = [e for e in eqs if self.answer(*e) in self.withheld]
+        else:
+            order = np.random.default_rng(seed).permutation(len(eqs))
+            n = int(round(train_frac * len(eqs)))
+            self.train = [eqs[i] for i in order[:n]]
+            self.held_out = [eqs[i] for i in order[n:]]
 
     def answer(self, op, a, b):
-        return int(self.table[a, b]) if op == "?" else OPS[op](a, b, self.p)
+        v = int(self.table[a, b]) if op == "?" else OPS[op](a, b, self.p)
+        return v if self.perm is None else int(self.perm[v])
 
     def written(self, op, a, b):
         """The equation's symbols, in the order written."""

@@ -24,9 +24,9 @@ from arc_agent_v2.hippocampus import Hippocampus
 
 
 class Brain:
-    def __init__(self, config=ARITHMETIC, consolidation=True, regularity=True, coordinates=True):
+    def __init__(self, config=ARITHMETIC, consolidation=True, regularity=True, coordinates=True, factoring=True):
         self.config, self.consolidation = config, consolidation
-        self.regularity, self.coordinates = regularity, coordinates
+        self.regularity, self.coordinates, self.factoring = regularity, coordinates, factoring
         d, w, seed = config.sdr.d, config.sdr.w, config.seed
         self.regions = {r.name: [Column(d, w, seed + 97 * i) for i in range(r.columns)] for r in config.validate()}
         self.hippocampus = Hippocampus(d, w, seed)
@@ -77,7 +77,8 @@ class Brain:
             return None
         cfg = self.config.sdr
         self.frame = consolidate(self.hippocampus.replay(), self.hippocampus.contents(), self.hippocampus.start,
-                                 self.regularity, (cfg.d, cfg.w, self.config.seed) if self.coordinates else None)
+                                 self.regularity, (cfg.d, cfg.w, self.config.seed) if self.coordinates else None,
+                                 self.factoring)
         for c in self.columns():
             c.install(self.frame, self.coordinates)
         return self.frame

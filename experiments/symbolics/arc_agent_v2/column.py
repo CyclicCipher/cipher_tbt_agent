@@ -7,6 +7,10 @@ Each input arrives from the bus (bus.py), stamped, with its role for this column
    doesn't move it.
 
 If L5 doesn't know the move, the column is lost until the next episode, and the brain falls back on the hippocampus.
+
+**Part 5:** where the frame is factored, the column also tracks (phase, coordinate). An input moves the phase by its
+transition and the coordinate by its shift. A prediction comes from the place where it has content, and otherwise from
+the phase: one symbol for the whole phase, or the symbol whose own position is the coordinate (naming).
 The column learns its frame from consolidation (`install`), not online. Online memory is the hippocampus's job.
 `stamp` is the bus's check that the column applied every message it was sent.
 """
@@ -20,12 +24,20 @@ class Column:
     def __init__(self, d, w, seed=0):
         self.l4, self.l5, self.l6, self.l23 = L4(w), L5(d, w, seed), L6(), L23(d, w)
         self.stamp = 0
+        self.fac = None                                 # part 5: the frame's factorization, if any
 
     def reset(self):
         self.l6.reset()
 
     def predict(self, sensor="symbols"):
-        return self.l23.predict(self.l6.place, sensor)
+        p = self.l23.predict(self.l6.place, sensor)
+        if p is not None or self.fac is None or self.l6.fac is None:
+            return p
+        phase, coord = self.l6.fac
+        kind = self.fac.content.get((phase, sensor))
+        if kind is None:
+            return None
+        return kind[1] if kind[0] == "const" else self.fac.named.get(coord)
 
     def step(self, x, sensor, moves, stamp, content=True):
         """Sense x (unless it is an efference copy, which nothing here predicts) and, if it moves the place, move by
@@ -34,6 +46,10 @@ class Column:
             self.l4.sense(x, self.predict(sensor))
         if moves and not self.l6.lost():
             self.l6.place = self.l5.move(self.l6.place, x)
+        if moves and self.l6.fac is not None:
+            phase, coord = self.l6.fac
+            nxt, delta = self.fac.trans.get((phase, x)), self.fac.shift.get(x)
+            self.l6.fac = None if nxt is None or delta is None else (nxt, self.fac.modules.bind(coord, delta))
         self.stamp = stamp
 
     def route(self, goal=None):
@@ -63,3 +79,5 @@ class Column:
         if coordinates:
             for orbit in frame.coords:
                 self.l5.build_words(orbit.modules)
+        self.fac = frame.factored if coordinates else None
+        self.l6.fac_start = self.fac.start if self.fac is not None else None
