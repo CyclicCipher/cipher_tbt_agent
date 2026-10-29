@@ -4,7 +4,7 @@
 import numpy as np
 
 from arc_agent_v2.HDClibrary import (SDR, Associations, Blocks, CategoryEncoder, Conjunction, GridEncoder,
-                                     ItemMemory, Permutation,
+                                     ItemMemory, Modules, Permutation,
                                      ScalarEncoder, SpatialPooler, Synapses, bundle, cdt, chance_overlap, jaccard,
                                      kwta, overlap, shift, thin, union)
 
@@ -214,3 +214,12 @@ def test_associations_store_and_recall_by_overlap():
     assert len(m) == 2 and m.recall(k1) == {v1: 2, v2: 1} and m.best(k1) == v1
     assert m.best(thin(k2, 30, r) | SDR.random(D, 10, r)) == v2   # a noisy key still finds its value
     assert m.recall(SDR.random(D, W, r)) == {} and m.best(SDR.random(D, W, r)) is None
+
+
+def test_modules_bind_adds_phases_per_module():
+    m = Modules(D, (3, 5, 7), R=14, seed=0)
+    a, b = m.code([1, 2, 3]), m.code([2, 4, 6])
+    assert a.w == 42 and m.is_code(a) and not m.is_code(SDR.random(D, 42, rng(21)))
+    assert m.bind(a, b) == m.code([0, 1, 2]) and m.unbind(m.bind(a, b), b) == a
+    assert m.phases(a).tolist() == [1, 2, 3] and m.bind(a, m.identity()) == a
+    assert overlap(a, m.code([1, 0, 3])) == 2 * 14 and overlap(a, m.code([0, 0, 0])) == 0   # R bits per agreeing module

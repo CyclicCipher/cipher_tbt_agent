@@ -330,3 +330,131 @@ instead of a row in a table.
 
 **The guard (`test_rule.py`)** extends to every new brain module. `walk_world.py` is a world; the brain never imports
 it.
+
+### Part 4 amendments (2026-10-29, during the build, before any run)
+
+1. **Episode 1 is 1,000 steps, not 300.**
+   - **The problem:** a random walk of 300 steps visits all 60 nodes in only 16% of walks (torus 6 × 10: 0.159;
+     cycle ±1 ±7: 0.172; 2,000 simulated walks each). The coordinate step needs every node, so C5 would fail by
+     design.
+   - **The fix:** at 1,000 steps the chance is 0.998 and 0.9995.
+   - **Why part 11 could use 300:** its learner searched a family of tori, which doesn't need full coverage.
+2. **"Agree" in P3's full form is agreement on a content that identifies places.**
+   - **The rule:** a determined content counts as evidence for a merge only if it has never been the determined
+     content of two places shown to differ (a pairwise check within each group of equal content, before any merge).
+   - **Why:** read literally, two places after different first digits in A1 both have the determined content "+".
+     When their observed continuations happen not to overlap, nothing ever contradicts merging them. At p = 13 and
+     half the table that is about 2 expected false merges per run.
+   - **The consequences:**
+     - "+" fails the test, because places after different digits conflict further down;
+     - a walk's unique node labels pass it;
+     - with repeated labels nothing passes, so no false merges are made. The hard case stays open, as declared.
+3. **Arm (d) searches this trial's remembered transitions between places identified by P3** (graph memory, as in
+   part 11), without P4 or coordinates.
+   - **Why:** the hippocampus's raw episode tree has no repeated places, so no way back can be searched in it at all.
+   - **Arm (c)** stays the whole mechanism (P3, P4, coordinates), on this trial's steps alone.
+
+
+## Part 4 results (2026-10-29; `runs/a4.txt`, `runs/a4.json`; 54 s for everything)
+
+**Built:**
+- **`bus.py`:** the one router. It stamps inputs, delivers them exactly once in step order to each column's receptive
+  field, and marks a column that missed a message lost instead of letting it drift. Tested in `test_bus.py` with three
+  columns sharing a field and a region that sees only the retina.
+- **Efference copies:** `config.efference`.
+- **Moving and sensed sources:** `Region.moves`.
+- **`Modules`:** block codes with a period per block.
+- **P3's full form,** with the identifying-content reading.
+- **The coordinate step** (generators, orbits, the commutativity read-out, characters, the module chain, codes and
+  shifts).
+- **L5's route.**
+- **`walk_world.py`.**
+
+**Build check: efference copies had to become their own kind of input.**
+- **The failure:** the first walk episode merged nothing (1,001 places). Every action had been stored as content of
+  the place it was taken from, so two visits to one node always "disagreed": the agent took different next actions.
+- **The reason:** an action is what the agent does at a place, not something the place predicts. A place's observed
+  future is what the world shows for each action taken (the actions are the input alphabet, as in a Moore machine).
+- **The fix:** `config.efference` names the sensors that carry the agent's own actions. They move the place, and they
+  are never content: the bus marks them so for every subscriber.
+- **The same distinction answers the user's warning about efference copies:** a copy reaches every column whose
+  receptive field includes it, as the same SDR at the same stamp, and each column's L5 learns what it does in that
+  column's own frame.
+
+**C1–C3: A1's frames** (3 seeds each; the ring of places after "a + b"):
+
+| p | module periods (every seed) | codes distinct | maps rebuilt from one instance | instances matched | overlap = R × 3-adic closeness |
+|---|---|---|---|---|---|
+| 13 | [13] | yes | 12/12 | 12/12 | — |
+| 97 | [97] | yes | 96/96 | 96/96 | — |
+| 105 | [3, 5, 7] | yes | 104/104 | 104/104 | — |
+| 81 | [3, 9, 27, 81] | yes | 80/80 | 80/80 | 3,240/3,240 pairs |
+
+**C4:** part 3's A1 results reproduce exactly, in all six runs (p = 13 and 97, 3 seeds).
+
+**C5–C6: walk worlds** (1,000-step episode, unique labels, 3 seeds):
+
+| world | places | table complete | moves P4 inferred | wrong moves | coordinates | installed shifts right | bus faults |
+|---|---|---|---|---|---|---|---|
+| E1 torus 6 × 10 | 60 | yes | 6, 4, 2 | 0 | one orbit of 60: [2, 2, 3, 5] | 240/240 | 0 |
+| E2 cycle ±1 ±7 | 60 | yes | 5, 9, 7 | 0 | one orbit of 60: [2, 3, 4, 5] | 240/240 | 0 |
+| O1 A₅ | 60 | no (in every seed) | 0 | 0 | seed 1: declined, "not abelian"; seeds 0 and 2: 30 orbits of 2, period 2 | 60/60 | 0 |
+| O2 box | 60 | no | 0 | 0 | declined, "no move permutes a set of places" | — | 0 |
+
+**C7–C9: the shortcut test** (20 trials × 3 seeds per world):
+
+| world | shortcut trials | arm | success | length ÷ shortest | shortest way taken on shortcut trials |
+|---|---|---|---|---|---|
+| E1 | 0.77 | (a) carried coordinates | 1.000 | 1.000 | 1.000 |
+| | | (b) carried table | 1.000 | 1.000 | 1.000 |
+| | | (c) relearning | 0.133 | 1.683 | 0.043 |
+| | | (d) graph memory | 0.133 | 1.683 | 0.043 |
+| E2 | 0.95 | (a) carried coordinates | 1.000 | 1.000 | 1.000 |
+| | | (b) carried table | 1.000 | 1.000 | 1.000 |
+| | | (c) relearning | 0.217 | 3.833 | 0.070 |
+| | | (d) graph memory | 0.217 | 4.194 | 0.070 |
+
+(a) and (b) planned identically in all 120 trials.
+
+**Verdicts:**
+- **C1, C2, C3, C4: confirmed** in every run.
+- **C5: confirmed.** On E2, v2 found Z/60 exactly, where part 8's torus family settled on a 15 × 15 partial model.
+- **C6: confirmed on O2; refuted on O1 in 2 of 3 seeds.**
+  - P4 inferred nothing on A₅, so its table stayed incomplete (178–179 of 180 moves).
+  - Only the involution a came out as a full permutation in seeds 0 and 2. Its 2-cycles became 30 small orbits, each
+    with exact period-2 coordinates.
+  - In seed 1 a different gap left a and b both complete, and the step declined: "not abelian".
+  - C6 predicted a decline assuming a complete table.
+  - **What was installed is correct, not a convincing wrong model:** 0 wrong moves, and every installed shift right
+    (60/60). But it is a fragment: the cosets of one generator.
+- **C7, C8, C9: confirmed.**
+  - Carried coordinates got home in every trial by the shortest way, wrap-arounds included.
+  - The carried table planned identically.
+  - Relearning and graph memory got home in 13–22% of trials (≤ 0.9 and ≤ 0.3).
+  - Shortcut trials were 77% and 95%.
+  - 54 s in all.
+
+**What this shows:**
+1. **Coordinates come from the moves alone.**
+   - Each group's own chain of quotients comes out: the CRT factors of 105, the 3-adic digits of 81.
+   - Every move becomes one fixed shift, found from a single instance.
+   - In Z/81, two codes' overlap is exactly their 3-adic closeness: the p-adic metric appears in SDR overlap without
+     being given (finding 3).
+2. **The case that fooled part 8 doesn't fool v2,** because v2's hypothesis is any commutative group read off the
+   moves, not a family of shapes.
+3. **No wrong structure was installed anywhere:** 0 wrong moves in 12 walk episodes, every installed shift right, and
+   no bus faults.
+4. **Carried structure pays at planning, as in part 11. The codes lose nothing against the complete table.**
+   Relearning equals graph memory: within a 50-step trial, P4 infers nothing at the excursion's unvisited end.
+   - Part 11's relearner won 73–95% because it searched an innate family of tori. v2 has no innate geometry for an
+     abstract frame, so without carried structure it can only use what it walked.
+5. **What codes add beyond a complete table is C2 and C3:** a move from one instance, and quotient structure in the
+   overlap. The shortcut test can't show it, by design.
+
+**Limits:**
+1. **P4 is weak on non-commutative groups:** 0 inferences on A₅. Few input pairs there share a displacement. Partial
+   tables then give partial orbits (cosets of one generator) instead of a decline or the whole group.
+2. **One frame for every region:** consolidation doesn't yet build a frame per receptive field.
+3. **Aliased labels:** P3's full form makes no false merges with repeated labels, and so it finds no places either.
+   Part 8's geometry hypotheses are the next step there.
+4. **Codes for non-commuting frames** (permutation representations) are not built.

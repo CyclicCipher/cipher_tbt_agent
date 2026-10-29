@@ -62,7 +62,11 @@ def frame_checks(world, brain, op="+"):
     for c in C:
         eq_move[c] = col.l5.move(c, world.sdr_of["="])
     orders, full = [], 0
+    rename = {}                                         # part 4: coordinated places are named by their codes
+    for orbit in brain.frame.coords:
+        rename.update(orbit.codes)
     for m in brain.frame.displacements:
+        m = {rename.get(s, s): rename.get(t, t) for s, t in m.items()}
         perm = {s: t for s, t in m.items() if s in C and t in C}
         if len(perm) == len(C) and len(C) > 0:
             full += 1

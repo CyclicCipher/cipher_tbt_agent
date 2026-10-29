@@ -19,6 +19,7 @@ Contents:
 - **block codes (`Blocks`):** an SDR with exactly one active bit per block, each block a small torus (a module).
   - Binding adds the blocks' offsets and unbinding subtracts them. This is an invertible binding that keeps the code
     sparse (sparse block codes: Laiho et al. 2015; Frady, Kleyko & Sommer 2023).
+  - `Modules`: the same with a period per block, so a learned frame's rings (13; or 3, 5 and 7) fit exactly.
   - So a block code is a coordinate system. power(base, x) puts x on a ring in every block (the number line in polar
     coordinates), and binding two places rotates the first by the second.
 - **encoders (the boundary where data becomes SDRs):**
@@ -354,6 +355,68 @@ class Blocks:
     def similarity(self, a, b):
         """The fraction of blocks that agree."""
         return overlap(a, b) / self.k
+
+
+def _unit(n, rng):
+    """A random unit mod n: a number coprime to n."""
+    while True:
+        u = int(rng.integers(1, n)) if n > 1 else 0
+        if n == 1 or np.gcd(u, n) == 1:
+            return u
+
+
+class Modules:
+    """Block codes whose blocks have their own periods (docs/LAB.md part 4). Module m is a ring of n_m cells, laid
+    out in R blocks, each with its own unit u coprime to n_m. A code is one active bit per block: a phase per module,
+    written as offset u * phase mod n_m in each of the module's blocks. Binding adds phases module by module (offsets
+    add mod each block's period), so it is invertible and keeps the code sparse, as Blocks' binding does; the periods
+    are whatever a frame needs (frameLearning finds them), not one block length. Two codes overlap in R bits for every
+    module whose phases agree."""
+
+    def __init__(self, d, periods, R, seed=0):
+        rng = np.random.default_rng((seed, 5150))
+        self.d, self.periods, self.R = d, tuple(int(n) for n in periods), int(R)
+        self.size = np.array([n for n in self.periods for _ in range(self.R)], np.int64)
+        if self.size.sum() > d:
+            raise ValueError("the modules need more than d bits")
+        self.start = np.concatenate([[0], np.cumsum(self.size)[:-1]]).astype(np.int64)
+        self.module = np.repeat(np.arange(len(self.periods)), self.R)
+        self.unit = np.array([_unit(int(n), rng) for n in self.size], np.int64)
+        self.k = int(self.size.size)
+        first = np.arange(len(self.periods)) * self.R
+        self.inv = np.array([pow(int(self.unit[i]), -1, int(self.size[i])) for i in first], np.int64)
+
+    def code(self, phases):
+        ph = np.asarray(phases, np.int64)[self.module]
+        return SDR._sorted(self.d, (self.start + (self.unit * ph) % self.size).astype(np.int32))
+
+    def is_code(self, a):
+        if a.d != self.d or a.w != self.k:
+            return False
+        o = a.idx.astype(np.int64) - self.start
+        return bool(((o >= 0) & (o < self.size)).all())
+
+    def offsets(self, a):
+        if not self.is_code(a):
+            raise ValueError("not a code of these modules")
+        return a.idx.astype(np.int64) - self.start
+
+    def phases(self, a):
+        """The phase of each module (read from its first block)."""
+        o = self.offsets(a)[np.arange(len(self.periods)) * self.R]
+        return (o * self.inv) % np.array(self.periods, np.int64)
+
+    def _from(self, o):
+        return SDR._sorted(self.d, (self.start + o % self.size).astype(np.int32))
+
+    def bind(self, a, b):
+        return self._from(self.offsets(a) + self.offsets(b))
+
+    def unbind(self, c, b):
+        return self._from(self.offsets(c) - self.offsets(b))
+
+    def identity(self):
+        return self.code(np.zeros(len(self.periods), np.int64))
 
 
 # ---- encoders: where data becomes SDRs -------------------------------------------------------------------------------

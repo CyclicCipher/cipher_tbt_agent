@@ -6,8 +6,9 @@ import ast
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BRAIN = ("brain", "column", "l4", "l5", "l6", "l23", "hippocampus", "frameLearning", "config")
-WORLDS = ("arithmetic_world",)
+BRAIN = ("brain", "bus", "column", "l4", "l5", "l6", "l23", "hippocampus", "frameLearning", "config")
+ENCODERS = {"CategoryEncoder", "ScalarEncoder", "GridEncoder"}   # the data-to-SDR boundary: the worlds' side
+WORLDS = ("arithmetic_world", "walk_world")
 LABEL_NAMES = {"symbols", "written", "answer", "decode", "labels", "OPS", "sdr_of", "held_out", "train"}
 
 
@@ -20,3 +21,5 @@ def test_brain_never_sees_a_world_or_a_label():
                 assert not any(w in (m or "") for m in mods for w in WORLDS), (name, mods)
             if isinstance(node, ast.Attribute):
                 assert node.attr not in LABEL_NAMES, (name, node.attr)
+            if isinstance(node, (ast.Name, ast.alias)):
+                assert (node.id if isinstance(node, ast.Name) else node.name) not in ENCODERS, name

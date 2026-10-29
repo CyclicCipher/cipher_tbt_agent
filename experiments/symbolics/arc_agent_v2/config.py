@@ -12,7 +12,18 @@ that use them are built (nothing is configured before it is used), so for now on
   feedback links usually reverse feedforward ones.
 
 All links run through the thalamocortical bus (bus.py). The hippocampus is not a region of the neocortex: it is
-configured apart (hippocampus.py, not designed yet).
+configured apart (hippocampus.py).
+
+**Inputs that move, and inputs that are sensed (part 4):** `moves` lists the sources whose inputs move the region's
+columns' place (P1): an efference copy of an action, or a symbol read in sequence. Every other source's inputs are
+sensed at the place (content, P2) and don't move it. By default every source moves (P1 as A1 uses it). This is
+wiring, set per region, as the efference copy reaches L5/L6 and sensation lands in L4.
+
+**Efference copies (part 4):** `efference` lists the sensors that carry copies of the agent's own actions. Their inputs
+move the place where a region lists them in `moves`, and they are never content: an action is what the agent does at
+a place, not something the place predicts. A place's observed future is what the world shows for each action taken,
+so an agent's own choices never count as a difference between two places. A read symbol (A1) comes from the world, so
+it both moves the place and is content.
 """
 from dataclasses import dataclass
 
@@ -32,6 +43,10 @@ class Region:
     feedforward: tuple = ()             # sources: region or sensor names
     feedback: tuple = ()
     note: str = ""
+    moves: tuple = None                 # the sources whose inputs move the place (None: every source)
+
+    def moving(self):
+        return tuple(self.feedforward) if self.moves is None else tuple(self.moves)
 
 
 @dataclass(frozen=True)
@@ -40,6 +55,7 @@ class BrainConfig:
     sensors: tuple = ()                 # where data enters as SDRs (HDClibrary's encoders)
     regions: tuple = ()
     seed: int = 0
+    efference: tuple = ()               # sensors that carry copies of the agent's own actions (part 4)
 
     def region(self, name):
         return next(r for r in self.regions if r.name == name)
@@ -50,6 +66,8 @@ class BrainConfig:
         names = [r.name for r in self.regions]
         if len(set(names)) != len(names) or set(names) & set(self.sensors):
             raise ValueError("region and sensor names must be unique")
+        if not set(self.efference) <= set(self.sensors):
+            raise ValueError("an efference copy must come from a sensor")
         known = set(names) | set(self.sensors)
         for r in self.regions:
             for src in r.feedforward + r.feedback:
@@ -57,6 +75,8 @@ class BrainConfig:
                     raise ValueError("%s receives from unknown %s" % (r.name, src))
             if r.columns < 1 or not (r.frame == "learned" or r.frame.startswith("innate:")):
                 raise ValueError("bad region %s" % r.name)
+            if not set(r.moving()) <= set(r.feedforward):
+                raise ValueError("%s moves on a source it doesn't receive" % r.name)
         order, done = [], set(self.sensors)
         while len(order) < len(self.regions):
             ready = [r for r in self.regions if r.name not in done and set(r.feedforward) <= done]
@@ -73,6 +93,11 @@ ARITHMETIC = BrainConfig(
     sensors=("symbols",),
     regions=(Region("assoc", 1, "learned", ("symbols",),
                     note="milestone A: symbols are random SDRs; the frame they live on must be learned"),))
+
+WALK = BrainConfig(
+    sensors=("motor", "retina"), efference=("motor",),
+    regions=(Region("assoc", 1, "learned", ("motor", "retina"), moves=("motor",),
+                    note="part 4: actions (efference copies) move the place; observations are sensed at it"),))
 
 MNIST = BrainConfig(
     sensors=("retina",),
@@ -97,4 +122,4 @@ HUMAN = BrainConfig(                    # the target layout: data only, not wire
         Region("M1", 8, "innate:motor-map", ("PMC", "proprioception"), ("PMC",)),
     ))
 
-PRESETS = {"arithmetic": ARITHMETIC, "mnist": MNIST, "human": HUMAN}
+PRESETS = {"arithmetic": ARITHMETIC, "walk": WALK, "mnist": MNIST, "human": HUMAN}
