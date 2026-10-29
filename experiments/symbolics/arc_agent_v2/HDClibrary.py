@@ -13,6 +13,8 @@ Contents:
   - thin: a random subset;
   - bundle: a sparse superposition that keeps what many inputs share;
   - cdt: context-dependent thinning, a similarity-preserving binding of free SDRs (Rachkovskij & Kussul 2001);
+  - Conjunction: a pattern-separating binding of two free SDRs (the dentate gyrus's): different pairs give nearly
+    unrelated codes;
 - **permutations:** shift and Permutation (roles, sequence positions);
 - **block codes (`Blocks`):** an SDR with exactly one active bit per block, each block a small torus (a module).
   - Binding adds the blocks' offsets and unbinding subtracts them. This is an invertible binding that keeps the code
@@ -25,6 +27,7 @@ Contents:
   - GridEncoder: 2-D places as block codes, i.e. grid-cell modules;
 - **memories:**
   - ItemMemory: cleanup, the stored SDR nearest a query, by an inverted index;
+  - Associations: one-shot key -> value memory, recalled by the key's overlap (CA3-style);
   - Synapses: HTM permanences with Hebbian learning;
   - SpatialPooler: HTM's learned encoder (Cui, Ahmad & Hawkins 2017).
 """
@@ -37,7 +40,7 @@ import numpy as np
 # ---- the datatype ---------------------------------------------------------------------------------------------------
 class SDR:
     """d bits, of which those in `idx` (sorted, unique, int32) are active. Immutable and hashable."""
-    __slots__ = ("d", "idx", "_h")
+    __slots__ = ("d", "idx", "_h", "_b")
 
     def __init__(self, d, idx=()):
         a = np.unique(np.asarray(idx, dtype=np.int64))
@@ -46,13 +49,13 @@ class SDR:
         self.d = int(d)
         self.idx = a.astype(np.int32)
         self.idx.flags.writeable = False
-        self._h = None
+        self._h = self._b = None
 
     @classmethod
     def _sorted(cls, d, idx):
         """From bits already sorted, unique and in range (the set operations' results)."""
         s = cls.__new__(cls)
-        s.d, s.idx, s._h = int(d), np.asarray(idx, dtype=np.int32), None
+        s.d, s.idx, s._h, s._b = int(d), np.asarray(idx, dtype=np.int32), None, None
         s.idx.flags.writeable = False
         return s
 
@@ -73,6 +76,16 @@ class SDR:
     def w(self):
         """The number of active bits."""
         return int(self.idx.size)
+
+    @property
+    def bits(self):
+        """The active bits as one integer (bit i set for active bit i), cached: AND, OR and popcount on it run
+        word-wide in C, so two SDRs' overlap costs well under a microsecond."""
+        if self._b is None:
+            x = np.zeros(self.d, np.uint8)
+            x[self.idx] = 1
+            self._b = int.from_bytes(np.packbits(x, bitorder="little").tobytes(), "little")
+        return self._b
 
     @property
     def sparsity(self):
@@ -108,7 +121,11 @@ class SDR:
         return bool(i < self.idx.size and self.idx[i] == bit)
 
     def __eq__(self, o):
-        return isinstance(o, SDR) and o.d == self.d and np.array_equal(o.idx, self.idx)
+        return o is self or (isinstance(o, SDR) and o.d == self.d and o.idx.size == self.idx.size
+                             and o.idx.tobytes() == self.idx.tobytes())
+
+    def __ne__(self, o):
+        return not self.__eq__(o)
 
     def __hash__(self):
         if self._h is None:
@@ -124,7 +141,7 @@ class SDR:
 def overlap(a, b):
     """Shared active bits: HTM's similarity."""
     a._same(b)
-    return int(np.intersect1d(a.idx, b.idx, assume_unique=True).size)
+    return (a.bits & b.bits).bit_count()
 
 
 def jaccard(a, b):
@@ -219,6 +236,27 @@ def cdt(sdrs, w, seed=0, max_perms=64):
 @lru_cache(maxsize=None)
 def _cdt_perm(d, seed, k):
     return Permutation(d, np.random.default_rng((seed, k, 77)))
+
+
+class Conjunction:
+    """A pattern-separating binding of two free SDRs, as the dentate gyrus separates patterns: a random SDR of w bits,
+    drawn from the pair's active bits (and the seed) as its source of randomness. It is the idealized random expansion:
+    pairs that differ in any bit get codes sharing about chance, and the same pair always gets the same code. It costs
+    O(w), not the O(d * w) of a dense projection. cdt keeps similarity; this removes it."""
+
+    def __init__(self, d, w, seed=0):
+        self.d, self.w, self.seed = d, w, seed
+        self.dt = np.uint16 if d <= 1 << 16 else np.uint32
+
+    def __call__(self, a, b):
+        msg = b"%d|" % self.seed + a.idx.tobytes() + b"|" + b.idx.tobytes()
+        n = 2 * self.w
+        while True:                                     # the first w distinct of n draws (2w almost always suffice)
+            draws = np.frombuffer(hashlib.shake_128(msg).digest(np.dtype(self.dt).itemsize * n), self.dt) % self.d
+            _, first = np.unique(draws, return_index=True)
+            if first.size >= self.w:
+                return SDR._sorted(self.d, np.sort(draws[np.sort(first)[:self.w]]).astype(np.int32))
+            n *= 2
 
 
 # ---- permutations ----------------------------------------------------------------------------------------------------
@@ -400,33 +438,48 @@ class GridEncoder:
 
 # ---- memories --------------------------------------------------------------------------------------------------------
 class ItemMemory:
-    """Cleanup memory: stored SDRs, recalled by overlap. An inverted index (bit -> the items that have it) makes a query
-    cost the postings of its active bits, not a scan over items."""
+    """Cleanup memory: stored SDRs, recalled by overlap. A query that is exactly a stored SDR is found by its pattern in
+    O(w), as an associative memory recalls in one parallel step. Any other query searches an inverted index (bit ->
+    the items that have it), whose cost grows with the items stored, so it is the fallback for noisy keys only. At 2%
+    sparsity the index reads about n * w * w / d entries per query, far fewer than a packed bit matrix's n * d / 64
+    words, so it beats SIMD popcount over all items here."""
 
     def __init__(self, d):
-        self.d, self.items, self.post = d, [], [[] for _ in range(d)]
+        self.d, self.items, self.exact = d, [], {}
+        self.post = np.zeros((d, 4), np.int32)          # row b: the items with bit b (columns grown by doubling)
+        self.npost = np.zeros(d, np.int64)
 
     def __len__(self):
         return len(self.items)
 
+    def find(self, sdr):
+        """The index of a stored SDR exactly equal to sdr, or None: O(w)."""
+        return self.exact.get(sdr)
+
     def add(self, sdr):
         i = len(self.items)
         self.items.append(sdr)
-        for b in sdr.idx.tolist():
-            self.post[b].append(i)
+        self.exact.setdefault(sdr, i)
+        b = sdr.idx
+        col = self.npost[b]
+        if col.size and col.max() >= self.post.shape[1]:
+            self.post = np.hstack([self.post, np.zeros_like(self.post)])
+        self.post[b, col] = i                           # an SDR's bits are distinct, so one vector write
+        self.npost[b] += 1
         return i
 
     def overlaps(self, q):
-        """Every stored item's overlap with q."""
+        """Every stored item's overlap with q (cost: the postings of q's bits)."""
         if not self.items:
             return np.zeros(0, np.int64)
-        hits = [self.post[b] for b in q.idx.tolist() if self.post[b]]
-        if not hits:
-            return np.zeros(len(self.items), np.int64)
-        return np.bincount(np.concatenate([np.asarray(h, np.int64) for h in hits]), minlength=len(self.items))
+        rows = self.post[q.idx]                         # one gather: (w, columns)
+        valid = np.arange(rows.shape[1])[None, :] < self.npost[q.idx][:, None]
+        return np.bincount(rows[valid], minlength=len(self.items))
 
     def nearest(self, q, k=1):
         """The index and overlap of the stored item nearest q (k > 1: arrays of the k nearest, best first)."""
+        if k == 1 and q in self.exact:
+            return self.exact[q], q.w
         o = self.overlaps(q)
         if o.size == 0:
             return (None, 0) if k == 1 else (np.zeros(0, int), np.zeros(0, int))
@@ -435,6 +488,44 @@ class ItemMemory:
             return i, int(o[i])
         top = np.argsort(-o, kind="stable")[:k]
         return top, o[top]
+
+
+class Associations:
+    """One-shot key -> value memory, recalled by the key's overlap (CA3-style heteroassociation). Storing is one shot:
+    under a key exactly equal to a stored one, the value is added to its counts; any other key is a new item. A recall
+    returns the value counts of the stored key equal to the query (O(w)), or else of the stored key overlapping it best,
+    if by at least theta (pattern completion for a noisy key)."""
+
+    def __init__(self, d, theta):
+        self.keys, self.values, self.theta = ItemMemory(d), [], theta
+
+    def __len__(self):
+        return len(self.values)
+
+    def _find(self, key):
+        i, o = self.keys.nearest(key)
+        return i if i is not None and o >= self.theta else None
+
+    def store(self, key, value, count=1):
+        i = self.keys.find(key)
+        if i is None:
+            i = self.keys.add(key)
+            self.values.append({})
+        self.values[i][value] = self.values[i].get(value, 0) + count
+
+    def recall(self, key):
+        """{value: count} stored under the best-matching key ({} if none matches)."""
+        i = self._find(key)
+        return {} if i is None else self.values[i]
+
+    def best(self, key):
+        """The most frequent value stored under the key, or None."""
+        r = self.recall(key)
+        return max(r, key=r.get) if r else None
+
+    def items(self):
+        """Every (stored key, {value: count}), in the order stored."""
+        return list(zip(self.keys.items, self.values))
 
 
 class Synapses:

@@ -3,7 +3,8 @@
 """
 import numpy as np
 
-from arc_agent_v2.HDClibrary import (SDR, Blocks, CategoryEncoder, GridEncoder, ItemMemory, Permutation,
+from arc_agent_v2.HDClibrary import (SDR, Associations, Blocks, CategoryEncoder, Conjunction, GridEncoder,
+                                     ItemMemory, Permutation,
                                      ScalarEncoder, SpatialPooler, Synapses, bundle, cdt, chance_overlap, jaccard,
                                      kwta, overlap, shift, thin, union)
 
@@ -190,3 +191,26 @@ def test_spatial_pooler_keeps_overlap_and_spreads_use():
     assert same > 12 and diff < 4
     used = union(sp.compute(noisy(p), learn=False) for p in protos)
     assert used.w > 100                                            # no single clique codes everything
+
+
+def test_conjunction_separates_patterns():
+    r = rng(19)
+    conj = Conjunction(D, W, seed=0)
+    p, q, x, y = (SDR.random(D, W, r) for _ in range(4))
+    assert conj(p, x) == conj(p, x) and conj(p, x).w == W
+    assert overlap(conj(p, x), conj(p, y)) <= 6                    # sharing the place is not enough
+    assert overlap(conj(p, x), conj(q, x)) <= 6                    # nor sharing the input
+    assert overlap(conj(p, x), p) <= 6 and overlap(conj(p, x), x) <= 6
+
+
+def test_associations_store_and_recall_by_overlap():
+    r = rng(20)
+    m = Associations(D, theta=W // 2)
+    k1, k2, v1, v2 = (SDR.random(D, W, r) for _ in range(4))
+    m.store(k1, v1)
+    m.store(k1, v2)
+    m.store(k1, v1)
+    m.store(k2, v2)
+    assert len(m) == 2 and m.recall(k1) == {v1: 2, v2: 1} and m.best(k1) == v1
+    assert m.best(thin(k2, 30, r) | SDR.random(D, 10, r)) == v2   # a noisy key still finds its value
+    assert m.recall(SDR.random(D, W, r)) == {} and m.best(SDR.random(D, W, r)) is None

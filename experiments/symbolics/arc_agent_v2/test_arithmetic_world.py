@@ -10,7 +10,7 @@ from arc_agent_v2.HDClibrary import SDR, overlap, thin
 
 def test_symbols_are_structureless_sdrs():
     w = ArithmeticWorld(p=13)
-    sdrs = [w.sdr[s] for s in w.symbols]
+    sdrs = [w.sdr_of[s] for s in w.symbols]
     assert len(sdrs) == 15 and all(isinstance(s, SDR) and s.d == 2048 and s.w == 40 for s in sdrs)
     assert max(overlap(a, b) for i, a in enumerate(sdrs) for b in sdrs[i + 1:]) <= 6   # "3" is no nearer "4" than "+"
 
@@ -32,7 +32,7 @@ def test_episodes_are_the_written_equation():
 
 def test_decode_tolerates_noise():
     w = ArithmeticWorld(p=13)
-    noisy = thin(w.sdr["5"], 24, np.random.default_rng(1)) | SDR.random(2048, 16, np.random.default_rng(2))
+    noisy = thin(w.sdr_of["5"], 24, np.random.default_rng(1)) | SDR.random(2048, 16, np.random.default_rng(2))
     assert w.decode(noisy) == "5" and w.decode(None) is None
 
 
@@ -41,6 +41,6 @@ def test_scorer_oracle_and_chance():
     answers = {tuple(s.idx.tobytes() for s in prefix): ans for prefix, ans, _ in w.queries()}
     oracle = lambda prefix: answers[tuple(s.idx.tobytes() for s in prefix)]
     assert w.score(oracle) == 1.0
-    guess = lambda prefix: w.sdr["0"]
+    guess = lambda prefix: w.sdr_of["0"]
     assert w.score(guess) < 0.2                                  # chance is 1/13
     assert w.score(lambda prefix: None) == 0.0

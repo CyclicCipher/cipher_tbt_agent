@@ -6,6 +6,9 @@ means, not which symbols are numbers or operators, not where the arguments or th
 0). The labels ("3", "+", "=") live only here, to build episodes and to score; the brain never sees them. The world
 computes the answers with integer arithmetic: it is the ground truth, not part of the brain.
 
+The operation "?" is a control, not arithmetic: a random table of answers (drawn once per world), with no structure
+to find. A brain that scores well above chance on its held-out equations is reading something it shouldn't.
+
 A1: addition mod p. The p * p equations are split at random: train_frac of them are shown in training, the rest are
 held out. The test shows a held-out equation up to "=", asks for the brain's prediction of the next SDR, and decodes
 that prediction to the nearest symbol (here, in the world).
@@ -24,10 +27,11 @@ class ArithmeticWorld:
         self.p, self.ops = p, tuple(ops)
         enc = CategoryEncoder(d, w, seed)
         self.symbols = [str(i) for i in range(p)] + list(self.ops) + ["="]
-        self.sdr = {s: enc.encode(s) for s in self.symbols}
+        self.sdr_of = {s: enc.encode(s) for s in self.symbols}
         self._memory = ItemMemory(d)                    # decoding, for scoring only
         for s in self.symbols:
-            self._memory.add(self.sdr[s])
+            self._memory.add(self.sdr_of[s])
+        self.table = np.random.default_rng((seed, 99)).integers(0, p, (p, p))   # the "?" control's answers
         eqs = [(op, a, b) for op in self.ops for a in range(p) for b in range(p)]
         order = np.random.default_rng(seed).permutation(len(eqs))
         n = int(round(train_frac * len(eqs)))
@@ -35,7 +39,7 @@ class ArithmeticWorld:
         self.held_out = [eqs[i] for i in order[n:]]
 
     def answer(self, op, a, b):
-        return OPS[op](a, b, self.p)
+        return int(self.table[a, b]) if op == "?" else OPS[op](a, b, self.p)
 
     def written(self, op, a, b):
         """The equation's symbols, in the order written."""
@@ -43,7 +47,7 @@ class ArithmeticWorld:
 
     def episode(self, op, a, b):
         """What the brain is shown: the equation as a list of SDRs."""
-        return [self.sdr[s] for s in self.written(op, a, b)]
+        return [self.sdr_of[s] for s in self.written(op, a, b)]
 
     def epoch(self, rng):
         """Every training equation once, in a random order, as episodes."""
