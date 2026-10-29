@@ -217,14 +217,35 @@ operation.
 ## 7. Build order
 
 Vertical slices. Nothing counts until it is wired into the brain and exercised by a test.
-1. **A1:**
-   - frameLearning for a group from partial triples;
-   - a column with minimal L6, L4, L5 and L2/3;
-   - a one-region brain;
-   - the memorizing control.
-2. **A2, then A3.**
-3. **B1:** a V1 sheet of columns, the bus, the spatial pooler, IT.
-4. **The hippocampus,** after the design question is settled.
-5. **B2.**
+1. **A1: done** (`docs/LAB.md` part 3).
+   - **Built:** the hippocampus's DG and CA3, a column with L6, L4, L5 and L2/3, a one-region brain, consolidation by
+     P3 and P4, and the memorizing control.
+   - **Result:** held-out accuracy 1.0 for p = 13 and p = 97, and the rings were found.
+2. **Coordinate learning** (the user, 2026-10-29: "the natural next one").
+   - **The goal:** place codes in which each learned move is one fixed operation on the code, the same at every
+     place, instead of a row in a table.
+   - **The candidate substrate:** a move as a fixed permutation of the code's bits. Block-code offset addition is its
+     commutative special case.
+   - **The constraint:** the codes come from the moves the frame found, never from a value given from outside (§0).
+     The exact line is to be pre-registered for the user to check.
+3. **One fact, two uses:** the symbol read as content names the place its move reaches from the start, so A1's two
+   rings (after "a", and after "a + b") become one.
+4. **Analogical mapping as a native ability** (the user, 2026-10-29: "highly desirable").
+   - An analogy is a map between two frames that carries moves to moves.
+   - With coordinates it is one change of coordinates, found from one aligned pair (Kanerva's "What's the Dollar of
+     Mexico?"; Gayler & Levy 2009). Step 3 is its first case.
+5. **The reversal curse** (the user, 2026-10-29: the same logic should overcome it).
+   - **Why it should:** a fact is a move between places, moves are one-to-one (P4), and the frame holds each map in
+     both directions. So the converse is the same fact read backwards.
+   - **Relations that aren't one-to-one:** the converse is the transpose, not the inverse
+     (`experiments/intelligent_constraints/`).
+   - **A test world, not designed yet:**
+     - facts "A r B" over random SDRs;
+     - some also shown as "B r′ A";
+     - held-out facts shown forward only, queried as "B r′ ?".
+6. **A2, then A3.**
+7. **B1:** a V1 sheet of columns, the bus, the spatial pooler, IT.
+8. **The hippocampus's CA1, and its attractor recall,** when something needs them.
+9. **B2.**
 
 Each step: pre-register in `docs/LAB.md`, build, run (about 10 minutes of compute at most), record.
