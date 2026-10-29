@@ -151,19 +151,28 @@ is to predict the next SDR.
 
 (A first proposal here hardcoded roles, the operation and integer math, and the user rejected it, 2026-10-29: see §0.)
 
-**frameLearning.py's starting material:**
-- **v1 and legacy research:**
-  - the cyclic group's characters as coordinates (`../legacy/docs/COORDINATES.md` parts 6 and 9);
-  - quotients as content regularities (DESIGN.md §3, part 10);
-  - learned permutations narrowed by every observation (v1 part 30 draft, `../arc_agent/unapplied/permute_frame.py`);
-  - action models lent across a frame's symmetries (part 31b draft, `conjugate.py`).
-- **The math for milestone A, the first research item:**
-  - **Learning the moves:** learning, from episodes alone, which inputs move the place and what each move does.
-  - **Closing them under composition:** a learned automaton, with relations between move sequences inferred from
-    shared endpoints, and coset enumeration to complete it. Nothing may assume the group is cyclic, abelian or
-    numeric.
-  - **Coordinates as a compression of the closed moves, if wanted later:** the group's characters, as the grokking
-    networks find.
+**frameLearning.py's starting material** (surveyed 2026-10-29). The sources are `../legacy/docs/COORDINATES.md`
+parts 1–13 (code in `../legacy/structure/claude/`), RESIDUAL_TRICK.md and REAL_ADELIC.md, and v1's
+`docs/HIDDEN_STATE.md` and `unapplied/`. They answer COORDINATES.md's own question, "can the right embedding be derived
+from the data instead of handed over?": yes. What each offers for the hard cases:
+
+| hard case | what was found | for v2 |
+|---|---|---|
+| the structure is not the one hypothesized | parts 2–4: axiom sets (abelian group, group, quasigroup, semilattice, chain, none) compete by prequential evidence. An axiom costs nothing and pays when true; a random table is rejected (1.6 million contradictions) | P4 is one hypothesis (a regular group action) among several. A2 needs this: subtraction is a quasigroup, max a chain, × mod p has an absorbing 0 |
+| little data | part 7: associativity in all four forms, with the cancellation patterns. Table known after 2–3% of the entries; code 1.35× the information minimum. The remaining gap is tracking which labels are placed, which is coordinates | stronger completion. Coordinates also feed inference, not only output |
+| aliased observations | part 8: the structure found from 2–3 repeated colours almost as fast as from unique ones, places given by each geometry hypothesis's path integration. A true geometry outside the family yields a convincing partial model; the fix (all lattices, Hermite normal form) was never run | under aliasing P3 breaks (futures repeat). Places must come from path integration under geometry hypotheses |
+| uncertain moves | part 9: one map per position hypothesis (FastSLAM). A single blurred map reinforces its own errors | several place hypotheses, each with its own content; loop closure |
+| non-commutative structure | parts 5–6: decomposing the regular representation gives characters (abelian) or irreducible matrices (A₅: 3 × 3 rotations); "abelian" is read off the decomposition | coordinates from this decomposition of the consolidated move table (part 5's transition table). In SDR form: block codes whose block periods are the characters' orders (learned module sizes, as grid modules differ in scale); permutation representations for non-abelian frames |
+| an encoding the learner can't use | part 1, K5: the right coordinates as circles didn't help a small transformer; as residue lookup tables they did | codes must suit the column's operations (overlap, binding) |
+| place value and carry | REAL_ADELIC: 3-adic digits (81 = 3⁴) speed learning ≥ 6.6×, a prime gains nothing. Part 1 found 105 = 3 · 5 · 7 from the table; part 10 found the subgroup lattice | A3: place value is a chain of quotients (Z/81 → Z/27 → Z/9 → Z/3), found from the group's subgroups, with no base given |
+| geometry vs content | part 10: within one episode a striped colouring is a smaller torus; structure is what persists and constrains actions. Part 11: geometry pays at planning (the shortcut test) | test coordinates on plans and shortcuts, not only on next-symbol prediction |
+| hidden states | v1 HIDDEN_STATE §7–8: an event-conditioned graph learned by Baum–Welch recovered a lock and a mode machine exactly | P3 under ambiguity, made probabilistic |
+| learned permutations under repeated labels | v1 part 30 draft: each operator's allowed sources narrowed by every observation | constraint propagation, as in part 7's Sudoku rules |
+
+**Not in the folder:**
+- the lattice family for geometries outside the hypothesis space;
+- whether part 9's remaining gap is the data's or the beam's;
+- the commutator as a measure of how much joint search a composition needs (RESIDUAL_TRICK H1, untested).
 
 ## 5. Questions: open and settled
 
