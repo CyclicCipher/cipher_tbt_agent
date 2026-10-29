@@ -256,7 +256,10 @@ class Blocks:
     invertible binding that keeps the code sparse. So a block code is a point on a product of tori: a coordinate
     system. power(base, x) multiplies the offsets by x, putting x on a ring in every block (fractional power encoding:
     the number line in polar coordinates), and bind(power(g, a), power(g, b)) = power(g, a + b): the first argument
-    turns the hand to itself, the second turns it by itself."""
+    turns the hand to itself, the second turns it by itself.
+
+    This is innate algebra, for innate frames (V1's retinotopy). Never use power(g, x) with x the value a symbol stands
+    for: that hands an abstract domain its number line instead of letting it be learned (ARCHITECTURE.md section 0)."""
 
     def __init__(self, d, k, shape=None):
         if d % k:

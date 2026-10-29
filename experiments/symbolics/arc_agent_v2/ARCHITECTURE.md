@@ -9,6 +9,37 @@ Started 2026-10-29 (the user). **This is the one agent under development.**
 - **Tests:** `../../venv312/Scripts/python.exe -m pytest arc_agent_v2 -q`.
 - **Lab book:** `arc_agent_v2/docs/LAB.md`.
 
+## 0. The hard rule: no meaning is built in (the user, 2026-10-29)
+
+**No SDR has a built-in meaning, and no math is hardcoded.**
+- **Symbols enter as random SDRs.** Inside the brain nothing may look up what a symbol is: no labels, no values, no
+  roles. Labels exist only in the worlds, for building inputs and scoring.
+- **Forbidden:**
+  - integer or floating-point arithmetic on what symbols stand for;
+  - slots assigned by input position;
+  - an operation fixed to a symbol or to a layer;
+  - **cargo-cult learning:** a learned quantity plugged into a hardcoded role or formula. For example, learning φ so
+    that φ(c) = φ(a) + φ(b) hides addition in the learning target.
+- **Why:** a brain with math hardcoded into it can't learn other domains. The meaning of an SDR in MNIST, in a game or
+  in arithmetic must be learned the same way.
+- **Innate, and only this:** the column's prior, which is domain-general and used identically for space, images and
+  symbols.
+  1. Inputs arrive as SDRs.
+  2. There is a hidden place, and moves change it.
+  3. Moves compose (one after another), and a move does the same thing wherever it is made, until refuted (path
+     integration; place invariance).
+  4. Content can be remembered at a place.
+  5. Innate frames exist only where biology gives them (V1's retinotopy, M1's motor map: `config` "innate:<kind>"),
+     never for an abstract domain.
+- **How a symbol acquires its meaning (the user's question, the design target):** a symbol's meaning is what it does,
+  the move it makes in the column's frame.
+  - Its position on an axis is where its move takes you from the start ("argument 1 turns the hand to itself").
+  - Its use as an argument is that it moves you from wherever you are ("argument 2 turns it by itself").
+  - That is one learned fact, used in two ways. The axis itself is the orbit of the moves (13 moves of "1" mod 13
+    bring you back): found, not given.
+- **The test for any mechanism:** would it learn MNIST, or a game, unchanged? If it needs to know that its inputs are
+  numbers, it breaks the rule.
+
 ## 1. The theory
 
 From `arc_agent/docs/DESIGN.md` §1a (the user's derivation, 2026-10-29):
@@ -104,13 +135,21 @@ Hyperparameters are added to the config as the parts that use them are built.
 | `hippocampus.py` | episodes: fast, one-shot memory of what happened, for what the columns can't generalize | **not designed yet** (§5, question 3) |
 | `frameLearning.py` | learning coordinate systems, transformations and functions from examples | proposal below |
 
-**The layers on milestone A** (a proposal, to be pre-registered with the code). The input is a triple of random SDRs
-(a, b, c), seen as a ∘ b = c, with ∘ never named:
-- **L6** holds a learned map from each symbol to a place, a block code power(g, φ(symbol)). frameLearning finds φ, so
-  that φ(c) = φ(a) + φ(b) on the training pairs.
-- **L4** has two slots: argument 1 sets the place (turn the hand to a), and argument 2's place is the displacement.
-- **L5** applies the operation: bind(place(a), place(b)), a rotation.
-- **L2/3** reads the content at the resulting place: the symbol whose place it is (cleanup by overlap).
+**The layers on milestone A** (a direction, to be pre-registered in detail with the code, `docs/LAB.md` part 3). The
+input is the written equation, "a + b = c", one random SDR per symbol, one equation per episode. The brain's only task
+is to predict the next SDR.
+- **L6:** the hidden place, an SDR. Each episode starts at the same place.
+- **L5:** each input's move, learned as a mapping from places to places. A move is assumed to do the same thing at
+  every place, until refuted.
+- **L2/3:** the content remembered at a place, which is the prediction of the next input there.
+- **L4:** the input, at the current place.
+- **How it generalizes:** when two sequences of moves end at the same place from the start, they are taken to be
+  equal everywhere (path integration). From the training equations this closes the moves into a group, the way coset
+  enumeration (Todd–Coxeter) builds a group from relations, and fills in the held-out pairs.
+- **What is not given:** which symbols move the place and which don't, how many places there are, the cycle, or
+  commutativity. All of it is learned.
+
+(A first proposal here hardcoded roles, the operation and integer math, and the user rejected it, 2026-10-29: see §0.)
 
 **frameLearning.py's starting material:**
 - **v1 and legacy research:**
@@ -118,27 +157,35 @@ Hyperparameters are added to the config as the parts that use them are built.
   - quotients as content regularities (DESIGN.md §3, part 10);
   - learned permutations narrowed by every observation (v1 part 30 draft, `../arc_agent/unapplied/permute_frame.py`);
   - action models lent across a frame's symmetries (part 31b draft, `conjugate.py`).
-- **The math for milestone A:**
-  - The training triples define, for each b, a partial permutation P_b : a ↦ c.
-  - These permutations commute and compose (P_b P_b' = P_{b+b'}): a partial regular representation of the group.
-  - Its characters, the joint eigenvectors (a discrete Fourier transform), give the circle coordinates. This is what
-    the grokking networks find by gradient descent; here it is to be found by the group structure itself.
-  - How to do this from partial data, without assuming the group is cyclic, is the first research item.
+- **The math for milestone A, the first research item:**
+  - **Learning the moves:** learning, from episodes alone, which inputs move the place and what each move does.
+  - **Closing them under composition:** a learned automaton, with relations between move sequences inferred from
+    shared endpoints, and coset enumeration to complete it. Nothing may assume the group is cyclic, abelian or
+    numeric.
+  - **Coordinates as a compression of the closed moves, if wanted later:** the group's characters, as the grokking
+    networks find.
 
-## 5. Open questions (for the user)
+## 5. Questions: open and settled
 
-1. **L6's code:** a metric code (grid modules: near places overlap), an exact algebraic code (powers of a block code),
-   or both, coarse modules metric and fine ones algebraic?
-2. **L4:** the user marked "place / arguments" with "?". The working reading is the argument slots: the places the
-   operation's inputs occupy. Feedforward sensory input arrives there, as in TBT.
-3. **The hippocampus:** the v1 memory (Spotlight cells keyed by exact joint states) is to be replaced. A proposal to
-   research first: DG, CA3 and CA1 built on SDRs.
+1. **L6's code (open; for innate frames only).** For a learned frame, places are learned SDRs and there is no numeric
+   substrate (§0). For V1's innate retinotopic frame, the candidates are:
+   - the metric grid code (`GridEncoder`: coarse modules, with long periods, make near places overlap; fine modules
+     tell near places apart);
+   - an exact algebraic code.
+
+   This is decided at B1.
+2. **L4 (open):** the user marked "place / arguments" with "?". The working reading is the input at the current
+   place. Feedforward sensory input arrives there, as in TBT.
+3. **The hippocampus (settled, the user, 2026-10-29: accepted):** DG, CA3 and CA1 built on SDRs, to be researched,
+   then built.
    - **DG (pattern separation):** a random expansion followed by kwta.
    - **CA3:** a binary associative memory written in one shot by Hebbian learning, both autoassociative (completion)
      and heteroassociative (sequence, "what followed"). For example Willshaw's memory, or Kanerva's sparse
      distributed memory, itself a model of CA3.
    - **CA1:** maps the recalled pattern back into the cortex's SDRs.
-4. **A1's input:** the triples alone (no operation symbol at all), as proposed above.
+4. **A1's input (settled, the user, 2026-10-29):** the written equation, every symbol a random SDR (operator and "="
+   included), one equation per episode. Triples without an operation symbol were rejected: a format that leaves the
+   operation out hardcodes what it means.
 
 ## 6. Milestones (success criteria fixed now; each build step gets its own pre-registration in `docs/LAB.md`)
 
@@ -147,7 +194,7 @@ operation.
 
 | # | test | success | control |
 |---|---|---|---|
-| A1 | addition mod p (p = 13 and 97) from triples (a, b, c); train on half the p² pairs at random, test on the other half (the answer: the nearest symbol) | held-out accuracy ≥ 0.99 | the same brain with frame learning off (memorizing only): chance, 1/p |
+| A1 | addition mod p (p = 13 and 97), the written equation "a + b = c", every symbol a random SDR, one equation per episode; the only task is to predict the next SDR; train on half the p² equations at random, test the prediction after "=" on the other half (decoded by the world to the nearest symbol) | held-out accuracy ≥ 0.99 | the same brain with frame learning off (memorizing only): chance, 1/p |
 | A2 | three operations mixed (+, −, × mod p), each named by a random SDR | ≥ 0.95 on each (× lives on another coordinate system: the multiplicative group) | as A1 |
 | A3 | base-10 addition of multi-digit numbers (digits as random SDRs), tested 2 digits longer than trained | ≥ 0.95 exact | as A1 |
 
