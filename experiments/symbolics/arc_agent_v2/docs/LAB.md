@@ -197,3 +197,136 @@ p = 97 now takes about 4 s with scoring; p = 13 takes 54 ms end to end.
 4. **The ring after "a" and the ring after "a + b" are different places.** The same displacements act on both, but
    the brain does not yet know that "the place 7 takes you to from the start" is "the place a sum of 7 reaches".
    That is the other half of "one fact, two uses".
+
+## Part 4: coordinates learned from the frame (step 2; pre-registered 2026-10-29, before the code)
+
+**Why (the user):** coordinate learning is the natural next step. Pre-registered with two tests from the survey
+(ARCHITECTURE.md §4):
+- a structure outside the hypothesis space, the case where COORDINATES part 8's partial models fooled the scoring;
+- a shortcut test (part 11), where carried structure pays before any revisit.
+
+**The goal:** place codes in which each learned move is one fixed operation on the code, the same at every place,
+instead of a row in a table.
+
+### The change
+
+1. **Coordinates from the frame** (`frameLearning.py`, the method of COORDINATES parts 1, 5 and 6):
+   - **The generators:** the frame's maps that are full permutations of a set of places, i.e. P4's pooled
+     displacements, and any input whose move permutes a set of places. The places they act on split into orbits;
+     each orbit gets coordinates.
+   - **The read-out "abelian":** do the generators commute on the orbit? If not, the step declines and the orbit keeps
+     its table. (Codes for non-commuting frames, permutation representations, are a later step.)
+   - **Characters:** the common eigenvectors of the generators' permutation matrices (a random complex combination),
+     each normalized at the orbit's base place, the first of its places met. Each character has an order n, and a
+     phase index (0 … n−1) at every place.
+   - **Modules, finding 3:** go through the characters in increasing order of n, and keep one only if it splits some
+     class of places that the ones kept so far leave together. This keeps the group's own chain of quotients:
+     - Z/105 gives 3, 5, 7 (the CRT factors);
+     - Z/81 gives 3, 9, 27, 81 (the 3-adic digits);
+     - Z/6 × Z/10 gives 2, 2, 3, 5.
+   - **The code** (a new library class, `Modules`, block codes whose blocks have their own periods):
+     - **Blocks:** each kept character of order n becomes R blocks of n cells, each block with a random unit u
+       (coprime to n). R = max(1, min(⌊d / Σn⌋, ⌈w / number of modules⌉)), so about w active bits within d.
+     - **A place's code:** offset u · (its phase index) mod n in each block.
+     - **A move:** the shift δ it makes in every block. It is applied by binding (offset addition), the same at every
+       place, and is found from a single instance (s → t) as δ = unbind(code(t), code(s)).
+2. **Inputs that move, and inputs that are sensed** (`config`, `column`, `hippocampus`):
+   - **Each sensor's inputs either move the place** (P1; an efference copy, or A1's read symbols) **or are sensed at
+     it** (content, P2; they don't move it).
+   - **A1:** its symbols move, as before.
+   - **The walk worlds:** actions move; observations are sensed.
+   - The hippocampus stores transitions for moving inputs, and content for both.
+3. **P3 in its full form,** as part 3 worded it: "two places whose observed futures agree (and never disagree) are one
+   place". Part 3 built only the strict form (identical futures), which merges nothing in a walk, whose futures never
+   repeat.
+   - **After the strict merges:** places are merged if, over every input sequence both have seen, their content never
+     differs where both are determined (seen with one next input), and they agree on at least one such content.
+   - **Merging folds their children together.** A merge that would make some place's content conflict is undone.
+   - **Candidates** are compared only within groups of equal determined content.
+4. **The route (L5's inverse):** the moves that lead from here to a goal place.
+   - **With coordinates:** the displacement δ = unbind(goal, here), looked up in a table of shortest words built once
+     by a breadth-first walk over the codes.
+   - **With a table:** a breadth-first search over the known moves.
+   - It is used only by the shortcut test.
+
+### The line between innate and learned (for the user to check)
+
+- **Innate:**
+  - P1–P4 (approved);
+  - modules: rings whose offsets add when moves compose. This is the grid-module substrate; the library supplies
+    it, as it supplies binding;
+  - that a sensor's inputs either move or are sensed. This is wiring: efference copy against sensory afferent, as
+    TBT's location is path-integrated from movement while sensation lands in L4. It is set per sensor in `config`.
+- **Learned from the data:**
+  - the places;
+  - every move;
+  - whether the moves commute;
+  - how many modules there are, and their periods;
+  - each place's phase;
+  - each move's shift.
+- **Never used:** a symbol's value, label or position in the input. The base place is the first met, and the units
+  are random. The eigen-decomposition is consolidation's computation over the learned moves, as the integer row
+  addresses are.
+
+### Worlds
+
+- **A1's frames:** addition mod p, train fraction 0.5, 3 seeds; p = 13, 97, 105 and 81.
+- **`walk_world.py` (new):**
+  - **Episode 1:** a walk from a start node, actions and nodes' labels as random SDRs, with a unique label per node.
+  - **Inside the hypothesis space:**
+    - **E1:** the 6 × 10 torus, actions N, S, E, W.
+    - **E2:** the cycle of 60, actions ±1 and ±7. This is part 8's E2: outside part 8's family of rectangular tori,
+      where a 15 × 15 torus won as a partial model. It is inside v2's (any finite abelian group).
+  - **Outside it:**
+    - **O1:** A₅'s Cayley graph, actions a, b and b⁻¹ (a group, but not commutative);
+    - **O2:** a bounded 6 × 10 box, moves blocked at the walls (not a group: a blocked move is not one-to-one).
+- **Episode 1 is 300 steps,** part 11's length, with 3 seeds per world.
+
+### The shortcut test (part 11, in v2)
+
+- **Trials:** 20 per seed, on E1 and E2. Each trial has a new start node and new unique labels; the start is the
+  brain's base place, the worlds being homogeneous. Then:
+  1. a 40-step random walk;
+  2. an excursion: k steps of action 0, then m of action 2;
+  3. the query: the brain's route home, executed in the world.
+- **Arms:**
+  - **(a)** episode 1's frame carried, with coordinates;
+  - **(b)** episode 1's frame carried, as its table, without coordinates;
+  - **(c)** relearning: a frame consolidated from this trial's steps only;
+  - **(d)** the hippocampus only: a search over this trial's remembered transitions.
+- **Measures:**
+  - success (back at the start node);
+  - length over the true shortest length;
+  - on shortcut trials (where the shortest way home wraps around), how often the shortest way is taken.
+- **What it separates:** carried structure from relearning, as part 11 did. If P4 completes the carried table, (a)
+  and (b) should plan identically. That tests that the codes lose nothing, not that they add anything. What codes add
+  beyond a complete table is measured by C2 (a move from one instance) and C3 (quotients).
+
+### Predictions
+
+| # | prediction |
+|---|---|
+| C1 | A1's frames, on the ring of places after "a + b": module periods [13], [97], [3, 5, 7] and [3, 9, 27, 81] for p = 13, 97, 105 and 81, in every seed; every place's code distinct |
+| C2 | on those rings, every pooled displacement is one fixed shift: code(t) = bind(code(s), δ) for 100% of its (s, t), and δ found from one (s, t) reproduces the whole map (100%) |
+| C3 | finding 3: on Z/81's ring, two places' codes overlap in exactly R × #{k ≤ 4 : 3^k divides their difference} bits, for every pair. SDR overlap is 3-adic closeness. (The difference is read from the world's labels in the harness only) |
+| C4 | no regression from P3's full form: part 3's A1 results (M1–M4) reproduce exactly for p = 13 and 97 |
+| C5 | E1 and E2, in every seed: consolidation finds exactly 60 places; P4 completes the move table; the read-out says abelian; the modules are [2, 2, 3, 5] (Z/6 × Z/10) and [2, 3, 4, 5] (Z/60). On E2, v2 is not fooled where part 8 was |
+| C6 | O1 and O2, in every seed: the step declines (O1: not abelian; O2: the moves are not permutations) and installs no codes. P4's inferred moves are 100% correct on O1 (a group, where P4 is exact) and ≥ 95% correct on O2 |
+| C7 | the shortcut test, arm (a): success in every trial on E1 and E2, always by the shortest way (length ratio 1.00), wrap-arounds included |
+| C8 | arm (b) plans exactly as (a) in every trial. Arm (c): success ≤ 0.9, or the shortcut taken in ≤ 30% of shortcut trials. Arm (d): success ≤ 0.3 |
+| C9 | design and cost: ≥ 30% of trials are shortcut trials; all of part 4 runs in under 60 s |
+
+**What would refute the step:**
+- **C5 failing on E2:** v2 fooled where part 8 was.
+- **C6 failing:** codes installed on a structure they can't represent, which is a convincing wrong model.
+- **C2 failing with C1 holding:** the code doesn't carry the moves.
+- **C3 failing:** the module chain isn't the quotient structure.
+
+**Not in this step:**
+- an aliased episode 1 (geometry hypotheses scored by path integration, part 8);
+- slips (one map per hypothesis, part 9);
+- codes for non-commuting frames;
+- competing structure hypotheses (needed for A2).
+
+**The guard (`test_rule.py`)** extends to every new brain module. `walk_world.py` is a world; the brain never imports
+it.
