@@ -251,6 +251,43 @@ waveform and never the upstroke's overshoot (`sim.py`). A bug fix, not a change 
 **The fix, checked:** the same diagnostic gives zone peaks of 48, 67 and 108 mV for w = 320, 640 and 1280 pA, rising
 smoothly with w.
 
+### Run 3 (2026-10-30, at commit 9d54abc; `runs/e0_dt0.05.json`): the result
+
+| # | verdict | numbers |
+|---|---|---|
+| dCaAP check | pass, by construction | K = 1.0, 0.189, 0.036 |
+| N1 | **fail** | the same-branch ratio is at most 1.17 (k = 6); the other-branch ratio stays in 0.89–1.10 |
+| N2 | **fail** | pulse alone: 1 spike, *with a full-strength dCaAP* (K = 1.0). Tuft alone: 0. Together: 1–2 spikes at every Δt. K by Δt: −10: 0.71, −5: 0.57, 0: 0.26, 2: 0.09, 5–20: 1.0 |
+| N3 | **fail** | spikes: A 0, B 0, A+B 1. K = 0.019 for A alone |
+| N4 | **fail** | inward/outward at most 1.11 |
+| N5 | **fail** | doubling basal input adds 7.93 events/s, apical 0.83 (events do follow basal input). The burst fraction changes by −0.448 with basal and −0.032 with apical |
+| N6 | **pass** | conditioning or the test alone: no spike. Both: 1 spike at Δ = 50 and 100, none at 300 |
+| step size (dt = 0.025 ms) | verdicts identical; 65 of 68 numbers within 5% | the three outside are N5 differences over 10 s of random input, which drift with spike timing: events with apical doubling 0.83 against 0.92; burst fraction −0.448 against −0.418 (basal) and −0.032 against −0.044 (apical). N5 fails at both step sizes. That run took 122 s, over the 2-minute limit |
+| cost | prediction holds | 1.43, 2.42 and 1.70 s per simulated second (one cell; 12 as a batch; the 2 × 3 network) |
+
+Run 3 matches run 2 to within N5's numbers. The overshoot bug was large only when a strong dendritic current met a
+spike. The step-size check is not what caught it: run 2's check at dt = 0.025 gave the same verdicts (it crashed in
+the comparison code, a bug in reading JSON keys, since fixed).
+
+**What E0 established, across the three runs:**
+1. **One thing works:** an NMDA plateau in a thin branch is a memory of about 100 ms, gone by 300 ms (N6).
+2. **The NMDA nonlinearity shows in the branch but not at the soma** (N1).
+   - **Why:** a thin segment saturates near its reversal potential. One distal segment can't fire the soma at any
+     input size, while a branch's three segments together can.
+   - **So:** the nonlinearity is real, but it caps, not amplifies, what reaches the soma.
+3. **The apical side does not do its job** (N2, N3, N5). That is the side every candidate learning rule in DESIGN.md
+   §5 reads.
+   - **The bAP fires the dCaAP:** the bAP reaches the zone at about +4 mV, so every somatic spike outside the
+     dCaAP's refractory period fires a full dCaAP. The apical dendrite is short (250 µm), and the bAP crosses it
+     almost unattenuated.
+   - **A full dCaAP doesn't make a burst:** it adds at most one spike. Its strength w was set by the zone's voltage,
+     not by what reaches the soma.
+   - **Bursts come from the wrong side:** the bursts that occur come from strong basal drive, and apical input barely
+     changes them.
+   - **No single definition of K works:** Gidon's K is defined for current steps. Run 1's measure, C·dV/dt, fits
+     synaptic input and fails steps. Amendment 2's measure fits steps and gives K ≈ 0 for any synaptic input.
+4. **Order sensitivity is weak** with 3 segments per branch (N4).
+
 ### The instrument: `viz/` (not an experiment)
 
 A local web page served by `viz/server.py`. Every simulation runs in the same `sim.py`, so there is one model and no

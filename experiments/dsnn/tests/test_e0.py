@@ -166,7 +166,7 @@ def numbers(res):
     out.update({"dcaK%d" % i: k for i, k in enumerate(res["check_dcaap_shape"]["K"])})
     out.update({"N1_same_k%d" % x["k"]: x["same_ratio"] for x in res["N1"]["rows"]})
     out.update({"N1_other_k%d" % x["k"]: x["other_ratio"] for x in res["N1"]["rows"]})
-    out.update({"N2_dt%d" % d: v for d, v in res["N2"]["spikes_within_30ms"].items()})
+    out.update({"N2_dt%s" % d: v for d, v in res["N2"]["spikes_within_30ms"].items()})   # keys are str after JSON
     out.update({"N3_" + k: v for k, v in res["N3"]["spikes"].items()})
     out.update({"N4_s%d_i%g" % (x["s"], x["interval"]): x["ratio"] for x in res["N4"]["rows"]})
     for k in ("r", "r_prime", "d_events_basal", "d_events_apical", "d_bf_basal", "d_bf_apical"):
