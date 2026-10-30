@@ -1002,3 +1002,101 @@ coordinate.
 - **H6 failing in the answers:** the merges changed single-operation worlds.
 
 **Not in this step:** precedence ("a + b × c", part B), × in chains, parentheses.
+
+### Part 7 amendments (2026-10-29, before the code)
+
+1. **No chain in training: the one-chain arm is dropped** (the user: "We will no longer run a single chain in the
+   training").
+   - **Removed with it:** changes 2 (a collision as a merge first) and 3 (classes tried with naming). Both existed
+     only for that arm, and untested machinery is not built.
+   - **What remains:** part 7 is change 1, the phase merge.
+   - **Predictions removed:** H3, and H5's collision control.
+   - **H2–H5 now read:**
+     - **H2:** chains of 2, 3 and 4 operations ≥ 0.99, zero-shot;
+     - **H4:** {start, after "+"} and {after a digit, after "a op b"} merge, and every move of the frame is the
+       world's;
+     - **H5:** with the phase merge off, chains ≤ 0.05.
+2. **The control** is `Brain(phase_merge=False)`.
+3. **The regression (H6)** covers:
+   - part 3 (`runs/a1.json`);
+   - part 5's F1–F3 (`runs/a5.json`), where only the phase count may change;
+   - part 6's A2 and reversal (`runs/a6.json`);
+   - part 4's walks and shortcut tests (`runs/a4.json`).
+
+   Part 4's A1 entries are left out: their known difference is part 4's own checker bug (part 5).
+4. **Part 6's harness names phases by the states they contain.** A merged phase holds several states (S and "after
+   +"), so a phase can no longer be named by its first state. For unmerged frames this gives the same values.
+
+## Part 7 results (2026-10-29; `runs/a7.txt`, `runs/a7.json`, `runs/a7_a2_phases.txt`)
+
+**Built:**
+- **`frameLearning._merge_phases`:** P3 lifted to phases. The seeds are phases of one shift class sharing an input;
+  the fold is as P3's full form folds places. Contents are compared with `_kind`, now shared with `factor`.
+- **`Brain(phase_merge=False)`:** the control.
+- **`ArithmeticWorld.score_chains`:** chains, only ever tested.
+- **`tests/test_a7.py`:** the harness.
+
+**Found during the build, after the pre-registration:** H6's prediction that A1 goes from 6 phases to 4 was wrong.
+- **What the build showed:** part 5's fast test still found 6 phases.
+- **Why:** in A1 a digit is always followed by "+", and a result always by "=". Both contents are determined and they
+  differ, so the fold refuses.
+- **What I did:** the prediction was left as registered and is reported refuted below.
+
+**H1, H2, H5: accuracy** (every seed, p = 13 and 97):
+
+| | the brain as built | phase merge off |
+|---|---|---|
+| single equations, + and − (held out) | 1.000 | 1.000 |
+| chains of 2 operations (1,000) | 1.000 | 0.000 |
+| chains of 3 operations | 1.000 | 0.000 |
+| chains of 4 operations | 1.000 | 0.000 |
+
+No chain was ever trained on.
+
+**H4: the mechanism** (every seed): the {+, −} world's 7 phases become 5.
+- **What merged:**
+  - the start with "after +";
+  - "after a digit" with "after a op b".
+- **What stayed apart:** "after −".
+- **The frame:** every move is the world's, and no place holds two states.
+
+**H6: no regression in the answers.**
+- **Part 3:** reproduces exactly.
+- **Part 4:**
+  - the box and both shortcut tests reproduce exactly;
+  - A₅ differs in seeds 0 and 2 as in parts 5 and 6 (part 5's generator correction);
+  - E1 and E2 show `shifts_right` 240 against "240". This is the harness's JSON normalization turning a numpy integer
+    into a string (fixed after the run), not a change: the values are equal.
+- **Part 5:** F1–F3 reproduce exactly.
+- **Part 6:** A2 and the reversal reproduce exactly (every recorded field).
+- **Phase counts:**
+  - A2 goes from 8 to 6 in every seed, as predicted (measured after the run, since part 6's records hold no phase
+    count: `runs/a7_a2_phases.txt`);
+  - A1 stays at 6, against the prediction of 4.
+
+**H7: cost** (training and sleep at p = 97): 9.5 s, 9.9 s, 9.5 s.
+
+**Verdicts:**
+- H1, H2, H4, H5 and H7 confirmed in every seed.
+- H6 confirmed for the answers and A2's phases; refuted for A1's phases.
+
+**What this shows:**
+1. **Chains of any length, never seen, are answered exactly.**
+   - **The running result needs no store of its own:** it is the coordinate, as a grid code is the running position.
+   - **The phase automaton becomes a loop, and the evidence is part 6's shift classes:**
+     - the start and "after +" shift every digit alike, so they are one phase;
+     - so the phases their digits lead to are one: a result continues like a digit.
+2. **The generalization is only as bold as the data allow.**
+   - **In A1** (one operator), what follows a digit is always "+", and what follows a result is always "=". The two
+     places disagree, so P3 keeps them apart, and A1's brain would not chain.
+   - **With + and −,** what follows a digit varies, so nothing contradicts the merge.
+   - **This is P3's rule working as written:** a determined content is evidence. Whether a learner should override
+     it ("a result is a value like any other") is a question for the user.
+3. **The merge has a cost.** After "a op b" the merged phase predicts nothing, since it now expects "=" or an
+   operator. The hippocampus still recalls "=" after prefixes it has lived through.
+
+**Limits:**
+1. **One precedence level only:** "+" and "−", left to right. Precedence ("a + b × c") is part B.
+2. **Chains work only where what follows a digit varies** (point 2).
+3. **× is not in chains:** × is left out of the factored coordinate (part 6), so "a × b + c" has no coordinate after
+   "a × b".

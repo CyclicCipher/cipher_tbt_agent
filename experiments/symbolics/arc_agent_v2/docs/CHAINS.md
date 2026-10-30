@@ -419,6 +419,59 @@ read is by overlap (§5).
      thalamus's held values is B's design question.
 3. **No CA1.** Recalled content is never mapped back into the cortex's places. It is not needed until 1 or 2 is.
 
+## 12. What the thalamus learns, and what it does, compared with a column (the user, 2026-10-29)
+
+**The short answer:**
+- **A column learns content and operations:** what is where, what comes next, how a move changes a place.
+- **The thalamus learns almost no content.** Its learnable parts set how much and when (gains and gates). The choice
+  of which gate opens is learned elsewhere: by the basal ganglia from dopamine, and, for timing, by the cerebellum.
+
+**What a column learns:**
+- **Feedforward synapses into L4 and L2/3:** features, receptive fields.
+- **Lateral and recurrent L2/3 connections:** associations, voting, and sequence memory on distal dendrites (HTM's
+  temporal memory).
+- **L5 and L6:** the frame and the displacements that move a place in it.
+- **Apical feedback synapses in L1:** learned context from higher areas.
+
+**What the thalamus learns:**
+
+| part | what is plastic | what it sets |
+|---|---|---|
+| driver synapses (retina → LGN; L5 → higher-order thalamus) | mostly fixed in adults (plastic in development) | nothing learned: the message passes as it is |
+| modulatory synapses from L6 (corticothalamic) | NMDA-receptor LTP/LTD | the gain of a column's own relay |
+| the reticular nucleus (TRN) | short-term plasticity; long-term depression of its electrical coupling (Landisman & Connors 2005) | how strongly, and how in sync, it suppresses relays |
+| thalamocortical input to cortex | plastic in the critical period; in adults, higher-order thalamic input paired with sensory input drives LTP in L2/3 (Gambino et al. 2014) | the thalamus helps teach the cortex, rather than learning itself |
+| mediodorsal (MD) responses | track the statistics of which context holds (Rikhye, Gilra & Halassa 2018) | which context to sustain; the learning may sit in its PFC inputs |
+
+**What the thalamus does** (its operations, none of which needs content learning):
+1. **Relay and route.**
+   - **First-order:** sense → cortex.
+   - **Higher-order:** a column's L5 output → thalamus → another area. This is the transthalamic route, the efference
+     copy's path.
+2. **Gate.**
+   - **The default:** the basal ganglia inhibit the thalamus tonically, so every channel is closed.
+   - **Selection:** the selected channel is released by disinhibition.
+   - **The TRN** suppresses the relays not attended to (Crick's "searchlight").
+3. **Set gain and mode.**
+   - **Gain:** L6 feedback scales its own relay.
+   - **Mode:** tonic firing relays faithfully; bursts signal novelty, "wake up" (Sherman 2001).
+4. **Sustain:** thalamocortical loops keep the PFC's working-memory activity alive, and amplify the PFC's own
+   connections (§3).
+5. **Switch context:** MD sustains the relevant PFC representations and suppresses the others (§4).
+6. **Synchronize and bind:**
+   - **The matrix's diffuse projections** to layer 1 coordinate the timing of areas.
+   - **The pulvinar** synchronizes two visual areas according to attention, regulating what passes between them
+     (Saalmann et al. 2012).
+7. **Compare** (a hypothesis): the pulvinar sets the cortex's prediction against the next input every ~100 ms, and the
+   difference trains the cortex (O'Reilly et al. 2021, §10).
+
+**For `thalamus.py`:**
+- **It is mostly deterministic operations:** route, gate, hold, switch, synchronize, compare.
+- **Its learned state is small:** a gain per channel, and how strongly each gate closes.
+- **The policy of which gate opens when** is learned outside it: by a basal-ganglia learner taught by prediction error,
+  and later by the goal cortex's drives ("be correct"; ARCHITECTURE §7).
+- **This matches** the TBT line's July review (`src/tbt/notes/bg_thalamus_value_research.md`, thread 3).
+
 ## Sources
 
 - Alexander & Brown 2011, "Medial prefrontal cortex as an action-outcome predictor", *Nature Neuroscience* 14.
@@ -432,7 +485,12 @@ read is by overlap (§5).
 - Frank & Badre 2012, "Mechanisms of hierarchical reinforcement learning in corticostriatal circuits 1", *Cerebral
   Cortex* 22.
 - Gardner, Schoenbaum & Gershman 2018, "Rethinking dopamine as generalized prediction error", *Proc. R. Soc. B* 285.
+- Gambino et al. 2014, "Sensory-evoked LTP driven by dendritic plateau potentials in vivo", *Nature* 515.
 - Graybiel 1998, "The basal ganglia and chunking of action repertoires", *Neurobiology of Learning and Memory* 70.
+- Landisman & Connors 2005, "Long-term modulation of electrical synapses in the mammalian thalamus", *Science* 310.
+- Saalmann, Pinsk, Wang, Li & Kastner 2012, "The pulvinar regulates information transmission between cortical areas
+  based on attention demands", *Science* 337.
+- Sherman 2001, "Tonic and burst firing: dual modes of thalamocortical relay", *Trends in Neurosciences* 24.
 - Lisman & Idiart 1995, "Storage of 7 ± 2 short-term memories in oscillatory subcycles", *Science* 267.
 - Long, Jin & Fee 2010, "Support for a synaptic chain model of neuronal sequence generation", *Nature* 468.
 - Luck & Vogel 1997, "The capacity of visual working memory for features and conjunctions", *Nature* 390.

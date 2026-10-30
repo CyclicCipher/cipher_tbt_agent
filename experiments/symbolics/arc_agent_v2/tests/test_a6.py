@@ -98,18 +98,17 @@ def a2(p, seed):
     out["factored"], out["why"] = fac is not None, f.unfactored                  # G4
     if fac is None:
         return out
-    kind = {}                                                                    # each phase, named by its states
+    phase_of = {}                                       # each state's phase (a merged phase holds several: part 7)
     for u, s in lab.items():
-        kind.setdefault(fac.phase[u], "B" + s[1] if s[0] == "B" else s[0])
-    cls = {kind[ph]: k for ph, k in fac.cls.items() if ph in kind}
-    cls.update({n: None for n in kind.values() if n not in cls})
+        phase_of.setdefault("B" + s[1] if s[0] == "B" else s[0], fac.phase[u])
+    cls = {n: fac.cls.get(ph) for n, ph in phase_of.items()}
     m, plus, minus = fac.modules, cls["B+"], cls["B-"]
     d = lambda c, b: fac.shift.get((c, world.sdr_of[str(b)]))
     alike = sum(1 for b in range(p) if d(plus, b) is not None and d(cls["S"], b) == d(plus, b))
     negated = sum(1 for b in range(p) if None not in (d(plus, b), d(minus, b)) and
                   m.bind(d(plus, b), d(minus, b)) == m.identity())
     k = fac.relation.get((min(plus, minus), max(plus, minus))) if None not in (plus, minus) else None
-    out.update(classes=cls, left_out=sorted(kind.get(q, "?") for q in fac.left_out), k=k,
+    out.update(classes=cls, left_out=sorted(n for n, ph in phase_of.items() if ph in fac.left_out), k=k,
                naming=sorted(name.get(x, "?") for x in fac.naming),
                identities=sorted(name.get(x, "?") for x in fac.identities),
                digits_alike=alike / p, digits_negated=negated / p, related=len(fac.related))

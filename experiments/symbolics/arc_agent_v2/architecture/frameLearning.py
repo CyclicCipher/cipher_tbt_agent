@@ -33,6 +33,11 @@ where the moves allow them.
     own shifts. A phase that fits no class is left out of the coordinate.
   - **The relation:** two classes are related by an automorphism x -> k x of the coordinate group, found from the
     inputs both have seen and applied to the rest. For "+" and "−", k = −1.
+- **Phases merge as places do (part 7: P3 lifted to phases).**
+  - **The rule:** two phases of one shift class that share an input are one phase, unless their fold disagrees (an
+    input leading them to phases that can't be one, or contents that can't be one).
+  - **Its effect:** the start and "after +" merge, so "after a digit" and "after a op b" do too. The phase automaton
+    loops, and a chain continues from a result as from a digit.
 - **One coordinate for every place, and phases (part 5).** Each moving input is one shift of a coordinate shared
   by every place, wherever it is made (P4's regularity across the frame); the start's coordinate is found. Naming (the
   determined symbol that comes next names the place's position) is tested per input and accepted only if consistent;
@@ -99,11 +104,11 @@ class Frame:
 
 
 def consolidate(transitions, contents, start, regularity=True, coordinates=None, factoring=True, end=None,
-                relate=True):
+                relate=True, merge=True):
     """A Frame from the hippocampus's replay: transitions [(place, input, next place, times seen)] and contents
     [(place, sensor, input, times seen)], of episodes that start at start. coordinates = (d, w, seed), or None;
     factoring: part 5's (phase, coordinate) factorization, where there are coordinates; end: the hippocampus's SDR for
-    an episode's end, as content; relate: part 6's relation between shift classes."""
+    an episode's end, as content; relate: part 6's relation between shift classes; merge: part 7's phase merge."""
     places = same_future(transitions, contents)
     pid, P, xid, X = {}, [], {}, []
 
@@ -145,7 +150,7 @@ def consolidate(transitions, contents, start, regularity=True, coordinates=None,
     coords, declined, systems = coordinate(move, maps, P, X, coordinates) if coordinates and U else ([], [], [])
     fac, why = None, None
     if factoring and systems and places.get(start, start) in pid:
-        fac, why = factor(move, cont, pid[places.get(start, start)], P, X, systems, xid.get(end, -1), relate)
+        fac, why = factor(move, cont, pid[places.get(start, start)], P, X, systems, xid.get(end, -1), relate, merge)
     return Frame(places.get(start, start), moves, content, places, inferred, disp, coords, declined, fac, why,
                  len(split))
 
@@ -986,10 +991,10 @@ def _choose(alg, D, cons, limit=2000000):
     return theta
 
 
-def factor(move, cont, start, P, X, systems, end=-1, relate=True):
+def factor(move, cont, start, P, X, systems, end=-1, relate=True, merge=True):
     """Part 5: one coordinate for every place, and phases. Part 6: where one shift per input contradicts the moves,
-    shift classes, and (relate) the relation between them. end: the input id of an episode's end, if any. Returns a
-    Factored, or None (with why) if the frame can't be factored."""
+    shift classes, and (relate) the relation between them. Part 7 (merge): phases merged as places are. end: the input
+    id of an episode's end, if any. Returns a Factored, or None (with why) if the frame can't be factored."""
     if not systems:
         return None, "no coordinates"
     systems = sorted(systems, key=lambda s: -len(s[0]))  # the coordinate: the system that covers the most places
@@ -1029,6 +1034,9 @@ def factor(move, cont, start, P, X, systems, end=-1, relate=True):
         return None, "the moves are not one shift each"
     Cv, Dv = sol
     relation, related = _relate(Dv, nX, modules.periods) if relate else ({}, [])
+    kind = lambda us, s: _kind(us, s, det, cont, accepted, own, Cv)
+    if merge:
+        phase, cls = _merge_phases(phase, E, cls, Dv, nX, kind, lambda u: det.get(u, {}))
     rep = {}
     for u in range(len(P)):
         rep.setdefault(phase[u], u)
@@ -1053,11 +1061,9 @@ def factor(move, cont, start, P, X, systems, end=-1, relate=True):
     for ph in set(phase):
         members = [u for u in range(len(P)) if phase[u] == ph]
         for s in {s for u in members for s in det.get(u, {})}:
-            syms = [(u, det[u][s]) for u in members if s in det.get(u, {})]
-            if len({sym for _, sym in syms}) == 1 and len(syms) == sum(1 for u in members if s in cont[u]):
-                content[(P[rep[ph]], s)] = ("const", X[syms[0][1]])
-            elif accepted and all(sym in own and own[sym] in Cv and u in Cv and Cv[own[sym]] == Cv[u] for u, sym in syms):
-                content[(P[rep[ph]], s)] = ("named", None)
+            k = kind(members, s)
+            if k is not None:
+                content[(P[rep[ph]], s)] = k if k[0] == "named" else ("const", X[k[1]])
     if start not in Cv:
         return None, "the start has no coordinate"
     zero = tuple(0 for _ in modules.periods)
@@ -1069,6 +1075,93 @@ def factor(move, cont, start, P, X, systems, end=-1, relate=True):
                     shifts, coord, content, named, [X[y] for y in accepted], identities, len(set(phase)),
                     {P[rep[ph]]: k for ph, k in cls.items()}, relation, [P[u] for u in left],
                     [(k // nX, X[k % nX]) for k in related]), None
+
+
+def _kind(us, s, det, cont, accepted, own, Cv):
+    """What a set of places predicts of a sensor: ("const", input) if every place with content there has the same one,
+    ("named", None) if each place's content is the symbol whose own position is its coordinate (where naming was
+    accepted), else None."""
+    syms = [(u, det[u][s]) for u in us if s in det.get(u, {})]
+    if not syms:
+        return None
+    if len({sym for _, sym in syms}) == 1 and len(syms) == sum(1 for u in us if s in cont[u]):
+        return ("const", syms[0][1])
+    if accepted and all(sym in own and own[sym] in Cv and u in Cv and Cv[own[sym]] == Cv[u] for u, sym in syms):
+        return ("named", None)
+    return None
+
+
+def _merge_phases(phase, E, cls, D, nX, kind, sensed):
+    """Phases merge as places do (part 7: P3 lifted to phases). Two phases are one if they share an input whose shift
+    is the same from both (the evidence: they are in one shift class), and their fold never disagrees:
+    - they are in the same class (so every input they share shifts alike);
+    - every input both make moves by leads them to phases that are again one;
+    - for each sensor, where both predicted something, the merged phase still does (one symbol, or naming).
+    kind(places, sensor): what places predict (`_kind`); sensed(place): the sensors with a determined content there.
+    Returns (each place's phase, each phase's class)."""
+    members, tr = defaultdict(list), defaultdict(dict)  # phase -> its places; phase -> input -> the phases it leads to
+    for u, ph in enumerate(phase):
+        members[ph].append(u)
+    for u, x, v in E:
+        tr[phase[u]].setdefault(x, set()).add(phase[v])
+    parent = {ph: ph for ph in members}
+
+    def find(ph):
+        while parent[ph] != ph:
+            ph = parent[ph]
+        return ph
+
+    def fold(a, b):
+        over, otr, omem = {}, {}, {}
+
+        def f(ph):
+            ph = find(ph)
+            while ph in over:
+                ph = over[ph]
+            return ph
+
+        q = [(a, b)]
+        while q:
+            p, r = q.pop()
+            p, r = f(p), f(r)
+            if p == r:
+                continue
+            if cls.get(p) != cls.get(r):
+                return None
+            tp, tq = otr.get(p, tr[p]), otr.get(r, tr[r])
+            for x in tp.keys() & tq.keys():
+                a_, b_ = {f(t) for t in tp[x]}, {f(t) for t in tq[x]}
+                if len(a_) != 1 or len(b_) != 1:
+                    return None
+                q.append((a_.pop(), b_.pop()))
+            mp, mq = omem.get(p, members[p]), omem.get(r, members[r])
+            for s in {s for u in mp for s in sensed(u)} & {s for u in mq for s in sensed(u)}:
+                if kind(mp, s) is not None and kind(mq, s) is not None and kind(mp + mq, s) is None:
+                    return None
+            otr[p] = {x: tp.get(x, set()) | tq.get(x, set()) for x in tp.keys() | tq.keys()}
+            omem[p] = mp + mq
+            over[r] = p
+        return over, otr, omem
+
+    seeds = defaultdict(list)                           # (class, input) -> the phases that shift by it
+    for ph in sorted(members):
+        if ph in cls:
+            for x in sorted(tr[ph]):
+                if cls[ph] * nX + x in D:
+                    seeds[(cls[ph], x)].append(ph)
+    for key in sorted(seeds):
+        a = seeds[key][0]
+        for b in seeds[key][1:]:
+            if find(a) == find(b):
+                continue
+            done = fold(a, b)
+            if done is not None:
+                over, otr, omem = done
+                for r, p in over.items():
+                    parent[r] = p
+                for p in otr:
+                    tr[p], members[p] = otr[p], omem[p]
+    return [find(ph) for ph in phase], {find(ph): k for ph, k in cls.items()}
 
 
 def _classes(alg, E, phase, C0, nX):

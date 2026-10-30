@@ -25,10 +25,11 @@ from arc_agent_v2.architecture.hippocampus import Hippocampus
 
 class Brain:
     def __init__(self, config=ARITHMETIC, consolidation=True, regularity=True, coordinates=True, factoring=True,
-                 relation=True):
+                 relation=True, phase_merge=True):
         self.config, self.consolidation = config, consolidation
         self.regularity, self.coordinates, self.factoring = regularity, coordinates, factoring
         self.relation = relation                        # part 6: shift classes related by an automorphism
+        self.phase_merge = phase_merge                  # part 7: phases merged as places are
         d, w, seed = config.sdr.d, config.sdr.w, config.seed
         self.regions = {r.name: [Column(d, w, seed + 97 * i) for i in range(r.columns)] for r in config.validate()}
         self.hippocampus = Hippocampus(d, w, seed)
@@ -85,7 +86,7 @@ class Brain:
         cfg = self.config.sdr
         self.frame = consolidate(self.hippocampus.replay(), self.hippocampus.contents(), self.hippocampus.start,
                                  self.regularity, (cfg.d, cfg.w, self.config.seed) if self.coordinates else None,
-                                 self.factoring, self.hippocampus.end, self.relation)
+                                 self.factoring, self.hippocampus.end, self.relation, self.phase_merge)
         for c in self.columns():
             c.install(self.frame, self.coordinates)
         return self.frame

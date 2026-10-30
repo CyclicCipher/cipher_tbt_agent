@@ -271,7 +271,7 @@ in `docs/LAB.md`, built, run (about 10 minutes of compute at most), and recorded
 | 2 | coordinates learned from the frame; the bus and efference copies | part 4 | **done** |
 | 3 | one fact, two uses: one coordinate for every place, factored into (phase, coordinate) | part 5 | **done** |
 | A2 | three operations mixed; subtraction from addition facts (the reversal) | part 6 | **done** |
-| chains A | chained expressions of one precedence level ("a + b − c ="); no chains vs one chain in training | part 7 | pre-registered |
+| chains A | chained expressions of one precedence level ("a + b − c ="), zero-shot | part 7 | **done**: chains of 2–4 operations 1.000, never trained; 0.000 with the phase merge off |
 | hippocampus | keys by the cortex's location (TEM-t); the gaps in `docs/CHAINS.md` §11 | part 8 | planned |
 | chains B | precedence ("a + b × c ="): held values in a `thalamus.py`; the gate taught by prediction error | part 9 | planned |
 
@@ -314,3 +314,13 @@ are folded in where the goal uses them:
     the converse is the same fact read backwards;
   - for relations that aren't one-to-one, the converse is the transpose, not the inverse
     (`experiments/intelligent_constraints/`).
+- **A goal cortex** (the user, 2026-10-29; not designed yet).
+  - **What it is:** a part of the neocortex, made of columns that predict reward and punishment as generally as
+    possible.
+  - **Active inference:** goals are ideal states the model tries to stay in.
+  - **The drives:**
+    - **The first goal:** "be correct".
+    - **Later, in agentic experiments:** "achieve the WIN" and "don't waste actions", as two separate drives.
+  - **Why it matters for chains:** it could drive multi-step chained actions to be correct in the first place.
+  - **It meets B's gate:** "be correct" as a drive is a learning signal of the kind the gate needs (`docs/CHAINS.md`
+    §10).

@@ -17,6 +17,7 @@ to find. A brain that scores well above chance on its held-out equations is read
   translation, so the answer no longer names where the sum is.
 - **`reverse=True` (part 6):** S, a random third of the digits, is never subtracted. Every "a - b" with b in S is left
   out of training, the rest are split as usual, and the test is every subtraction by a digit in S.
+- **Chains (part 7):** "a + b - c = d", evaluated left to right, are only ever tested (`score_chains`), never trained.
 
 A1: addition mod p. The p * p equations are split at random: train_frac of them are shown in training, the rest are
 held out. The test shows a held-out equation up to "=", asks for the brain's prediction of the next SDR, and decodes
@@ -107,3 +108,22 @@ class ArithmeticWorld:
         qs = self.queries(held_out)
         hits = sum(self.decode(predict(prefix)) == self.written(*eq)[-1] for prefix, _, eq in qs)
         return hits / len(qs)
+
+    # ---- chains (part 7): never trained on, only tested -------------------------------------------------------------
+    def written_chain(self, ops, xs):
+        """A chain "x0 op0 x1 op1 x2 ... = v", evaluated left to right (one precedence level)."""
+        v = xs[0]
+        for op, x in zip(ops, xs[1:]):
+            v = OPS[op](v, x, self.p)
+        return [str(xs[0])] + [s for op, x in zip(ops, xs[1:]) for s in (op, str(x))] + ["=", str(v)]
+
+    def score_chains(self, predict, n_ops, count=1000, seed=0):
+        """The fraction of `count` random chains of n_ops operations (operators from this world's) whose answer is the
+        symbol nearest predict(the chain up to "=")."""
+        rng = np.random.default_rng((seed, 77, n_ops))
+        hits = 0
+        for _ in range(count):
+            ops = [self.ops[i] for i in rng.integers(0, len(self.ops), n_ops)]
+            syms = self.written_chain(ops, rng.integers(0, self.p, n_ops + 1).tolist())
+            hits += self.decode(predict([self.sdr_of[s] for s in syms[:-1]])) == syms[-1]
+        return hits / count
