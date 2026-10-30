@@ -90,6 +90,8 @@ class Column:
 
     def _weigh(self, x, sensor):
         """Bayes' rule: each hypothesis's weight times how expected x was there."""
+        if len(self.l6.hyps) == 1:                      # one hypothesis: normalized, its weight stays log 1 = 0
+            return
         K = self.fac.vocab
         hyps = {}
         for h, lw in self.l6.hyps.items():
@@ -128,7 +130,11 @@ class Column:
     # ---- the column's steps ---------------------------------------------------------------------------------------
     def predict(self, sensor="symbols"):
         if self.fac is not None and self.l6.hyps:
-            scores = self._scores(sensor)
+            if len(self.l6.hyps) == 1:                  # one hypothesis: Laplace's rule is monotone in the counts
+                c, _ = self._counts(next(iter(self.l6.hyps)), sensor)
+                scores = c
+            else:
+                scores = self._scores(sensor)
             if scores:
                 return max(scores, key=scores.get)
         return self.l23.predict(self.l6.place, sensor)

@@ -28,13 +28,10 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # arc_agent
 
 
 def run(p, frac, seed, arm, op="+"):
+    from arc_agent_v2.tests.trained import trained as shared   # one trained brain per (world, flags) per run
     t0 = time.time()
-    world = ArithmeticWorld(p=p, ops=(op,), train_frac=frac, seed=seed)
-    brain = Brain(BrainConfig(ARITHMETIC.sdr, ARITHMETIC.sensors, ARITHMETIC.regions, seed),
-                  consolidation=(arm == "full"))
-    for ep in world.epoch(np.random.default_rng(seed)):
-        brain.episode(ep)
-    frame = brain.sleep()
+    world, brain, _ = shared(p, seed, dict(ops=(op,), train_frac=frac), dict(consolidation=(arm == "full")))
+    frame = brain.frame
     out = dict(p=p, frac=frac, seed=seed, arm=arm, op=op, train=len(world.train), held_out=len(world.held_out),
                held_out_acc=world.score(brain.predict_after), train_acc=world.score(brain.predict_after, held_out=False))
     out["seconds"] = round(time.time() - t0, 1)         # M5: learning, sleep and scoring (not the checks below)

@@ -450,12 +450,14 @@ def _regular(move, ctx, split, const=None):
     nP, nX = move.shape
     base = nX * nX
     sp = np.array(sorted(split), np.int64)
+    is_split = np.zeros(base, bool)                     # pair -> taken per context (a lookup, not a search)
+    is_split[sp] = True
     free = np.ones((nX + 1, nX), bool) if const is None else ~const   # [context + 1, input]: names displacements
 
     def lab(u, pairs):                                  # a pair's label at place u: itself, or itself in u's context
         if not sp.size:
             return pairs
-        return np.where(np.isin(pairs, sp), base * (2 + ctx[u]) + pairs, pairs)
+        return np.where(is_split[pairs], base * (2 + ctx[u]) + pairs, pairs)
 
     pool = Pool(nP, nX, base * (nX + 2) if sp.size else base)
     pairs, S, T, U = _instances(move, True)
@@ -464,7 +466,7 @@ def _regular(move, ctx, split, const=None):
         keep = free[k, pairs // nX] & free[k, pairs % nX]
         pairs, S, T, U = pairs[keep], S[keep], T[keep], U[keep]
     if pairs.size:
-        pool.seed(np.where(np.isin(pairs, sp), base * (2 + ctx[U]) + pairs, pairs) if sp.size else pairs, S, T)
+        pool.seed(np.where(is_split[pairs], base * (2 + ctx[U]) + pairs, pairs) if sp.size else pairs, S, T)
     inferred, changed, ar = 0, True, np.arange(nX)
     while changed:
         changed = False
@@ -1029,8 +1031,10 @@ def factor(move, cont, start, P, X, systems, end=-1, relate=True):
         cls = _classes(alg, E, phase, C0, nX)           # part 6: generalize, then split by phase
     keyed = [(u, cls[phase[u]] * nX + x, v) for u, x, v in E if phase[u] in cls]
     keys = sorted({k for _, k, _ in keyed})
-    accepted = [y for y, pairs in names.items() if len(pairs) >= 2 and _solve(alg, keyed, sorted(pairs), C0, keys)]
-    sol = _solve(alg, keyed, sorted(p for y in accepted for p in names[y]), C0, keys)
+    tried = {y: _solve(alg, keyed, sorted(pairs), C0, keys) for y, pairs in names.items() if len(pairs) >= 2}
+    accepted = [y for y, sol in tried.items() if sol]
+    sol = tried[accepted[0]] if len(accepted) == 1 else \
+        _solve(alg, keyed, sorted(p for y in accepted for p in names[y]), C0, keys)   # one naming: its solve is it
     if sol is None:
         accepted, sol = [], _solve(alg, keyed, [], C0, keys)
     if sol is None:

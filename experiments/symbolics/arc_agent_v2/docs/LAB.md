@@ -1428,3 +1428,47 @@ The control's singles are 1.000 everywhere.
 2. **Each burst leaves one hypothesis here.** No world yet needs a union of several hypotheses at once.
 3. **No unions over places:** the box still loses its column.
 4. **× is outside the union:** after "a ×" every hypothesis drops, and the place answers (amendment 3).
+
+## Performance pass (2026-10-29, after part 9; the user: "Performance should be one of our highest commitments")
+
+**Why part 9's run took 9.4 min:**
+- **Its own runs, 222 s:** 24 trained brains. Each p = 97 arm cost about 10 s of training and sleep, plus about 8 s
+  for ~12,400 queries at ~2 ms each.
+- **The regression, 340 s:** it trained about 40 more brains, many of them the same brain again. A1 at p = 97 was
+  trained by parts 3, 5 and 9 alike, and the {+, −} world by parts 7 and 9.
+
+**The profile** (p = 97, {+, −}; sleep 17.8 s under the profiler):
+- **Installing the frame into L5:** 7.3 s. Most of it was `x not in self.inputs`, a linear scan over a list of SDRs
+  compared by bytes (978,000 equality tests).
+- **Queries:** 2.2 of 3.9 s went to the column's posterior predictive. It runs at every input, since L4 compares
+  against it, even with one hypothesis.
+- **P4:** `np.isin` against the 9,318 split pair labels, about 67,000 times.
+
+**The fixes:** each leaves every result identical.
+1. **L5:** a set beside the input list.
+2. **The column, with one hypothesis:**
+   - the prediction is the argmax of its counts (Laplace's rule is monotone in them);
+   - the weighting is skipped (one normalized weight is always 0).
+3. **The conjunction:** its first w distinct draws are chosen in plain Python, instead of numpy's unique and two
+   sorts.
+4. **Factoring:** when exactly one naming is accepted, its solve is the final solve, so it is not run twice.
+5. **P4:** "is this pair split?" is a boolean table lookup, not a search.
+6. **`tests/trained.py`:** the harnesses share trained brains within one run, keyed on the world and the brain's
+   non-default flags (the last 8 kept). Training is deterministic and the harnesses query without learning.
+
+**Measured:**
+- **Sleep at p = 97, {+, −}:** 10.0 s became 5.0 s. Of what remains, P4 is 2.5 s, factoring 1.1 s, coordinates 0.6
+  s and the install 0.6 s.
+- **One part 9 arm:** about 18 s became 12.0 s.
+- **A query:** 1,965 µs became 807 µs (profiled).
+- **The test suite:** 17.4 s became 12.9 s.
+- **Identical results, checked:** a part 9 arm (p = 97, seed 0), part 5's `one_fact` (p = 97, seed 1), part 6's A2
+  (p = 13, seed 2) and part 3 (p = 97, seed 1, here from the cache).
+
+**What is left:**
+- **P4's fill loop:** a Python loop over places and candidates, with two small numpy calls per inferred move (14,113
+  at p = 97).
+- **Factoring's trial solves.**
+
+Vectorizing these is the next performance step. It changes the order of pooling, so it needs a check that the
+results stay identical.

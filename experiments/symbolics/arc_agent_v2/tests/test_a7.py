@@ -23,6 +23,7 @@ import numpy as np
 from arc_agent_v2.architecture.brain import Brain
 from arc_agent_v2.config.config import ARITHMETIC, BrainConfig
 from arc_agent_v2.tests.test_a6 import labels, truth
+from arc_agent_v2.tests.trained import trained as shared   # one trained brain per (world, flags) per run
 from arc_agent_v2.worlds.arithmetic_world import ArithmeticWorld
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # arc_agent_v2/
@@ -32,13 +33,7 @@ LENGTHS = (2, 3, 4)
 
 def trained(p, seed, union=True, ops=("+", "-")):
     """Since part 9 the arms are the union column and its control (part 7's phase merge was replaced by the union)."""
-    world = ArithmeticWorld(p=p, ops=ops, train_frac=0.5, seed=seed)
-    brain = Brain(BrainConfig(ARITHMETIC.sdr, ARITHMETIC.sensors, ARITHMETIC.regions, seed), union=union)
-    t = time.time()
-    for ep in world.epoch(np.random.default_rng(seed)):
-        brain.episode(ep)
-    brain.sleep()
-    return world, brain, time.time() - t
+    return shared(p, seed, dict(ops=ops, train_frac=0.5), dict(union=union))
 
 
 def mechanism(world, brain):

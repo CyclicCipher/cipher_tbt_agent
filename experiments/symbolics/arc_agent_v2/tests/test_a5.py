@@ -22,6 +22,7 @@ import numpy as np
 from arc_agent_v2.worlds.arithmetic_world import ArithmeticWorld
 from arc_agent_v2.architecture.brain import Brain
 from arc_agent_v2.config.config import ARITHMETIC, BrainConfig
+from arc_agent_v2.tests.trained import trained as shared   # one trained brain per (world, flags) per run
 from arc_agent_v2.tests.test_a1 import run as run_a1
 from arc_agent_v2.tests.test_a4 import EXCURSION, KINDS, a1 as a4_a1, shortcut, summarize, walk_checks
 
@@ -30,11 +31,7 @@ SEEDS = (0, 1, 2)
 
 
 def trained(p, seed, factoring=True, **kw):
-    world = ArithmeticWorld(p=p, train_frac=0.5, seed=seed, **kw)
-    brain = Brain(BrainConfig(ARITHMETIC.sdr, ARITHMETIC.sensors, ARITHMETIC.regions, seed), factoring=factoring)
-    for ep in world.epoch(np.random.default_rng(seed)):
-        brain.episode(ep)
-    brain.sleep()
+    world, brain, _ = shared(p, seed, dict(train_frac=0.5, **kw), dict(factoring=factoring))
     return world, brain
 
 

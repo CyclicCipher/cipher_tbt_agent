@@ -22,6 +22,7 @@ import time
 
 import numpy as np
 
+from arc_agent_v2.tests.trained import trained as shared   # one trained brain per (world, flags) per run
 from arc_agent_v2.worlds.arithmetic_world import OPS, ArithmeticWorld
 from arc_agent_v2.architecture.brain import Brain
 from arc_agent_v2.config.config import ARITHMETIC, BrainConfig
@@ -32,13 +33,7 @@ CHAIN = {13: (2, 3, 4), 97: (2, 3, 4, 8, 16, 32)}   # the multiplicative group's
 
 
 def trained(p, seed, relation=True, **kw):
-    world = ArithmeticWorld(p=p, train_frac=0.5, seed=seed, **kw)
-    brain = Brain(BrainConfig(ARITHMETIC.sdr, ARITHMETIC.sensors, ARITHMETIC.regions, seed), relation=relation)
-    t = time.time()
-    for ep in world.epoch(np.random.default_rng(seed)):
-        brain.episode(ep)
-    brain.sleep()
-    return world, brain, time.time() - t
+    return shared(p, seed, dict(train_frac=0.5, **kw), dict(relation=relation))
 
 
 def labels(world, frame):

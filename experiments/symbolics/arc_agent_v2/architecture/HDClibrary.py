@@ -253,10 +253,11 @@ class Conjunction:
         msg = b"%d|" % self.seed + a.idx.tobytes() + b"|" + b.idx.tobytes()
         n = 2 * self.w
         while True:                                     # the first w distinct of n draws (2w almost always suffice)
-            draws = np.frombuffer(hashlib.shake_128(msg).digest(np.dtype(self.dt).itemsize * n), self.dt) % self.d
-            _, first = np.unique(draws, return_index=True)
-            if first.size >= self.w:
-                return SDR._sorted(self.d, np.sort(draws[np.sort(first)[:self.w]]).astype(np.int32))
+            draws = (np.frombuffer(hashlib.shake_128(msg).digest(np.dtype(self.dt).itemsize * n), self.dt)
+                     % self.d).tolist()
+            first = list(dict.fromkeys(draws))          # the distinct draws, in the order drawn
+            if len(first) >= self.w:
+                return SDR._sorted(self.d, np.array(sorted(first[:self.w]), np.int32))
             n *= 2
 
 

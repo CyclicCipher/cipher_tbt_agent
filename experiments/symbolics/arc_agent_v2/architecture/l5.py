@@ -31,15 +31,18 @@ class L5:
         self.shifts = {}                                # input -> [(modules, delta)], one per orbit it moves
         self.words = []                                 # per orbit: (modules, {displacement code: [inputs]})
         self.inputs = []                                # every input with a known move, in the order learned
+        self._known = set()                             # the same, for O(1) membership
 
     def learn(self, place, x, nxt):
         self.moves.store(self.key(place, x), nxt)
-        if x not in self.inputs:
+        if x not in self._known:
+            self._known.add(x)
             self.inputs.append(x)
 
     def learn_shift(self, x, modules, delta):
         self.shifts.setdefault(x, []).append((modules, delta))
-        if x not in self.inputs:
+        if x not in self._known:
+            self._known.add(x)
             self.inputs.append(x)
 
     def move(self, place, x):
