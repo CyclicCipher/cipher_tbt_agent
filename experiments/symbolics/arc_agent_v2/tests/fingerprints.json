@@ -1,0 +1,427 @@
+{
+ "A1 13 0": {
+  "inferred": 85,
+  "split": 0,
+  "moves": "819fa341bfe03330",
+  "content": "d08c1ceca3b5e0a0",
+  "disp": "df292d9500ed5cc4",
+  "coords": [
+   [
+    13,
+    [
+     13
+    ]
+   ],
+   [
+    13,
+    [
+     13
+    ]
+   ]
+  ],
+  "declined": [],
+  "unfactored": null,
+  "phases": 6,
+  "phase": "a4399ab1caf4f1a6",
+  "trans": "5858a0bb994eefce",
+  "shift": "58ee39be1e9578a2",
+  "coord": "898c7e190876988b",
+  "named": "0511f0ed7a4eeb52",
+  "cls": "f5ddfb2710b43109",
+  "relation": [],
+  "counts": "66a539777dc44f3b",
+  "cells": 53,
+  "start": "360000007c0000000700000012000000"
+ },
+ "A1 13 1": {
+  "inferred": 85,
+  "split": 0,
+  "moves": "f2dad376684b4a3b",
+  "content": "494405a8e1713540",
+  "disp": "d3ef5c34ed72d6e3",
+  "coords": [
+   [
+    13,
+    [
+     13
+    ]
+   ],
+   [
+    13,
+    [
+     13
+    ]
+   ]
+  ],
+  "declined": [],
+  "unfactored": null,
+  "phases": 6,
+  "phase": "d8ae9456b5766664",
+  "trans": "ecd346b71a569631",
+  "shift": "036c57407941ae76",
+  "coord": "3307fea9df63e0e5",
+  "named": "443a6e0cfc60969d",
+  "cls": "0c9c16279ea641e7",
+  "relation": [],
+  "counts": "b603892f8a4646bf",
+  "cells": 53,
+  "start": "08000000150000000500000019000000"
+ },
+ "A2 13 0": {
+  "inferred": 253,
+  "split": 162,
+  "moves": "53fc346a457ebae6",
+  "content": "b3094be8dddccb7c",
+  "disp": "1cdabf92adf5234d",
+  "coords": [
+   [
+    12,
+    [
+     2,
+     3,
+     4
+    ]
+   ],
+   [
+    13,
+    [
+     13
+    ]
+   ]
+  ],
+  "declined": [],
+  "unfactored": null,
+  "phases": 8,
+  "phase": "e32b29f1a541fa2c",
+  "trans": "cd22601a2e01a89a",
+  "shift": "c50f41e984fc357d",
+  "coord": "076ec448a0e7d8b8",
+  "named": "2bf68445899dc464",
+  "cls": "1e5c2df5bcad2584",
+  "relation": [
+   "((0, 1), (12,))"
+  ],
+  "counts": "ead1c421fde584a7",
+  "cells": 79,
+  "start": "360000007c0000000200000017000000"
+ },
+ "rev 13 2": {
+  "inferred": 143,
+  "split": 158,
+  "moves": "cb75d472637d7435",
+  "content": "4e52035b068a3d5d",
+  "disp": "7b4a9c3c408b9942",
+  "coords": [
+   [
+    13,
+    [
+     13
+    ]
+   ]
+  ],
+  "declined": [],
+  "unfactored": null,
+  "phases": 7,
+  "phase": "b45966b3a6211c06",
+  "trans": "d1ab8f3a99efbfd5",
+  "shift": "0b9aba19654f11c4",
+  "coord": "004ae745b7784b1e",
+  "named": "755b6d3ef347be4b",
+  "cls": "65fe450cc65ea87a",
+  "relation": [
+   "((0, 1), (12,))"
+  ],
+  "counts": "7b933bafdcee9c3a",
+  "cells": 66,
+  "start": "1a0000005d0000000800000015000000"
+ },
+ "withheld 13 0": {
+  "inferred": 59,
+  "split": 0,
+  "moves": "3ff2efac45f09c5a",
+  "content": "887629409eed193a",
+  "disp": "4189c4e4cf6e5eb7",
+  "coords": [
+   [
+    13,
+    [
+     13
+    ]
+   ]
+  ],
+  "declined": [],
+  "unfactored": null,
+  "phases": 6,
+  "phase": "43f11bea2e855eb4",
+  "trans": "2929e2ae4eb15919",
+  "shift": "72cde60ac6893fa4",
+  "coord": "5da47c1975662448",
+  "named": "55500b3ed13e35ad",
+  "cls": "a8b3e4c0184f8679",
+  "relation": [],
+  "counts": "1b2468b46dd6d852",
+  "cells": 45,
+  "start": "360000007c0000000700000012000000"
+ },
+ "permute 13 1": {
+  "inferred": 85,
+  "split": 0,
+  "moves": "04b16d9d215efc86",
+  "content": "df1e70242a3b9c35",
+  "disp": "d3ef5c34ed72d6e3",
+  "coords": [
+   [
+    13,
+    [
+     13
+    ]
+   ],
+   [
+    13,
+    [
+     13
+    ]
+   ]
+  ],
+  "declined": [],
+  "unfactored": null,
+  "phases": 6,
+  "phase": "2cdf97287426ec78",
+  "trans": "ecd346b71a569631",
+  "shift": "acd0804166c25fb6",
+  "coord": "eac97ef1389c4aa2",
+  "named": "46ea306e96329052",
+  "cls": "b0a10c6b3e51df9d",
+  "relation": [],
+  "counts": "efd58e0f53d763bc",
+  "cells": 53,
+  "start": "0800000015000000000000000d000000"
+ },
+ "A1 97 0": {
+  "inferred": 4705,
+  "split": 0,
+  "moves": "fa4ef72d726fdcc9",
+  "content": "2269e6760393471f",
+  "disp": "067b6ef695932e0d",
+  "coords": [
+   [
+    97,
+    [
+     97
+    ]
+   ],
+   [
+    97,
+    [
+     97
+    ]
+   ]
+  ],
+  "declined": [],
+  "unfactored": null,
+  "phases": 6,
+  "phase": "7b6b6a6cece3f727",
+  "trans": "ac5e793f26a3c7b7",
+  "shift": "462831f4a22514aa",
+  "coord": "1586af719a9cbb32",
+  "named": "2980eaa413182d72",
+  "cls": "532c9f2cf5125ad2",
+  "relation": [],
+  "counts": "c190ec48016b9074",
+  "cells": 389,
+  "start": "360000007c0000001300000069000000"
+ },
+ "A2 97 0": {
+  "inferred": 14113,
+  "split": 9318,
+  "moves": "edc7a67a16a9a4d6",
+  "content": "e15612c68b458376",
+  "disp": "c69606883f58d066",
+  "coords": [
+   [
+    97,
+    [
+     97
+    ]
+   ],
+   [
+    96,
+    [
+     2,
+     3,
+     4,
+     8,
+     16,
+     32
+    ]
+   ]
+  ],
+  "declined": [],
+  "unfactored": null,
+  "phases": 8,
+  "phase": "ee499ff43ab9e877",
+  "trans": "d11cfda1020f3c59",
+  "shift": "3141960342451422",
+  "coord": "f7017c15c3079b43",
+  "named": "f4826ec5f1572f13",
+  "cls": "997f88426b466a9d",
+  "relation": [
+   "((0, 1), (96,))"
+  ],
+  "counts": "534e35ed9ff7843c",
+  "cells": 583,
+  "start": "360000007c0000002000000088000000"
+ },
+ "pm 97 1": {
+  "inferred": 9409,
+  "split": 9314,
+  "moves": "f1d60fba5a60be1c",
+  "content": "3702c38c384f2b38",
+  "disp": "bc48229171594df4",
+  "coords": [
+   [
+    97,
+    [
+     97
+    ]
+   ]
+  ],
+  "declined": [],
+  "unfactored": null,
+  "phases": 7,
+  "phase": "3379742f17a3703d",
+  "trans": "b270e27d161a3af3",
+  "shift": "4099baaaf791213e",
+  "coord": "55ae04526979b689",
+  "named": "b130c404f0ced74c",
+  "cls": "8bd854acdafecb9d",
+  "relation": [
+   "((0, 1), (96,))"
+  ],
+  "counts": "bc10c04cd3d41969",
+  "cells": 486,
+  "start": "080000001500000007000000a6000000"
+ },
+ "rev 97 0": {
+  "inferred": 7857,
+  "split": 9314,
+  "moves": "2ba273d52a1ec8df",
+  "content": "e3660e9b5266413e",
+  "disp": "7532a397ecf299e4",
+  "coords": [
+   [
+    97,
+    [
+     97
+    ]
+   ]
+  ],
+  "declined": [],
+  "unfactored": null,
+  "phases": 7,
+  "phase": "f6783ccc183344dd",
+  "trans": "6319229498e5de49",
+  "shift": "0ca86fc7db38a638",
+  "coord": "f38b4ff6b0aa4c3d",
+  "named": "0a1a40a32f21bba3",
+  "cls": "a0ed1a6bba6049af",
+  "relation": [
+   "((0, 1), (96,))"
+  ],
+  "counts": "f938bda42fda829a",
+  "cells": 486,
+  "start": "360000007c0000000a000000bc000000"
+ },
+ "E1 torus": {
+  "inferred": 6,
+  "split": 0,
+  "moves": "c289b2f2c129a90a",
+  "content": "a93eb20d732dd938",
+  "disp": "b38e0ced917be360",
+  "coords": [
+   [
+    60,
+    [
+     2,
+     2,
+     3,
+     5
+    ]
+   ]
+  ],
+  "declined": [],
+  "unfactored": null,
+  "phases": 1,
+  "phase": "18f052d727ea9560",
+  "trans": "ecb2b941755fbdae",
+  "shift": "d4e9b5fa2373c431",
+  "coord": "20854c5122c4a2a9",
+  "named": "3011955e507d3971",
+  "cls": "60aa4b3e2ca0667d",
+  "relation": [],
+  "counts": "9ccf9298bdb61035",
+  "cells": 60,
+  "start": "360000007c0000000000000002000000"
+ },
+ "E2 cycle": {
+  "inferred": 5,
+  "split": 0,
+  "moves": "1f0c8b49412f3974",
+  "content": "2a41c586958d5e3c",
+  "disp": "cc2307707171fa97",
+  "coords": [
+   [
+    60,
+    [
+     2,
+     3,
+     4,
+     5
+    ]
+   ]
+  ],
+  "declined": [],
+  "unfactored": null,
+  "phases": 1,
+  "phase": "53ffb6eb3087c6e1",
+  "trans": "59472010867954e8",
+  "shift": "2e965f707bb5835a",
+  "coord": "490360ac7f47345f",
+  "named": "1b89607ac6fa0bfa",
+  "cls": "60aa4b3e2ca0667d",
+  "relation": [],
+  "counts": "9eea2e7bb12987b7",
+  "cells": 60,
+  "start": "360000007c0000000000000002000000"
+ },
+ "O1 A5": {
+  "inferred": 0,
+  "split": 0,
+  "moves": "0c2fefee83bf1e2b",
+  "content": "7a37af1b5f8b9da6",
+  "disp": "220b7f0e61a05f82",
+  "coords": [],
+  "declined": [
+   [
+    "60",
+    "its moves don't connect its places"
+   ]
+  ],
+  "unfactored": null
+ },
+ "O2 box": {
+  "inferred": 0,
+  "split": 12,
+  "moves": "fbd6cafb58c6aa27",
+  "content": "a60f3eb74445d60d",
+  "disp": "e3b0c44298fc1c14",
+  "coords": [],
+  "declined": [
+   [
+    "0",
+    "no move permutes a set of places"
+   ]
+  ],
+  "unfactored": null
+ }
+}

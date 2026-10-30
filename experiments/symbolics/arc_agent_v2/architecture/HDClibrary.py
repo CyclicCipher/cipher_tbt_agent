@@ -248,8 +248,16 @@ class Conjunction:
     def __init__(self, d, w, seed=0):
         self.d, self.w, self.seed = d, w, seed
         self.dt = np.uint16 if d <= 1 << 16 else np.uint32
+        self._made = {}                                 # a pure function of the pair: memoized
 
     def __call__(self, a, b):
+        key = (a, b)
+        out = self._made.get(key)
+        if out is None:
+            out = self._made[key] = self._make(a, b)
+        return out
+
+    def _make(self, a, b):
         msg = b"%d|" % self.seed + a.idx.tobytes() + b"|" + b.idx.tobytes()
         n = 2 * self.w
         while True:                                     # the first w distinct of n draws (2w almost always suffice)
@@ -517,6 +525,7 @@ class ItemMemory:
         self.d, self.items, self.exact = d, [], {}
         self.post = np.zeros((d, 4), np.int32)          # row b: the items with bit b (columns grown by doubling)
         self.npost = np.zeros(d, np.int64)
+        self.indexed = 0                                # items in the postings: the rest are indexed when searched
 
     def __len__(self):
         return len(self.items)
@@ -529,18 +538,42 @@ class ItemMemory:
         i = len(self.items)
         self.items.append(sdr)
         self.exact.setdefault(sdr, i)
-        b = sdr.idx
-        col = self.npost[b]
-        if col.size and col.max() >= self.post.shape[1]:
-            self.post = np.hstack([self.post, np.zeros_like(self.post)])
-        self.post[b, col] = i                           # an SDR's bits are distinct, so one vector write
-        self.npost[b] += 1
         return i
+
+    def extend(self, sdrs):
+        """Add many SDRs at once (the same as adding them one by one)."""
+        start = len(self.items)
+        for j, sdr in enumerate(sdrs):
+            self.items.append(sdr)
+            self.exact.setdefault(sdr, start + j)
+
+    def _index(self):
+        """Put the items not yet in the postings there, in one pass: the same postings as indexing them one by one in
+        the order added. Exact recall never needs them, so storing costs O(w) and the index is built when searched."""
+        if self.indexed == len(self.items):
+            return
+        start, sdrs = self.indexed, self.items[self.indexed:]
+        self.indexed = len(self.items)
+        bits = np.concatenate([sdr.idx for sdr in sdrs]).astype(np.int64)
+        if not bits.size:
+            return
+        items = np.repeat(np.arange(start, start + len(sdrs)), [sdr.idx.size for sdr in sdrs])
+        o = np.argsort(bits, kind="stable")             # by bit, the items in the order added
+        b, it = bits[o], items[o]
+        first = np.r_[0, np.flatnonzero(np.diff(b)) + 1]
+        rank = np.arange(b.size) - np.repeat(first, np.diff(np.r_[first, b.size]))
+        col = self.npost[b] + rank
+        while col.max() >= self.post.shape[1]:
+            self.post = np.hstack([self.post, np.zeros_like(self.post)])
+        self.post[b, col] = it
+        u, cnt = np.unique(b, return_counts=True)
+        self.npost[u] += cnt
 
     def overlaps(self, q):
         """Every stored item's overlap with q (cost: the postings of q's bits)."""
         if not self.items:
             return np.zeros(0, np.int64)
+        self._index()
         rows = self.post[q.idx]                         # one gather: (w, columns)
         valid = np.arange(rows.shape[1])[None, :] < self.npost[q.idx][:, None]
         return np.bincount(rows[valid], minlength=len(self.items))
@@ -581,6 +614,20 @@ class Associations:
             i = self.keys.add(key)
             self.values.append({})
         self.values[i][value] = self.values[i].get(value, 0) + count
+
+    def store_many(self, triples):
+        """Many (key, value, count), as `store` one by one would leave them, with the new keys indexed in one pass."""
+        pending, new = {}, []
+        for key, value, count in triples:
+            i = self.keys.find(key)
+            if i is None:
+                i = pending.get(key)
+                if i is None:
+                    i = pending[key] = len(self.values)
+                    new.append(key)
+                    self.values.append({})
+            self.values[i][value] = self.values[i].get(value, 0) + count
+        self.keys.extend(new)
 
     def recall(self, key):
         """{value: count} stored under the best-matching key ({} if none matches)."""

@@ -1734,3 +1734,57 @@ results stay identical.
 4. **Contexts are pairs of exact inputs.** About 4,600 are learned at p = 97, most of them noise kept below the prior.
    Generalizing between contexts would need SDR overlap, or the inputs' roles, which are learned elsewhere (shift
    classes).
+
+## Performance step (2026-10-29, after part 10; the user: "do the performance step first")
+
+**The rule:** every change leaves results identical, checked in three ways.
+- **Frames:** fingerprints of 14 worlds (A1, A2, {+, −}, the reversal, withheld and relabelled answers at p = 13 and
+  97, and the four walk worlds) are identical to a baseline recorded before the step.
+  - **What they cover:** moves, contents, displacements, coordinates and the whole factoring.
+  - **Where:** `tests/test_fingerprints.py`, with the baseline in `tests/fingerprints.json`.
+- **Predictions:** the regression battery (below) reproduces every recorded prediction of parts 3–10.
+- **The suite:** 40 tests pass.
+
+**The changes:**
+1. **P4:**
+   - refused poolings are skipped before the call;
+   - `live()` iterates only over valid entries;
+   - `_mismatch` returns at once when all its values are equal (in every fill, one of the two calls always has a
+     constant value array);
+   - the fill's class lookup is vectorized.
+2. **Coordinates' `_cyclic`:** pointer jumping. The map is squared until every path has reached its cycle; the places
+   on cycles are then the image, minus the fixed points.
+3. **`ItemMemory`'s inverted index is built lazily,** in one pass, at the first overlap search. Exact recall never
+   needs it. Checked: the same postings as adding item by item.
+4. **The install:** `Associations.store_many`, `L5.learn_many` and `L2/3.learn_many` store in bulk.
+5. **The conjunction (the hippocampus's dentate gyrus and L5's keys) is memoized.** It is a pure function of the
+   pair, and the same situations recur across episodes.
+
+**Measured** (training and sleep at p = 97, each in a fresh process, the faster of two runs):
+
+| world | train, before → after | sleep, before → after | a query |
+|---|---|---|---|
+| A1 | 0.86 → 0.42 s | 1.81 → 2.01 s (noise) | 157 µs |
+| {+, −} | 1.65 → 0.86 s | 5.04 → 4.66 s | 156 µs |
+| A2 | 2.93 → 1.22 s | 9.14 → 7.03 s | 164 µs |
+
+**The regression tiers** (`tests/battery.py`; the user: each part's run within 2 minutes):
+- **Tier 1, with every part's run:**
+  - **What it covers:** the suite (with the fast fingerprints); parts 3, 5, 6, 9 and 10 at p = 13 (3 seeds); parts 4
+    and 8's walk checks.
+  - **Its cost:** 30.4 s.
+- **Tier 2, its own run, when consolidation, the column or the thalamus changes:**
+  - **What it covers:** the same parts at p = 97 (seed 0), with the full fingerprints.
+  - **Its cost:** 58.4 + 21.0 s.
+- **The known difference:** A₅'s difference from part 4's record (part 5's generator correction) is labelled known,
+  not reported as a failure.
+- **Checked now:** both tiers run, with no unexpected difference.
+
+**What is left:**
+1. **P4's `Pool.add`:** about 4 s of A2's 7 s sleep at p = 97. It is numpy overhead per inferred move, two calls
+   each. Batching them would change the order of pooling, so it needs a design that keeps the result identical by
+   construction.
+2. **Factoring's class trials:** about 1.3 s. Each re-solves every move kept so far; an incremental solver would solve
+   only the new phase's moves.
+3. **The thalamus's day 2:** about 4.5 s for 300 expressions at p = 97, with up to 64 thoughts per input while
+   learning.

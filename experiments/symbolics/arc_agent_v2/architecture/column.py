@@ -214,11 +214,8 @@ class Column:
                     shifted |= {(p, x) for p in orbit.codes}
         name = lambda p: rename.get(p, p)
         self.l6.start = name(frame.start)
-        for place, x, nxt in frame.moves:
-            if (place, x) not in shifted:
-                self.l5.learn(name(place), x, name(nxt))
-        for place, sensor, x, n in frame.content:
-            self.l23.learn(name(place), sensor, x, n)
+        self.l5.learn_many([(name(place), x, name(nxt)) for place, x, nxt in frame.moves if (place, x) not in shifted])
+        self.l23.learn_many([(name(place), sensor, x, n) for place, sensor, x, n in frame.content])
         if coordinates:
             for orbit in frame.coords:
                 self.l5.build_words(orbit.modules)

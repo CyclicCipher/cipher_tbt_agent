@@ -17,6 +17,10 @@ class L23:
     def learn(self, place, sensor, x, count=1):
         self.content.store(place, (sensor, x), count)
 
+    def learn_many(self, contents):
+        """Many (place, sensor, input, count) at once: the same as `learn` one by one."""
+        self.content.store_many([(place, (sensor, x), n) for place, sensor, x, n in contents])
+
     def counts(self, place, sensor="symbols"):
         """What came next at this place from this sensor: {input: times}."""
         if place is None:

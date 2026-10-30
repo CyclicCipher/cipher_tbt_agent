@@ -250,7 +250,15 @@ Then back to the ARC-AGI-3 public games.
 - **`runs/`:** the run outputs (not committed).
 
 Vertical slices: nothing counts until it is wired into the brain and exercised by a test. Each step is pre-registered
-in `docs/LAB.md`, built, run (about 10 minutes of compute at most), and recorded.
+in `docs/LAB.md`, built, run, and recorded.
+
+**Performance is among the highest commitments** (the user, 2026-10-29).
+- **The limit:** a part's run, its regression included, takes under 2 minutes.
+- **The regression is tiered** (`tests/battery.py`):
+  - **tier 1** goes with every part;
+  - **tier 2** (p = 97, and the full fingerprints of `tests/test_fingerprints.py`) runs when consolidation, the column
+    or the thalamus changes.
+- **A speedup must leave results identical:** the fingerprints and the battery check it.
 
 **Milestones** (§6):
 

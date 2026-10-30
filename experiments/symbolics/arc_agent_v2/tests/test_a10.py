@@ -10,7 +10,7 @@ with standard precedence, learning on.
   apart.
 - **K3:** the gate's learned P(yes) per context.
 - **K4:** the control (the gate off).
-- **K5:** the battery (amendment 7).
+- **K5:** the regression battery (amendment 7; since the performance step, tests/battery.py, tier 1).
 - **K6:** the cost.
 
 The battery runs first: it uses the shared trained brains (tests/trained.py) before day 2 changes A2's. The world's
@@ -81,53 +81,13 @@ def run(p, seed):
     return out
 
 
-def battery():
-    """K5 (amendment 7): parts 3, 5, 6 and 9 at p = 13 (3 seeds) and p = 97 (seed 0); parts 4 and 8's walk checks."""
-    from arc_agent_v2.tests.test_a1 import run as run_a1
-    from arc_agent_v2.tests.test_a4 import walk_checks
-    from arc_agent_v2.tests.test_a5 import answers, one_fact
-    from arc_agent_v2.tests.test_a6 import a2, reversal
-    from arc_agent_v2.tests.test_a8 import walks
-    from arc_agent_v2.tests.test_a9 import arm
-    plain = lambda o: o.item() if isinstance(o, np.generic) else str(o)
-    norm = lambda r: json.loads(json.dumps(r, default=plain))
-    diff = lambda old, new: {k: (old.get(k), new.get(k)) for k in set(old) | set(new)
-                             if not k.endswith("seconds") and old.get(k) != new.get(k)}
-    load = lambda name: json.load(open(os.path.join(HERE, "runs", name)))
-    cases = [(13, s) for s in SEEDS] + [(97, 0)]
-    g = dict(part3=[], part4=[], part5=[], part6=[], part8=[], part9=[])
-    f3 = ("held_out_acc", "train_acc", "inferred", "places_after_eq", "places_after_b", "displacements",
-          "full_on_C", "orders", "eq_one_to_one")
-    a1 = {(r["p"], r["seed"]): r for r in load("a1.json") if r["arm"] == "full" and r["op"] == "+" and r["frac"] == 0.5}
-    a5, a6, a9 = load("a5.json"), load("a6.json"), load("a9.json")
-    pick = lambda rows, p, s: next(r for r in rows if r["p"] == p and r["seed"] == s)
-    for p, s in cases:
-        new = run_a1(p, 0.5, s, "full")
-        g["part3"].append(dict(p=p, seed=s, diff={k: (a1[(p, s)][k], new[k]) for k in f3 if a1[(p, s)][k] != new[k]}))
-        g["part5"].append(dict(check="F1-F2", p=p, seed=s, diff=diff(pick(a5["one_fact"], p, s), norm(one_fact(p, s)))))
-        g["part5"].append(dict(check="F3", p=p, seed=s,
-                               diff=diff(pick(a5["withheld"], p, s), norm(answers(p, s, withhold=True)))))
-        g["part6"].append(dict(check="A2", p=p, seed=s, diff=diff(pick(a6["a2"], p, s), norm(a2(p, s)))))
-        g["part6"].append(dict(check="reversal", p=p, seed=s, diff=diff(pick(a6["reversal"], p, s), norm(reversal(p, s)))))
-        for w in ("+-", "+"):
-            old = next(r for r in a9["runs"] if r["world"] == w and r["p"] == p and r["seed"] == s)
-            new = dict(union=norm(arm(w, p, s, True)), control=norm(arm(w, p, s, False)))
-            g["part9"].append(dict(world=w, p=p, seed=s, diff={a: diff(old[a], new[a]) for a in new if diff(old[a], new[a])}))
-    for old in load("a4.json")["walk"]:
-        g["part4"].append(dict(kind=old["kind"], seed=old["seed"], diff=diff(old, norm(walk_checks(old["kind"], old["seed"])))))
-    for old in load("a8.json")["walks"]:
-        new = norm(walks(old["kind"], old["seed"]))
-        g["part8"].append(dict(kind=old["kind"], seed=old["seed"], diff={a: diff(old[a], new[a]) for a in "abc"
-                                                                         if diff(old[a], new[a])}))
-    return g
-
-
 def main(argv):
     out_path = argv[argv.index("--out") + 1] if "--out" in argv else os.path.join(HERE, "runs", "a10.json")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     say = lambda *a: print(*a, flush=True)
+    from arc_agent_v2.tests import battery            # the regression, tier 1 (tests/battery.py)
     t0 = time.time()
-    res = dict(battery=battery())
+    res = dict(battery=battery.run(1))
     res["seconds_battery"] = round(time.time() - t0, 1)
     t1 = time.time()
     res["runs"] = [run(p, s) for p in (13, 97) for s in SEEDS]
@@ -146,11 +106,7 @@ def main(argv):
     for r in res["runs"]:
         say("K4 p=%-3d seed %d: gate off: 2 ops %.3f (sensitive %.3f); 3 ops %.3f (sensitive %.3f)" % (
             r["p"], r["seed"], r["off2"], r["off2_sensitive"], r["off3"], r["off3_sensitive"]))
-    g = res["battery"]
-    for name in ("part3", "part5", "part6", "part9", "part4", "part8"):
-        for r in g[name]:
-            label = " ".join(str(r[k]) for k in ("check", "world", "kind", "p", "seed") if k in r)
-            say("K5 %s %s: %s" % (name.replace("part", "part "), label, r["diff"] or "reproduced"))
+    battery.report(res["battery"], lambda line: say("K5 " + line))
     for r in res["runs"]:
         say("K6 p=%-3d seed %d: day 2 %.1f s, the run %.1f s" % (r["p"], r["seed"], r["day2_seconds"], r["seconds"]))
     say("battery %.1f s; part 10's runs %.1f s; total %.1f s" % (res["seconds_battery"], res["seconds_part10"],

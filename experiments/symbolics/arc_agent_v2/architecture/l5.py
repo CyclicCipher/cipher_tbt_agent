@@ -41,6 +41,15 @@ class L5:
             self._known.add(x)
             self.inputs.append(x)
 
+    def learn_many(self, moves):
+        """Many (place, input, next place) at once: the same as `learn` one by one."""
+        self._moves = {}
+        self.moves.store_many([(self.key(place, x), nxt, 1) for place, x, nxt in moves])
+        for _, x, _ in moves:
+            if x not in self._known:
+                self._known.add(x)
+                self.inputs.append(x)
+
     def learn_shift(self, x, modules, delta):
         self._moves = {}
         self.shifts.setdefault(x, []).append((modules, delta))

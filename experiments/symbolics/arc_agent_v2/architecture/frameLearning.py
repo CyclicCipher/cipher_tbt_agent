@@ -191,7 +191,7 @@ def same_future(transitions, contents=()):
 
 def _mismatch(keys, vals):
     """True where another entry has the same key but a different value."""
-    if keys.size < 2:
+    if keys.size < 2 or (vals == vals[0]).all():        # one value: nothing can differ
         return np.zeros(keys.size, bool)
     o = np.lexsort((vals, keys))
     k, v = keys[o], vals[o]
@@ -240,14 +240,16 @@ class Pool:
         """The live class of each id in c (-1 stays -1)."""
         c = np.asarray(c, np.int64)
         out = c.copy()
-        ok = out >= 0
-        if not ok.any():                                # no class (there may be none yet)
+        ok = np.flatnonzero(out >= 0)
+        if not ok.size:                                 # no class (there may be none yet)
             return out
-        while True:
-            nxt = np.where(ok, self.to[np.where(ok, out, 0)], -1)
-            if np.array_equal(nxt, out):
+        v = out[ok]
+        while True:                                     # follow the pooling links to their roots
+            nxt = self.to[v]
+            if (nxt == v).all():
+                out[ok] = v
                 return out
-            out = nxt
+            v = nxt
 
     def context(self, labels):
         """The context of each label: -2 for a pair taken in every context, else the context it was split by."""
@@ -336,8 +338,10 @@ class Pool:
             fi = free[first]
             self.owner[S[fi], T[fi]] = c[fi]
             o = self.live(self.owner[S, T])
+        refused = self.refused
         for a, b in set(zip(c[o != c].tolist(), o[o != c].tolist())):
-            self.pool(a, b)
+            if (min(a, b), max(a, b)) not in refused:   # live roots already: a refusal is known without the call
+                self.pool(a, b)
 
     def pool(self, a, b):
         """Make two classes one, unless that would break one-to-one (then they are different displacements). Within a
@@ -477,13 +481,16 @@ def _regular(move, ctx, split, const=None):
                 continue
             cand = np.flatnonzero((pool.pair[lab(u, xs[:, None] * nX + ar[None, :])] >= 0).any(0) & (move[u] < 0) & ok)
             for y in cand.tolist():
-                t = -1
-                for c, s in zip(pool.live(pool.pair[lab(u, xs * nX + y)]).tolist(), move[u, xs].tolist()):
-                    t = pool.apply(c, s)
-                    if t >= 0:
-                        break
-                if t < 0:
+                c = pool.live(pool.pair[lab(u, xs * nX + y)])    # where each known move's class takes its place
+                ok = c >= 0
+                ts = np.full(xs.size, -1, np.int64)
+                if ok.any():
+                    cv = c[ok]
+                    ts[ok] = np.where(pool.bad[cv], -1, pool.fwd[cv, move[u, xs[ok]]])
+                hit = np.flatnonzero(ts >= 0)
+                if not hit.size:
                     continue
+                t = int(ts[hit[0]])                     # the first known move that tells
                 move[u, y] = t
                 inferred += 1
                 changed = True
@@ -609,20 +616,18 @@ def _cyclic(col):
     """A map (place -> place, -1 where undefined) restricted to the places on its complete cycles, where it is a
     permutation; -1 elsewhere (part 5: a map can permute one set of places while being partial elsewhere)."""
     n = col.size
-    out, state = np.full(n, -1, np.int64), np.zeros(n, np.int8)
-    for s in range(n):
-        if col[s] < 0 or state[s]:
-            continue
-        path, u = [], s
-        while u >= 0 and state[u] == 0:
-            state[u] = 1
-            path.append(u)
-            u = int(col[u])
-        if u >= 0 and state[u] == 1:                    # closed a cycle (a fixed point carries no structure)
-            cyc = path[path.index(u):]
-            if len(cyc) > 1:
-                out[cyc] = col[cyc]
-        state[path] = 2
+    out = np.full(n, -1, np.int64)
+    if n == 0:
+        return out
+    g = np.append(np.where(col >= 0, col, n), n)       # undefined -> a sink that stays put
+    steps = 1
+    while steps < n + 1:                                # g = col^(2^k), 2^k > n: every path has reached a cycle
+        g = g[g]
+        steps *= 2
+    on = np.unique(g[:n])
+    on = on[on < n]                                     # the places on cycles (the sink is not one)
+    on = on[col[on] != on]                              # a fixed point carries no structure
+    out[on] = col[on]
     return out
 
 
