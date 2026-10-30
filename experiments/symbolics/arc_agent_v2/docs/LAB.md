@@ -1472,3 +1472,103 @@ The control's singles are 1.000 everywhere.
 
 Vectorizing these is the next performance step. It changes the order of pooling, so it needs a check that the
 results stay identical.
+
+## Part 10: precedence, with working memory in the thalamus (pre-registered 2026-10-29, before the code)
+
+**Why:**
+- **The order:** B in ARCHITECTURE.md §7; the user chose standard precedence (× before + and −).
+- **The research:** `docs/CHAINS.md`.
+  - **Chaining:** a mental program holds pending results in a small store, one operation at a time (Zylberberg et al.
+    2011, 2013).
+  - **Gating:** the basal ganglia gate what enters and leaves it (PBWM), taught by prediction error (CHAINS.md §10).
+  - **The thalamus:** it holds and routes, and learns little itself (§12).
+
+**What breaks today:**
+- **Left to right:** the column computes chains left to right (part 9). "a + b × c" then becomes (a + b) × c.
+- **× after a result:** this has no move at all. × is outside the coordinate, and the place table has no × from a
+  result.
+- **Precedence is a convention:** no single equation shows it. So, unlike parts 7 and 9, this cannot be zero-shot. The
+  brain must see some mixed expressions with their answers.
+
+### The change
+
+1. **`thalamus.py`: working memory.**
+   - **What a hypothesis carries:** the column's union becomes a union of whole hypotheses. Each holds:
+     - the column's state (its place and its (phase, coordinate));
+     - its last input, and the state before that input;
+     - a stack of held states.
+   - **Three operations on each hypothesis:**
+     - **continue:** the column takes the input, as now;
+     - **hold:** push the state before the last input. Then restart the column at the frame's start, re-feed the last
+       input, and take the current one. ("a +" waits while "b × c" is computed.)
+     - **release** (only if the stack is not empty): pop a held state and feed it the name of the current coordinate,
+       the symbol whose own position it is (learned naming, part 5). Then the gate decides again: it may release
+       again, or take the input.
+   - **No meaning is given:** none of these knows what an input means.
+2. **The gate as hypotheses** (Bayes; NEURAL_COLUMN.md §4).
+   - **The branching:** at each input, every hypothesis branches by the operations, each weighted by the gate's prior
+     for its context.
+   - **The contexts:**
+     - **for hold:** the conjunction of the input before the last and the current one;
+     - **for release:** the conjunction of the held state's last input and the current one.
+   - **The weighting:** the union's Bayes weighting (part 9) by the episode's own inputs then favours the branches
+     that predicted them.
+   - **The housekeeping:** pruning and the limit of 64 hypotheses, as in part 9.
+3. **The gate learns from prediction error alone.**
+   - **The prior:** Dirichlet counts per context, starting at 1 for continue and 0.1 for each other operation. Unknown
+     contexts continue.
+   - **The update:** at an episode's end, each context's counts gain the posterior weight of the branches that took
+     each operation there (an EM step).
+   - **No reward:** the brain is taught by which branch predicted its own input best. This is the goal cortex's "be
+     correct" in its simplest form.
+4. **`Column.advance(state, input)`:** the column's step as a function from state to state, so the thalamus can
+   simulate branches without stepping the column through the bus (whose exactly-once delivery stays).
+
+### The line between innate and learned (for the user to check)
+
+- **New innate assumptions:**
+  - working memory: the last input, the state before it, a stack;
+  - three operations on it: continue, hold, release;
+  - the gate's operations as weighted hypotheses, with contexts as conjunctions of two inputs;
+  - the prior's update by the posterior (EM).
+- **Learned:**
+  - in which contexts holding or releasing makes the input predictable: precedence, that × binds tighter, and that a
+    pending + or − is released before a lower-precedence operator and before "=";
+  - the names of coordinates (part 5).
+- **Not given:** which inputs are operators, numbers or "="; the precedence itself.
+
+### Worlds
+
+- **Day 1:** A2's world, half of the 3p² single equations; then sleep.
+- **Day 2:**
+  - **The expressions:** 300 random expressions of 2 operations, "a op₁ b op₂ c = d", with standard precedence, mod p.
+  - **The learning:** learning on for the gate (the hippocampus remembers as usual); no sleep.
+- **Test:**
+  - 1,000 random held-out expressions of 2 operations;
+  - 1,000 of 3 operations, never shown;
+  - the precedence-sensitive ones (where left to right gives another answer) reported apart.
+- p = 13 and 97, 3 seeds.
+
+### Predictions
+
+| # | prediction |
+|---|---|
+| K1 | 2 operations, held out: ≥ 0.95, and ≥ 0.95 on the precedence-sensitive ones |
+| K2 | 3 operations, never shown: ≥ 0.90 |
+| K3 | the learned gate. Holding is preferred (prior > 0.9) in the contexts (+, ×), (−, ×) and (×, ×). Releasing is preferred before +, − and "=" when a + or − is held. Every other context prefers continue |
+| K4 | the control (the gate off: continue only): precedence-sensitive expressions ≤ 0.05, beyond the ~1/p where both orders agree |
+| K5 | no regression, on a bounded battery: every fast test; parts 3, 5, 6, 7 and 9 at p = 13 (3 seeds) and p = 97 (seed 0); parts 4 and 8's walk checks |
+| K6 | cost: the whole run, battery included, under 2 minutes (the user: performance is among the highest commitments) |
+
+**What would refute the step:**
+- **K1 failing:** prediction error does not teach the gate, or branching with these operations cannot express
+  precedence.
+- **K2 failing while K1 holds:** what was learned from two operations doesn't compose.
+- **K6 failing:** the hypotheses' branching costs too much.
+
+**Not in this step:**
+- parentheses;
+- division;
+- expressions longer than three operations in the test;
+- reward from the world;
+- the goal cortex itself.
