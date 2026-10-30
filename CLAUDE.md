@@ -1,8 +1,13 @@
 # CLAUDE.md — Cipher's TBT Agent
 
-## ⚠ THE ONLY PROJECT (user rule, 2026-10-29) — arc agent v2, `experiments/symbolics/arc_agent_v2/`
-Work only on **arc_agent_v2** unless the user explicitly decides otherwise. **START HERE:**
-`experiments/symbolics/arc_agent_v2/ARCHITECTURE.md`.
+## ⚠ NO CURRENT PROJECT (2026-10-29): arc agent v2 is CLOSED; ask the user which line is next
+The user ended the symbolic / TBT line after v2's part 12 and D2: "Symbolic models will never be able to work in a
+domain they weren't written for, or even particularly well in domains they were written for. Every TBT approach so far
+has been a dead end and it appears fundamental." The ideas may still apply to neural networks, where they came from.
+Don't resume v2, v1 or any other line until the user picks one. v2's record: `experiments/symbolics/arc_agent_v2/`
+(ARCHITECTURE.md §7, `docs/LAB.md`, `docs/VISION.md`).
+
+## (Closed) arc agent v2, `experiments/symbolics/arc_agent_v2/` — kept as reference
 
 **What v2 is:** a brain built of columns whose layers are the requirements for learning a general function:
 - L6 = coordinate system;

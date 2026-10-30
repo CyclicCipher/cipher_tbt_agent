@@ -256,6 +256,19 @@ operation.
 
 ## 7. Progress and build order (the one place to track where v2 is)
 
+**CLOSED (the user, 2026-10-29), after part 12 and D2.** The user's verdict: "Symbolic models will never be able to
+work in a domain they weren't written for, or even particularly well in domains they were written for. Every TBT
+approach so far has been a dead end and it appears fundamental."
+- **What v2 did:** A1, A2, chains A and B, location-keyed episodes and A3's first step, all in arithmetic. Part 12 kept
+  them unchanged with MNIST in the same brain.
+- **What it did not do:** learn MNIST.
+  - **What D2 found:** a hand-computed local orientation, at locations in the digit's own frame, would carry the digits
+    (11.3 nats per image against the tiles' 1.8).
+  - **Why that didn't rescue v2:** learning such features without labels is open in TBT itself (VISION.md §3), and v2's
+    working mechanisms fired only in the worlds they were written for (AUDIT §1).
+- **What may carry over:** the ideas, to neural networks, where they came from. The four requirements (§1) came from
+  the coordinates that grokking networks build.
+
 **The goal (the user, 2026-10-29):** one model that, by unsupervised and self-supervised learning only:
 - predicts MNIST digits;
 - does all arithmetic.
