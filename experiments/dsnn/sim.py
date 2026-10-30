@@ -182,6 +182,14 @@ def simulate(stims, T, p: Params, wiring: Wiring = None, dt=DT, rec_every=REC_EV
             clamp[held] -= dt
         new = spiking & ~held & (Vn[:, SOMA] >= p.V_detect)
         if new.any():
+            # The spike starts on this step. Solve again with the soma held at V_spike: the exponential term, taken from
+            # the previous step, overshoots to hundreds of mV in one step, and through the coupling the dendrites
+            # would see that overshoot instead of the spike's waveform (LAB.md E0, amendment 6).
+            A2, r2 = A[new].copy(), rhs[new].copy()
+            A2[:, SOMA, :] = 0.0
+            A2[:, SOMA, SOMA] = 1.0
+            r2[:, SOMA] = p.V_spike
+            Vn[new] = np.linalg.solve(A2, r2[..., None])[..., 0]
             for s in np.flatnonzero(new):
                 spikes[s].append(t)
                 b, src = divmod(s, nn)

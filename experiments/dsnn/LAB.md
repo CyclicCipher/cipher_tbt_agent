@@ -210,6 +210,47 @@ cost figure for the network above used the old wiring.
 - **N5:** uncertain.
 - **N6:** passes at Δ = 50, and is uncertain at Δ = 100.
 
+### Run 2 (2026-10-30, at commit 81937d8): void, because of a bug in the simulator found after the run
+
+**What the bug was:**
+- **The mechanism:** the soma's AdEx exponential current is taken from the previous step. So on the step where the
+  soma crosses V_detect, its new voltage overshoots by tens to hundreds of mV. The coupled solve passes that overshoot
+  to the dendrites for that one step, before the soma is set to +30 mV.
+- **How it was found:** after run 2, a diagnostic gave a full-strength dCaAP plus a zone step. The trunk read
+  **+692 mV**, the zone +149 mV, and at w = 640 pA the zone read +11,720 mV.
+- **What it touched:** every spike in runs 1 and 2 kicked the dendrites by an amount that depended on the step, not
+  on the spike's defined waveform. That may account for run 1's 26 spikes in 30 ms, the dCaAP that a pulse alone
+  triggered, and the network's dense bursts.
+- **Why no check caught it:** none of the pre-registered checks looked at voltages. The step-size check runs after
+  the main run.
+
+**Run 2's numbers, kept for the record only:**
+- dCaAP check: passes (K = 1.0, 0.189, 0.036).
+- N1 1.17.
+- N2: 1–2 spikes at every Δt.
+- N3: A 0, B 0, A+B 1, with K = 0.019 for A alone.
+- N4 at most 1.11.
+- N5: events +6.87 basal, +1.13 apical. Burst fraction −0.384 basal, −0.058 apical.
+- N6: passes.
+- Cost: 1.56, 2.53 and 1.87 s per simulated second.
+
+**One finding that doesn't depend on the bug:** amendment 2 makes K ≈ 0 for any dCaAP that synaptic input triggers.
+- **The numbers:** N3's A alone, 17 contacts on the zone, gives K = 0.019, because a brief synaptic current that
+  reaches θ is far larger than the threshold current for a long step.
+- **What it means:** Gidon's K is defined for current steps.
+  - Run 1's measure, C·dV/dt, fails for steps (the dCaAP check) and works for synapses (run 1's N3: K = 0.79 for A,
+    0.08 for A+B).
+  - Amendment 2's measure is the reverse.
+  - Neither describes one mechanism that holds for both kinds of input.
+
+### Amendment 6 (2026-10-30, before run 3): the spike's first step
+
+The step on which a spike starts is solved again with the soma held at V_spike, so the dendrites see the spike's
+waveform and never the upstroke's overshoot (`sim.py`). A bug fix, not a change to the model.
+
+**The fix, checked:** the same diagnostic gives zone peaks of 48, 67 and 108 mV for w = 320, 640 and 1280 pA, rising
+smoothly with w.
+
 ### The instrument: `viz/` (not an experiment)
 
 A local web page served by `viz/server.py`. Every simulation runs in the same `sim.py`, so there is one model and no
