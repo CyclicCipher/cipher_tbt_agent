@@ -11,7 +11,8 @@ frame, with coordinates where the frame's moves form a commutative group. Every 
 
 **A prediction of the next input** from a sensor comes from the cortex while a column knows where it is, and from the
 hippocampus otherwise. So before any sleep, and wherever the frame has no move, the brain can only recall what it has
-lived through.
+lived through. Since part 8, what the hippocampus saw today at the cortex's location comes first: a day's memory at a
+place overrides older knowledge there, until sleep consolidates it.
 
 **Not built yet:** one frame per receptive field (regions that receive different sensors would need their own
 consolidation). A1's and the walk worlds' configs have one region.
@@ -25,15 +26,16 @@ from arc_agent_v2.architecture.hippocampus import Hippocampus
 
 class Brain:
     def __init__(self, config=ARITHMETIC, consolidation=True, regularity=True, coordinates=True, factoring=True,
-                 relation=True, phase_merge=True):
+                 relation=True, phase_merge=True, locations=True, recency=True):
         self.config, self.consolidation = config, consolidation
         self.regularity, self.coordinates, self.factoring = regularity, coordinates, factoring
         self.relation = relation                        # part 6: shift classes related by an automorphism
         self.phase_merge = phase_merge                  # part 7: phases merged as places are
+        self.recency = recency                          # part 8: the day's memory at a location comes first
         d, w, seed = config.sdr.d, config.sdr.w, config.seed
         self.regions = {r.name: [Column(d, w, seed + 97 * i) for i in range(r.columns)] for r in config.validate()}
         self.hippocampus = Hippocampus(d, w, seed)
-        self.bus = Bus(config, self.regions, self.hippocampus)
+        self.bus = Bus(config, self.regions, self.hippocampus, locations)
         self.frame = None
 
     def fed_by(self, sensor):
@@ -53,13 +55,19 @@ class Brain:
         return self.bus.publish(sensor, x, learn)
 
     def predict(self, sensor="symbols"):
-        """The next input from a sensor: the first column fed by it that knows where it is and has content there; else
-        the hippocampus."""
+        """The next input from a sensor (part 8's order):
+        1. what came next today at the cortex's location (a memory since the last sleep);
+        2. else the first column fed by it that knows where it is and has content there;
+        3. else the hippocampus's recall of the path lived through."""
+        where = self.bus.where(sensor)
+        today = self.hippocampus.recall_today(where, sensor) if where is not None else None
+        if self.recency and today is not None:
+            return today
         for c in self.fed_by(sensor):
             p = c.predict(sensor)
             if p is not None:
                 return p
-        return self.hippocampus.predict(sensor)
+        return today if today is not None else self.hippocampus.predict(sensor)
 
     def finish(self, learn=True):
         """The episode ended (the hippocampus records it)."""
@@ -89,4 +97,5 @@ class Brain:
                                  self.factoring, self.hippocampus.end, self.relation, self.phase_merge)
         for c in self.columns():
             c.install(self.frame, self.coordinates)
+        self.hippocampus.consolidated()
         return self.frame

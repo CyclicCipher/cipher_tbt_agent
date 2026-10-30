@@ -34,8 +34,9 @@ once there are regions above.
 
 
 class Bus:
-    def __init__(self, config, regions, hippocampus):
+    def __init__(self, config, regions, hippocampus, locations=True):
         self.t, self.faults = 0, 0
+        self.locations = locations                      # part 8: give the hippocampus the cortex's location
         self.hippocampus = hippocampus
         self.routes = {s: [] for s in config.sensors}   # sensor -> [(column, moves)]
         self.moving = set()                             # sensors that move some column (and so the hippocampus)
@@ -52,7 +53,8 @@ class Bus:
         """Stamp x and deliver it. Returns the stamp."""
         self.t += 1
         content = sensor not in self.efference
-        self.hippocampus.step(x, sensor, sensor in self.moving, learn, content)
+        where = self.where(sensor) if self.locations else None
+        self.hippocampus.step(x, sensor, sensor in self.moving, learn, content, where)
         for c, moves in self.routes[sensor]:
             if c.stamp != self.sent.get(id(c), 0):     # it missed a message, or applied one twice
                 self.faults += 1
@@ -60,3 +62,8 @@ class Bus:
             c.step(x, sensor, moves, self.t, content)
             self.sent[id(c)] = self.t
         return self.t
+
+    def where(self, sensor):
+        """The cortex's location for this sensor (the entorhinal input, part 8): the place of the first column it
+        reaches that knows its place, or None."""
+        return next((c.l6.place for c, _ in self.routes.get(sensor, []) if not c.l6.lost()), None)

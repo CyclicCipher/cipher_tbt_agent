@@ -1184,3 +1184,60 @@ No chain was ever trained on.
 - **I4 failing:** the day memory leaks into consolidated behaviour.
 
 **Not in this step:** temporal context (gap 2), CA1 (gap 3), arithmetic one-shot facts.
+
+## Part 8 results (2026-10-29; `runs/a8.txt`, `runs/a8.json`)
+
+**Built:**
+- **`hippocampus.today`, `recall_today`, `consolidated`:** the day's memories by location.
+- **`Bus.where`:** the entorhinal input, the place of the first column that knows it.
+- **`Brain.predict`:** the day's memory, then the column, then the path recall.
+- **`Brain.sleep`:** clears the day after consolidating it.
+- **The flags** `Brain(locations=, recency=)`.
+- **`tests/test_a8.py`:** the harness.
+
+**I1–I3: day 2, relabelled** (right predictions / steps):
+
+| world | seed | revisits, column knows its place: (a) | (b) | (c) | first visits, every arm |
+|---|---|---|---|---|---|
+| E1 torus | 0, 1, 2 | 129/129, 137/137, 125/125 | 0 | 0 | 0 of 51, 43, 55 |
+| E2 cycle | 0, 1, 2 | 130/130, 134/134, 123/123 | 0 | 0 | 0 of 50, 46, 57 |
+| O1 A₅ | 0, 1, 2 | 143/143, 143/143, 137/137 | 0 | 0 | 0 of 37, 37, 43 |
+| O2 box | 0, 1, 2 | none (lost), 41/41, none (lost) | 0 | 0 | 0 of 40, 43, 52 |
+
+**The box:**
+- **What happened:** day 1's frame misses 7–25 of the box's 240 moves. On day 2 the column met a missing move and was
+  lost for the rest of the walk. In seeds 0 and 2 this happened before any revisit, and in seed 1 after 41 revisits.
+- **The scores on all revisits:** 0/140, 41/137 and 0/128.
+- **O1 A₅** also misses a few moves, but its walks never met one.
+
+**I4: no regression.**
+- Parts 3, 5 (F3), 6 and 7 reproduce exactly.
+- Part 4's walk checks reproduce exactly, except A₅'s known part-5 difference (seeds 0 and 2).
+- Both shortcut tests reproduce exactly.
+
+**I5: cost:** a day-2 walk of 180 steps takes 0.01–0.03 s.
+
+**Verdicts:**
+- **I1 confirmed** wherever it could be tested. It was untestable in two box seeds, where the column was lost before
+  any revisit.
+- **I2, I3, I4 and I5 confirmed.**
+
+**What this shows:**
+1. **One exposure, recalled by any path.**
+   - **The result:** filed under the cortex's place, what day 2 showed at a node is recalled by every later path to it
+     (100% of revisits).
+   - **The mechanism:** the cortex's frame carries over from day 1. The hippocampus binds the new content to it in one
+     shot, as TEM proposes.
+   - **Why it matters for the goal:** this is the ARC-AGI-3 case, a known mechanic in a new level.
+2. **Both pieces are needed.**
+   - **Without the location keys,** the path-keyed hippocampus never recalls a revisit, since every revisit is by a new
+     path.
+   - **Without recency,** the cortex's day-1 content wins and is wrong.
+3. **The limit is the cortex's.** Where the column is lost, it has no place to file under. Being lost at a missing
+   move is the failure the union column (part 9) is for.
+
+**Limits:**
+1. **The arbitration is a fixed rule:** today wins. It is not graded by reliability (NEURAL_COLUMN.md §4, point 3).
+2. **The day's memories are exact keys:** nothing is recalled by similarity of place.
+3. **The box loses the column:** its frame has no coordinates, and a missing move ends the column's knowledge of its
+   place.
