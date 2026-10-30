@@ -1321,3 +1321,17 @@ No chain was ever trained on.
   hypotheses with coordinates is not designed.
 - **A world needing a union of several hypotheses at once:** here each burst leaves one.
 - **Model comparison and graded arbitration** (NEURAL_COLUMN.md §4, points 2 and 3).
+
+### Part 9 amendments (2026-10-29, before the code)
+
+1. **Cross-entropy is reported too** (the user's question).
+   - **The measure:** with the answers, the harness reports the cross-entropy of the brain's predictive distribution at
+     each scored answer, −log₂ P(the true answer) averaged, in bits.
+   - **Where the distribution comes from:**
+     - where the column's place has content, Laplace's rule over its counts;
+     - else the union's posterior predictive;
+     - else the hippocampus's counts.
+   - **Its status:** a measure only. No prediction is registered for it.
+   - **Why:** with probabilities, accuracy hides the difference between a confident right answer and a lucky one.
+     Cross-entropy is the code length of the answers (prequential MDL), the currency NEURAL_COLUMN.md §4 needs for
+     model comparison.
