@@ -1100,3 +1100,87 @@ No chain was ever trained on.
 2. **Chains work only where what follows a digit varies** (point 2).
 3. **× is not in chains:** × is left out of the factored coordinate (part 6), so "a × b + c" has no coordinate after
    "a × b".
+
+## Part 8: the hippocampus keyed by the cortex's location (pre-registered 2026-10-29, before the code)
+
+**Why:**
+- **The user (2026-10-29):** fix the hippocampus's gaps, given its relation to attention.
+- **Gap 1** (CHAINS.md §11): its keys have no structure.
+  - **Today:** a key is the hash of the exact path, so a place reached by a new path recalls nothing.
+  - **In TEM** (Whittington et al. 2020; TEM-t 2022), the hippocampus binds what is sensed to the position the cortex
+    path-integrates. A new environment with known structure is then learned in one exposure, and recalled by any path.
+- **Why it matters for the goal:** an ARC-AGI-3 level is this case. The mechanics are known, but the layout and
+  content are new.
+
+**What breaks today:**
+- **Day 1:** the brain lives in a walk world and sleeps, so the cortex has the frame and the day's labels.
+- **Day 2:** the same world is relabelled (same graph, new labels), and the brain walks it again. At a node it already
+  passed today:
+  - the column predicts day 1's label, which is wrong;
+  - the hippocampus never lived through the new path to the node, so it recalls nothing.
+- **So:** what day 2 showed at a node is never used again on day 2.
+
+### The change
+
+1. **The hippocampus also keys by the cortex's location** (the entorhinal input).
+   - **What it receives:** with each input, the bus gives the hippocampus the place of the first column receiving
+     that sensor, if the column knows it.
+   - **What it stores:** what came next, under that location. Location keys are matched exactly.
+   - **What stays:** the path keys, which replay needs.
+2. **The day's memory comes first** (recency).
+   - **The order of prediction:**
+     1. a memory formed since the last sleep, at the column's current location;
+     2. otherwise, the column's own content;
+     3. otherwise, the hippocampus's path recall, as before.
+   - **At sleep:** the day is consolidated (replayed, as now), and the day's location memories are cleared.
+3. **Not in this part:**
+   - gap 2 (temporal context; B may need it);
+   - gap 3 (CA1). The recalled content is already the cortex's symbol, so it needs no mapping back.
+
+### The line between innate and learned (for the user to check)
+
+- **New innate assumptions:**
+  - the hippocampus binds what it senses to the cortex's location;
+  - what was lived through at a location since the last sleep takes precedence over older knowledge there. One-trial
+    learning of a new place in a familiar environment needs the hippocampus: the delayed matching-to-place task, Steele
+    & Morris 1999.
+- **Learned:**
+  - the locations (the cortex's frame, from day 1);
+  - the contents (from day 2, one exposure).
+
+### Worlds
+
+- **The walk worlds:** E1 torus, E2 cycle, O1 A₅, O2 box; 3 seeds.
+- **Day 1:** part 4's (one walk of 1,000 actions from node 0, then sleep).
+- **Day 2:**
+  - **The world:** relabelled (the same graph, new labels).
+  - **The walk:** one walk of 3n actions from node 0 (n = 60 nodes), learning on, no sleep.
+  - **The prediction:** at each arrival, the brain predicts the label before it is shown. A prediction is right if it
+    is that label's SDR exactly.
+- **What each step is scored as:**
+  - **a first visit** today;
+  - **a revisit:** within one walk, a node is always revisited by a path the hippocampus has not lived through.
+- **On O1 and O2,** day 1's frame misses a few moves, so the column can lose its place on day 2. Revisits are reported
+  separately for steps where the column knows its place.
+
+**The arms:**
+- (a) as built;
+- (b) location keys off (the hippocampus as before);
+- (c) recency off (location keys on, the column's content first).
+
+### Predictions
+
+| # | prediction |
+|---|---|
+| I1 | revisits where the column knows its place: (a) ≥ 0.95, in every world and seed |
+| I2 | revisits: (b) ≤ 0.05 and (c) ≤ 0.05 |
+| I3 | first visits: ≤ 0.05 in every arm (nothing can know a new label) |
+| I4 | no regression: the predictions of parts 3, 5 (F3), 6 and 7, and part 4's walk checks and shortcut tests, reproduce. Their harnesses predict only after sleep, without learning, so no day memory exists. Part 5's F1–F2 read no prediction and are not re-run |
+| I5 | cost: day 2 takes under 1 s per walk |
+
+**What would refute the step:**
+- **I1 failing:** the location doesn't carry the content, or the recall isn't used.
+- **I2 failing for (b):** something else already recalls by location.
+- **I4 failing:** the day memory leaks into consolidated behaviour.
+
+**Not in this step:** temporal context (gap 2), CA1 (gap 3), arithmetic one-shot facts.
