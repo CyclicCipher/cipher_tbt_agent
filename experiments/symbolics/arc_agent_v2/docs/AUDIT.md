@@ -170,10 +170,12 @@ the justifications.
 5. **A3 waits.** It is a measurement of the general learner on the data a human gets, all the digits shown. That
    includes the number line, which part 11's world never showed.
 
-## 5. For the user to decide
+## 5. Decided (the user, 2026-10-29)
 
-- **§2.3:** remove now, or replace inside the joint experiment's design? Removing now costs the reversal (1.0 → 0.0),
-  and probably precedence, until the general forms exist.
-- **"The same model":** I take it as one brain instance and one code. Regions differ only by wiring, as cortex does:
-  the eye's movements move the place and the retina is sensed, as in the walks; read symbols move the place. Is a
-  region per sensor acceptable, or must one region receive both?
+- **§2.3 is replaced inside the joint experiment's design,** not removed beforehand.
+- **"The same model":** "the same brain instance with no domain flag anywhere, and regions differing only in their
+  wiring."
+- **A region per sensor is fine:** "in an animal brain, the genome encodes that certain regions of the neocortex will
+  process data from certain patches of sensory data from parts of the body or sensory organs."
+- **Association regions:** "It is up to you to decide how to make associative or abstract regions that would combine
+  multimodal information, and will probably require research." The design is `docs/JOINT.md`.
