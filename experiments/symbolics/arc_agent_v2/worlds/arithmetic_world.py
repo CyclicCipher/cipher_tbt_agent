@@ -20,6 +20,10 @@ to find. A brain that scores well above chance on its held-out equations is read
 - **Chains (part 7):** "a + b - c = d", evaluated left to right, are only ever tested (`score_chains`), never trained.
 - **Expressions (part 10):** "a + b * c = d" with standard precedence (`written_expr`): × before + and −, left to
   right otherwise.
+- **Numerals (part 11):** with `base`, every number mod p is written as a numeral of k digits in that base, most
+  significant first, zero-padded: p = 100, base 10 gives "3 7 + 4 5 = 8 2". The digit symbols are "0".."base−1".
+  `score` then counts an answer right only if every one of its digits is, each predicted after the true digits
+  before it.
 
 A1: addition mod p. The p * p equations are split at random: train_frac of them are shown in training, the rest are
 held out. The test shows a held-out equation up to "=", asks for the brain's prediction of the next SDR, and decodes
@@ -36,10 +40,14 @@ OPS = {"+": lambda a, b, p: (a + b) % p,
 
 class ArithmeticWorld:
     def __init__(self, p=13, ops=("+",), train_frac=0.5, d=2048, w=40, seed=0, withhold=False, permute=False,
-                 reverse=False):
-        self.p, self.ops = p, tuple(ops)
+                 reverse=False, base=None):
+        self.p, self.ops, self.base = p, tuple(ops), base
+        self.k = 1
+        if base is not None:                            # part 11: the digits a numeral of p - 1 needs
+            while base ** self.k < p:
+                self.k += 1
         enc = CategoryEncoder(d, w, seed)
-        self.symbols = [str(i) for i in range(p)] + list(self.ops) + ["="]
+        self.symbols = [str(i) for i in range(p if base is None else base)] + list(self.ops) + ["="]
         self.sdr_of = {s: enc.encode(s) for s in self.symbols}
         self._memory = ItemMemory(d)                    # decoding, for scoring only
         for s in self.symbols:
@@ -78,9 +86,19 @@ class ArithmeticWorld:
         v = int(self.table[a, b]) if op == "?" else OPS[op](a, b, self.p)
         return v if self.perm is None else int(self.perm[v])
 
+    def numeral(self, n):
+        """A number's symbols: itself, or (part 11) its k digits in the base, most significant first."""
+        if self.base is None:
+            return [str(n)]
+        out = []
+        for _ in range(self.k):
+            out.append(str(n % self.base))
+            n //= self.base
+        return out[::-1]
+
     def written(self, op, a, b):
         """The equation's symbols, in the order written."""
-        return [str(a), op, str(b), "=", str(self.answer(op, a, b))]
+        return self.numeral(a) + [op] + self.numeral(b) + ["="] + self.numeral(self.answer(op, a, b))
 
     def episode(self, op, a, b):
         """What the brain is shown: the equation as a list of SDRs."""
@@ -106,10 +124,20 @@ class ArithmeticWorld:
         return self.symbols[i]
 
     def score(self, predict, held_out=True):
-        """The fraction of equations whose answer is the symbol nearest predict(prefix)."""
+        """The fraction of equations whose answer is the symbol nearest predict(prefix). With numerals (part 11): whose
+        every answer digit is, each predicted after the true symbols before it."""
+        if self.base is not None:
+            return float(np.mean([all(self.score_digits_of(predict, eq)) for eq in
+                                  (self.held_out if held_out else self.train)]))
         qs = self.queries(held_out)
         hits = sum(self.decode(predict(prefix)) == self.written(*eq)[-1] for prefix, _, eq in qs)
         return hits / len(qs)
+
+    def score_digits_of(self, predict, eq):
+        """Part 11: for each answer digit, whether the symbol nearest predict(the true symbols before it) is it."""
+        syms = self.written(*eq)
+        start = syms.index("=", len(self.numeral(0)) * 2 + 1) + 1
+        return [self.decode(predict([self.sdr_of[x] for x in syms[:i]])) == syms[i] for i in range(start, len(syms))]
 
     # ---- chains (part 7): never trained on, only tested -------------------------------------------------------------
     def written_chain(self, ops, xs):

@@ -1808,3 +1808,90 @@ results stay identical.
      about 4 million at p = 97, quadratic in the inputs per place.
    - **What would help:** not instantiating every pair, for example inferring moves from the coordinates once they
      exist. That changes what P4 computes, so it is a design step, to be pre-registered, not a speedup.
+
+## Part 11: A3, step 1 — two-digit numerals, measured (pre-registered 2026-10-29, before the code)
+
+**Why:**
+- **The milestone:** A3, the user's next milestone, multi-digit numbers with place value.
+- **The design:** `docs/A3.md`. §2 lists the gaps it expects in v2:
+  - the decimal chain isn't found;
+  - shifts by position are related by ×10, not a unit;
+  - two-digit answers can't be named;
+  - there is no carry.
+- **What this part does:** it measures those gaps on the smallest world that has them, before any mechanism is
+  designed. The brain is unchanged.
+
+**The world** (`ArithmeticWorld(p=100, base=10)`):
+- **The equations:** addition mod 100, every number written as two digits, most significant first, zero-padded:
+  "3 7 + 4 5 = 8 2".
+- **The symbols:** 12 random SDRs: the digits 0–9, "+" and "=".
+- **The arms** (3 seeds each):
+  - **(a) standard:** half the 10,000 equations trained, the other half held out;
+  - **(b) withheld:** a third of the results never occur as answers. Half of the rest are trained, and the test is
+    every equation whose answer is withheld (part 5's variant).
+- **An answer is right only if both its digits are,** each predicted after the true symbols before it.
+
+### Predictions
+
+| # | prediction |
+|---|---|
+| N1 | (a) held-out exact ≥ 0.99, by P4's displacements as in A1 |
+| N2 | an orbit of the 100 result places, with the chain (2, 4, 5, 25): the residues mod 4 and 25, not decimal digits |
+| N3 | at least two digit shift classes. The tens positions (after the start, after "+") shift a digit d by 10·d, the units positions by d. No relation is found between them (×10 is not a unit), and naming is refused |
+| N4 | (b) withheld answers: exact ≤ 0.05, and each digit ≤ 0.2 |
+| N5 | cost: the run under 2 minutes, with the suite |
+
+**What would refute §2 of A3.md:**
+- **N2 failing:** the decimal chain is found after all.
+- **N3 failing:** the positions are related.
+- **N4 failing:** answers never seen can already be named.
+
+Any of these would change the plan.
+
+**Not in this step:** any new mechanism (naming by quotient, the carry, longer numerals).
+
+## Part 11 results (2026-10-29; `runs/a11.txt`, `runs/a11.json`)
+
+**Built:**
+- **`ArithmeticWorld(base=)`:** numerals, `numeral`, `score_digits_of`, and the exact score.
+- **`tests/test_a11.py`.**
+- The brain is unchanged.
+
+| arm | seed | exact | tens digit | units digit | coordinates | factored |
+|---|---|---|---|---|---|---|
+| (a) standard | 0, 1, 2 | 1.000 | 1.000 | 1.000 | an orbit of 100, chain (2, 4, 5, 25) | yes |
+| (b) withheld | 0, 1, 2 | 0.000 | 0.000 | 0.000 | none: "no move permutes a set of places" | no |
+
+**N3** (standard arm, every seed):
+- **The classes:**
+  - tens = {the start, after "+"};
+  - units = {after a tens digit, after the first number, after the second tens digit, after "a + b"};
+  - a third class after "=".
+- **The shifts:** a digit's tens shift is 10 times its units shift (10/10 digits).
+- **No relation, no naming:** none is found between the classes, and no naming is accepted.
+
+**N5:** 35.3 s for the six runs; the suite (41 tests) 19.7 s.
+
+**Verdicts:** N1–N5 confirmed in every seed. The gaps of `docs/A3.md` §2 are where it put them.
+
+**Found, not predicted: without every result, no coordinate at all.**
+- **In the withheld arm,** nothing permutes a set of places, so nothing is factored.
+- **Why:**
+  - a digit's move within one position doesn't wrap around (after the tens digit 9 there is no "+1"; the wrap is the
+    carry into the next position);
+  - so the displacements' maps are paths on every position's places, and complete cycles exist only on the 100
+    results, which (b) leaves incomplete.
+- **The contrast with part 5's single-digit withheld world:** there the same translations wrap mod p on the complete
+  ring of first operands, and that orbit carried the coordinate (checked: an orbit of 13 at position 0).
+- **What it shows:** place value appears as a structural fact. Each digit position is Z/10 only together with the
+  carry.
+
+**What this shows for A3:**
+1. **The table and the coordinates answer every two-digit sum that was in the data** (1.000), and they find the group
+   Z/100. They don't find its decimal structure.
+   - **The chain is CRT** (2, 4, 5, 25).
+   - **Positions aren't related:** the tens shift is 10 × the units shift, an endomorphism part 6 can't relate.
+   - **Answers can't be named:** no symbol names a two-digit value.
+   - **With answers withheld,** nothing remains (0.000), against part 5's 1.000 for single digits.
+2. **Step 2 must give coordinates to places whose moves are paths, not cycles** (one position's digits), and join the
+   positions by the carry. This is the extension structure of `docs/A3.md` §1, now measured.
