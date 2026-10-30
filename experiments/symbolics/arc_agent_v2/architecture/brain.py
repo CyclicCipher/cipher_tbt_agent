@@ -23,11 +23,12 @@ from arc_agent_v2.config.config import ARITHMETIC
 from arc_agent_v2.architecture.frameLearning import consolidate
 from arc_agent_v2.architecture.hippocampus import Hippocampus
 from arc_agent_v2.architecture.information import bits, laplace
+from arc_agent_v2.architecture.thalamus import Thalamus
 
 
 class Brain:
     def __init__(self, config=ARITHMETIC, consolidation=True, regularity=True, coordinates=True, factoring=True,
-                 relation=True, locations=True, recency=True, union=True):
+                 relation=True, locations=True, recency=True, union=True, thalamus=True):
         self.config, self.consolidation = config, consolidation
         self.regularity, self.coordinates, self.factoring = regularity, coordinates, factoring
         self.relation = relation                        # part 6: shift classes related by an automorphism
@@ -37,6 +38,8 @@ class Brain:
                         for r in config.validate()}
         self.hippocampus = Hippocampus(d, w, seed)
         self.bus = Bus(config, self.regions, self.hippocampus, locations)
+        read = {s for s in self.bus.moving if s not in self.bus.efference}   # inputs read: content that moves
+        self.thalamus = Thalamus(self.columns()[0], read, enabled=thalamus)   # part 10: working memory and its gate
         self.frame = None
 
     def fed_by(self, sensor):
@@ -51,19 +54,36 @@ class Brain:
         for c in self.columns():
             c.reset()
         self.hippocampus.begin()
+        self.thalamus.begin()
 
     def step(self, x, sensor="symbols", learn=True):
-        return self.bus.publish(sensor, x, learn)
+        """One input: the thalamus branches and weighs by it (its best place is the hippocampus's location), the bus
+        delivers it, and the thalamus's thoughts move by it."""
+        moves, content = sensor in self.bus.moving, sensor not in self.bus.efference
+        where = self.thalamus.observe(x, sensor, moves, content, learn)
+        t = self.bus.publish(sensor, x, learn, where if self.thalamus.active() else Bus.OWN)
+        self.thalamus.advance(x, sensor, moves, content)
+        return t
+
+    def where(self, sensor="symbols"):
+        """The cortex's location: the thalamus's most probable place while it is active, else a column's."""
+        if self.thalamus.active():
+            return self.thalamus.best_place()
+        return self.bus.where(sensor)
 
     def predict(self, sensor="symbols"):
         """The next input from a sensor (part 8's order):
         1. what came next today at the cortex's location (a memory since the last sleep);
         2. else the first column fed by it that knows where it is and has content there;
         3. else the hippocampus's recall of the path lived through."""
-        where = self.bus.where(sensor)
+        where = self.where(sensor)
         today = self.hippocampus.recall_today(where, sensor) if where is not None else None
         if self.recency and today is not None:
             return today
+        if self.thalamus.active():                      # part 10: the thoughts' posterior predictive
+            p = self.thalamus.predict(sensor)
+            if p is not None:
+                return p
         for c in self.fed_by(sensor):
             p = c.predict(sensor)
             if p is not None:
@@ -75,10 +95,14 @@ class Brain:
         order as `predict`), by Laplace's rule over K, the number of inputs the brain has received (information.py)."""
         K = len(self.bus.inputs)
         count = lambda c: bits(*laplace(c.get(target, 0), sum(c.values()), K))
-        where = self.bus.where(sensor)
+        where = self.where(sensor)
         today = {x: n for (s, x), n in self.hippocampus.today.get(where, {}).items() if s == sensor}             if where is not None else {}
         if self.recency and today:
             return count(today)
+        if self.thalamus.active():
+            b = self.thalamus.bits(target, sensor, K)
+            if b is not None:
+                return b
         for c in self.fed_by(sensor):
             b = c.bits(target, sensor, K)
             if b is not None:
@@ -89,8 +113,9 @@ class Brain:
                       if s == sensor})
 
     def finish(self, learn=True):
-        """The episode ended (the hippocampus records it)."""
+        """The episode ended (the hippocampus records it; while learning, the thalamus's gate learns from it)."""
         self.hippocampus.finish(learn)
+        self.thalamus.finish(learn)
 
     def episode(self, xs, sensor="symbols", learn=True):
         """An episode of inputs from one sensor, or of (sensor, input) pairs, to its end."""

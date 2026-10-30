@@ -44,3 +44,26 @@ def bits(log_target, log_rest):
     if log_target == NEG_INF:
         return float("inf")
     return softplus(log_rest - log_target) / LN2
+
+
+# ---- mixtures of count distributions (the column's union, the thalamus's hypotheses) -------------------------------
+# A component is (log-weight, {input: n}, N): one hypothesis's counts, by Laplace's rule over K inputs.
+def mixture_scores(components, K):
+    """The (unnormalized) log-probability of each input some component has seen."""
+    cands = list(dict.fromkeys(x for _, c, _ in components for x in c))
+    return {x: logsumexp(lw + laplace(c.get(x, 0), N, K)[0] for lw, c, N in components) for x in cands}
+
+
+def mixture_logp(components, x, K):
+    """log P(x) under the mixture, its weights normalized; log(1/K) if it has no component."""
+    if not components:
+        return -math.log(K)
+    z = logsumexp(lw for lw, _, _ in components)
+    return logsumexp(lw + laplace(c.get(x, 0), N, K)[0] for lw, c, N in components) - z
+
+
+def mixture_bits(components, target, K):
+    """The code length of target under the mixture (the margin form is unchanged by the weights' total)."""
+    parts = [laplace(c.get(target, 0), N, K) for _, c, N in components]
+    return bits(logsumexp(lw + t for (lw, _, _), (t, _) in zip(components, parts)),
+                logsumexp(lw + r for (lw, _, _), (_, r) in zip(components, parts)))

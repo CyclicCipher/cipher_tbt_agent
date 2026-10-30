@@ -18,6 +18,8 @@ to find. A brain that scores well above chance on its held-out equations is read
 - **`reverse=True` (part 6):** S, a random third of the digits, is never subtracted. Every "a - b" with b in S is left
   out of training, the rest are split as usual, and the test is every subtraction by a digit in S.
 - **Chains (part 7):** "a + b - c = d", evaluated left to right, are only ever tested (`score_chains`), never trained.
+- **Expressions (part 10):** "a + b * c = d" with standard precedence (`written_expr`): × before + and −, left to
+  right otherwise.
 
 A1: addition mod p. The p * p equations are split at random: train_frac of them are shown in training, the rest are
 held out. The test shows a held-out equation up to "=", asks for the brain's prediction of the next SDR, and decodes
@@ -116,6 +118,29 @@ class ArithmeticWorld:
         for op, x in zip(ops, xs[1:]):
             v = OPS[op](v, x, self.p)
         return [str(xs[0])] + [s for op, x in zip(ops, xs[1:]) for s in (op, str(x))] + ["=", str(v)]
+
+    # ---- precedence (part 10): × before + and −, left to right otherwise ------------------------------------------
+    def value_expr(self, ops, xs):
+        p, terms, signs = self.p, [xs[0]], []
+        for op, x in zip(ops, xs[1:]):
+            if op == "*":
+                terms[-1] = terms[-1] * x % p
+            else:
+                signs.append(op)
+                terms.append(x)
+        v = terms[0]
+        for op, t in zip(signs, terms[1:]):
+            v = OPS[op](v, t, p)
+        return v
+
+    def written_expr(self, ops, xs):
+        """An expression "x0 op0 x1 op1 x2 ... = v" with standard precedence."""
+        return [str(xs[0])] + [s for op, x in zip(ops, xs[1:]) for s in (op, str(x))] + ["=", str(self.value_expr(ops, xs))]
+
+    def random_expr(self, n_ops, rng):
+        """(ops, operands) drawn uniformly."""
+        return (tuple(self.ops[i] for i in rng.integers(0, len(self.ops), n_ops)),
+                tuple(rng.integers(0, self.p, n_ops + 1).tolist()))
 
     def score_chains(self, predict, n_ops, count=1000, seed=0):
         """The fraction of `count` random chains of n_ops operations (operators from this world's) whose answer is the

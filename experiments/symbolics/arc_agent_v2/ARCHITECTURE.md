@@ -274,7 +274,7 @@ in `docs/LAB.md`, built, run (about 10 minutes of compute at most), and recorded
 | chains A | chained expressions of one precedence level ("a + b − c ="), zero-shot | part 7 | **done**: chains of 2–4 operations 1.000, never trained; 0.000 with the phase merge off |
 | hippocampus | keys by the cortex's location (TEM); a day's memory first; relabelled walk worlds | part 8 | **done**: revisits by new paths recalled 100% where the column knows its place; 0% without location keys or without recency |
 | union column | the column's state as a weighted union of (phase, coordinate) hypotheses: Bayesian filtering, bursting on surprise; replaces part 7's merge (`docs/NEURAL_COLUMN.md`) | part 9 | **done**: chains 1.000 in {+, −} and in {+} only (part 7 couldn't); k − 1 bursts per chain; control 0.000; answers ~1–1.6 bits (the Laplace prior is too broad) |
-| chains B | precedence ("a + b × c ="): working memory in a `thalamus.py`; the gate's operations as hypotheses, taught by prediction error | part 10 | pre-registered |
+| chains B | precedence ("a + b × c ="): working memory in a `thalamus.py`; the gate's operations as hypotheses, taught by prediction error | part 10 | **done**: 2-operation expressions 1.000 (precedence learned from 300 examples; gate off 0.000 on the sensitive ones); 3 operations 0.85–0.88 (releases before + and − unlearnable from 2-operation data); the run 3.4 min, over its 2-minute target |
 
 **Next, proposed in the order the goal needs (for the user to confirm, 2026-10-29).** Analogy and the reversal curse
 are folded in where the goal uses them:

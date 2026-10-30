@@ -377,6 +377,7 @@ class Modules:
     def __init__(self, d, periods, R, seed=0):
         rng = np.random.default_rng((seed, 5150))
         self.d, self.periods, self.R = d, tuple(int(n) for n in periods), int(R)
+        self._bound = {}                                # bind's results, memoized (codes are a finite group)
         self.size = np.array([n for n in self.periods for _ in range(self.R)], np.int64)
         if self.size.sum() > d:
             raise ValueError("the modules need more than d bits")
@@ -411,7 +412,11 @@ class Modules:
         return SDR._sorted(self.d, (self.start + o % self.size).astype(np.int32))
 
     def bind(self, a, b):
-        return self._from(self.offsets(a) + self.offsets(b))
+        key = (a, b)
+        out = self._bound.get(key)
+        if out is None:
+            out = self._bound[key] = self._from(self.offsets(a) + self.offsets(b))
+        return out
 
     def unbind(self, c, b):
         return self._from(self.offsets(c) - self.offsets(b))

@@ -1572,3 +1572,165 @@ results stay identical.
 - expressions longer than three operations in the test;
 - reward from the world;
 - the goal cortex itself.
+
+### Part 10 amendments (2026-10-29, during the build, before any run)
+
+1. **The union is re-seeded from a known place.**
+   - **The rule:** when a move leaves the union empty but the column's place is known, the union gets one hypothesis
+     per frame place sharing that place's name, (its phase, its coordinate), weighted by how often the place was
+     lived through.
+   - **Why:** after "a × b", × is outside the coordinate, so the union empties (part 9, amendment 3) while the place
+     path goes on. Continuing "a × b + c" by the place alone reads a code's mixed content (part 9, amendment 2).
+   - **What it is:** the place says where (the code), and the union says in which context. Re-seeding is the union
+     bursting from the place.
+2. **Where the gate branches.**
+   - **While learning** (awake, after a sleep): in every context, with the prior (1 for continue, 0.1 for each other
+     operation).
+   - **When predicting without learning:** only in contexts where learning raised the operation's posterior above
+     the prior's mean, 0.1 / 1.1. This is what "unknown contexts continue" means: no evidence that the operation
+     helps, no branch.
+   - **Why:** branching everywhere at test keeps about 64 hypotheses per input, which K6's 2 minutes can't afford.
+   - **An earlier draft used 0.01; the smoke case refuted it.** On p = 11, seed 5 (outside the pre-registration),
+     422 of 441 learned contexts still branched at 0.01. They are mostly contexts met a few times, whose P(yes) sits
+     between 0.01 and the prior's 0.09. The mean was 56 thoughts per query, almost all weightless.
+3. **The decision points** are the inputs that are both content and moving, the read symbols. Working memory holds
+   and re-feeds read inputs; an efference copy is never re-fed. So the walk worlds have no decision points.
+4. **The likelihood and K:** a hypothesis's likelihood of an input is its column state's posterior predictive (part
+   9), with K the frame's number of inputs.
+5. **The location the hippocampus files under is the brain's best estimate.**
+   - **The rule:** while the thalamus is active, the cortex's location (part 8's entorhinal input) is the place of its
+     most probable hypothesis, chosen after weighing the input just seen and before moving by it (postdiction). Where
+     the thalamus is inactive, it is the column's place, as before.
+   - **Why:** on day 2 the column's own place follows the left-to-right path. Part 8's day memory would file each
+     answer under that wrong place, and at test today's memory would override the right answer.
+   - **"Most probable" means the place, not the thought:** the place with the most posterior weight summed over the
+     thoughts at it.
+     - **Found on p = 17, seed 5** (outside the pre-registration): every failure was (−, ×), 24 of 115.
+     - **In each,** the single heaviest thought (about 0.33) sat at the left-to-right answer's place, while the
+       thoughts at the right one held about 0.56 between them. The day memory answered from the wrong place.
+   - **"No known place" competes too.** The thoughts whose place is lost (they know only their union) count together
+     as one candidate. If they hold the most weight, the brain's location is unknown, and nothing is recalled by
+     place.
+     - **Found on p = 41, seed 5:** in "1 + 2 + 3 × 4 =", the winning thought (0.97) had lost its place. The 0.03
+       thought with a known place chose where the day memory was read, and "a + b + c × d" failed 46 of 46.
+6. **The input a decision responds to is weighed before the decision.**
+   - **The rule:** each thought's likelihood of x is taken at its state before the operations, the same for all its
+     branches. An operation responds to x; it can't make x itself more or less probable. It is judged by what follows.
+   - **Why** (found on p = 41, seed 5, outside the pre-registration):
+     - after a result, the column expects "=", since on day 1 every result was followed by "=";
+     - so at an operator, any branch that holds (restarting where an operator is expected) explained the operator
+       better than continuing did;
+     - the tie contexts (+, +) and (+, −), where both parses give the right answer, learned to hold (0.85, 0.75);
+     - 3-operation expressions held at every operator, and "a + b × c − d" failed 35 of 38 times.
+7. **The battery (K5) leaves out part 7.**
+   - **Why it's covered:** part 7's world and both its arms are part 9's {+, −} world, union and control. Part 9's run
+     reproduced part 7's accuracies exactly and recorded them.
+   - **The fast tests** run as the suite (`pytest arc_agent_v2`), beside the harness.
+8. **What the smoke cases showed, for the record** (p = 11, 17 and 41, seed 5; none pre-registered; final code):
+
+   | p | 2 operations | precedence-sensitive | 3 operations | precedence-sensitive | gate off: 2 / 3 operations |
+   |---|---|---|---|---|---|
+   | 11 | 0.987 | 1.000 | 0.897 | 0.854 | 0.670 / 0.390 |
+   | 17 | 1.000 | 1.000 | 0.883 | 0.865 | 0.673 / 0.390 |
+   | 41 | 1.000 | 1.000 | 0.880 | 0.849 | 0.673 / 0.390 |
+
+   - **What fails on 3 operations:** the expressions that need a release before a lower-precedence operator ("a × b ×
+     c + d", "a − b × c ± d").
+   - **Why:** a held state followed by + or − never occurs in 2-operation training, so that release context is never
+     learned.
+   - **What this predicts for the run:** about 4/27 of the 3-operation expressions fail. K2 (≥ 0.90) may fail narrowly,
+     and K3's "release before + and −" is not learnable from these data.
+
+## Part 10 results (2026-10-29; `runs/a10.txt`, `runs/a10.json`)
+
+**Built:**
+- **`architecture/thalamus.py`:** working memory per thought (the last input, the state before it, a stack); continue,
+  hold and release; the gate's operations as weighted hypotheses; EM on the Dirichlet counts.
+- **`Column.advance`:** the column's step as a function from state to state.
+- **The column's other additions:** re-seeding from a known place (amendment 1); `components` and `name`.
+- **`Brain`:** the thalamus between the input and the bus. The hippocampus files under the brain's best place
+  (amendment 5).
+- **Memoized** `Modules.bind` and `L5.move`.
+- **`ArithmeticWorld.written_expr`:** standard precedence, in the world only.
+- **`tests/test_a10.py`.**
+
+**K1, K2, K4: accuracy** (1,000 expressions each):
+
+| p | seed | 2 operations (precedence-sensitive) | 3 operations (precedence-sensitive) | gate off: 2 ops (sensitive) | gate off: 3 ops (sensitive) |
+|---|---|---|---|---|---|
+| 13 | 0 | 1.000 (1.000 of 209) | 0.880 (0.861 of 359) | 0.653 (0.000) | 0.443 (0.000) |
+| 13 | 1 | 1.000 (1.000 of 169) | 0.867 (0.815 of 390) | 0.678 (0.000) | 0.442 (0.000) |
+| 13 | 2 | 1.000 (1.000 of 177) | 0.872 (0.862 of 354) | 0.679 (0.000) | 0.452 (0.000) |
+| 97 | 0 | 1.000 (1.000 of 238) | 0.870 (0.868 of 439) | 0.651 (0.000) | 0.443 (0.000) |
+| 97 | 1 | 1.000 (1.000 of 204) | 0.850 (0.810 of 453) | 0.678 (0.000) | 0.442 (0.000) |
+| 97 | 2 | 1.000 (1.000 of 212) | 0.860 (0.846 of 415) | 0.679 (0.000) | 0.452 (0.000) |
+
+**K3: the learned gate** (P(yes); every seed):
+
+| context | P(yes) |
+|---|---|
+| hold, (+, ×) | 0.94–0.98 |
+| hold, (−, ×) | 0.95–0.98 |
+| hold, (×, ×) | 0.93–0.97 |
+| hold, every other pair of operators | 0.00–0.10 |
+| hold, every other context learned (568 at p = 13, about 4,600 at p = 97) | at most 0.10–0.34 |
+| release before "=", + held | 0.93–0.98 |
+| release before "=", − held | 0.87–0.97 |
+| release before "=", × held | 0.84–0.96 |
+| release before +, − or ×, anything held | never met |
+
+**K5: the battery.**
+- Parts 3, 5 (F1–F3), 6 and 9 reproduce exactly (p = 13, 3 seeds; p = 97, seed 0).
+- Part 8's walks reproduce exactly.
+- Part 4's walk checks reproduce exactly, except A₅'s known part-5 difference (seeds 0 and 2).
+- The suite passes, 39 tests (15.8 s).
+
+**K6: cost:**
+- **The whole run:** 201.7 s, of which the battery took 127.3 s and part 10's runs 74.3 s.
+- **Per seed:** day 2 took 3.5–4.7 s, and one run 5.7 s (p = 13) or 17.5–19.8 s (p = 97).
+
+**Verdicts:**
+- **K1 confirmed:** 1.000 in every seed, the precedence-sensitive ones included.
+- **K2 refuted:** 0.850–0.880, below 0.90.
+- **K3:** confirmed for the holds, the releases before "=" and every other context. Refuted for the releases before +
+  and −, which were never met.
+- **K4 confirmed.**
+- **K5 confirmed.**
+- **K6 refuted:** 201.7 s, against under 2 minutes.
+
+**What this shows:**
+1. **Precedence is learned from 300 examples and prediction error alone.**
+   - **The data:** nothing tells the brain which symbols are operators, or which binds tighter.
+   - **What it learned:**
+     - to hold the pending operation exactly before × ((+, ×), (−, ×), (×, ×));
+     - to continue everywhere else;
+     - to release before "=".
+   - **The test:** held-out 2-operation expressions are exact, the precedence-sensitive ones included. With the gate
+     off, the same brain gets 0.000 of those.
+2. **The convention is in the data, not the brain.** Only the world computes precedence. Training on another
+   convention would teach another gate.
+3. **What 2-operation data can't teach.**
+   - **The missing context:** a held state followed by + or − ("a − b × c + d", "a × b × c + d") never occurs with
+     two operations, so the release it needs is never learned.
+   - **The failures:** these are the 3-operation failures, about 4/27 of expressions, as amendment 8 predicted.
+   - **What it says:** the composition works where the learned contexts cover it, and stops exactly where they don't.
+4. **The amendments came from smoke cases, not the pre-registered ones.**
+   - **The two that mattered most** were found by tracing failures:
+     - weighing an input before the gate responds to it (6);
+     - the brain's location as the place with the most weight, "unknown" included (5).
+   - **Both are rules of inference:** neither knows any content.
+
+**Limits:**
+1. **K6:** the run took 3.4 minutes.
+   - **The battery's share:** 127 s, re-checking parts 3–9.
+   - **What the time is:** mostly training and queries at p = 97.
+   - **What's left to speed up:** P4's fill loop and factoring are still Python loops (the performance pass). A
+     3-operation query costs about 3× a 2-operation one.
+2. **Releases before + and −** need training expressions of 3 operations, or a generalization between release
+   contexts. The latter is not designed: a context is a pair of exact inputs, so nothing carries "release before ="
+   over to "release before +".
+3. **The day memory and the thalamus** interact only through the location (amendment 5). The graded arbitration of
+   NEURAL_COLUMN.md §4 is still a fixed rule.
+4. **Contexts are pairs of exact inputs.** About 4,600 are learned at p = 97, most of them noise kept below the prior.
+   Generalizing between contexts would need SDR overlap, or the inputs' roles, which are learned elsewhere (shift
+   classes).

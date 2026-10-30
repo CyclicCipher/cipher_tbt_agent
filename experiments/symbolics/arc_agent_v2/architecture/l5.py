@@ -32,25 +32,37 @@ class L5:
         self.words = []                                 # per orbit: (modules, {displacement code: [inputs]})
         self.inputs = []                                # every input with a known move, in the order learned
         self._known = set()                             # the same, for O(1) membership
+        self._moves = {}                                # move's results, memoized until the next learn
 
     def learn(self, place, x, nxt):
+        self._moves = {}
         self.moves.store(self.key(place, x), nxt)
         if x not in self._known:
             self._known.add(x)
             self.inputs.append(x)
 
     def learn_shift(self, x, modules, delta):
+        self._moves = {}
         self.shifts.setdefault(x, []).append((modules, delta))
         if x not in self._known:
             self._known.add(x)
             self.inputs.append(x)
 
     def move(self, place, x):
-        """Where input x leads from place, or None if the frame doesn't know."""
+        """Where input x leads from place, or None if the frame doesn't know (memoized: a pure function of what L5
+        has learned)."""
+        key = (place, x)
+        if key in self._moves:
+            return self._moves[key]
+        out = None
         for modules, delta in self.shifts.get(x, ()):
             if modules.is_code(place):
-                return modules.bind(place, delta)
-        return self.moves.best(self.key(place, x))
+                out = modules.bind(place, delta)
+                break
+        else:
+            out = self.moves.best(self.key(place, x))
+        self._moves[key] = out
+        return out
 
     def build_words(self, modules):
         """The shortest words over this orbit's shifts, for every displacement (a breadth-first walk from 0)."""

@@ -34,7 +34,7 @@ The column learns its frame from consolidation (`install`), not online. Online m
 import heapq
 import math
 
-from arc_agent_v2.architecture.information import NEG_INF, bits, laplace, logsumexp
+from arc_agent_v2.architecture.information import NEG_INF, laplace, logsumexp, mixture_bits, mixture_scores
 from arc_agent_v2.architecture.l23 import L23
 from arc_agent_v2.architecture.l4 import L4
 from arc_agent_v2.architecture.l5 import L5
@@ -51,6 +51,7 @@ class Column:
         self.fac = None                                 # part 5: the frame's factorization, if any
         self.union = union                              # part 9
         self.bursts, self.burst_sizes = 0, []           # part 9: counted, for the harness
+        self._at = {}                                   # part 10: a place's name -> [((phase, coordinate), times)]
 
     def reset(self):
         self.l6.reset()
@@ -71,13 +72,6 @@ class Column:
                 return {name: N}, N
         return c, N
 
-    def _scores(self, sensor):
-        """The posterior predictive's log-probability of each input some hypothesis has seen next."""
-        K = self.fac.vocab
-        per = [(lw,) + self._counts(h, sensor) for h, lw in self.l6.hyps.items()]
-        cands = list(dict.fromkeys(x for _, c, _ in per for x in c))
-        return {x: logsumexp(lw + laplace(c.get(x, 0), N, K)[0] for lw, c, N in per) for x in cands}
-
     def _normalize(self, hyps):
         if not hyps:
             return {}
@@ -88,19 +82,20 @@ class Column:
         z = logsumexp(kept.values())
         return {h: lw - z for h, lw in kept.items()}
 
-    def _weigh(self, x, sensor):
+    def _weighed(self, hyps, x, sensor):
         """Bayes' rule: each hypothesis's weight times how expected x was there."""
-        if len(self.l6.hyps) == 1:                      # one hypothesis: normalized, its weight stays log 1 = 0
-            return
+        if len(hyps) == 1:                              # one hypothesis: normalized, its weight stays log 1 = 0
+            return hyps
         K = self.fac.vocab
-        hyps = {}
-        for h, lw in self.l6.hyps.items():
+        out = {}
+        for h, lw in hyps.items():
             c, N = self._counts(h, sensor)
-            hyps[h] = lw + laplace(c.get(x, 0), N, K)[0]
-        self.l6.hyps = self._normalize(hyps)
+            out[h] = lw + laplace(c.get(x, 0), N, K)[0]
+        return self._normalize(out)
 
-    def _move(self, x):
-        """Every hypothesis moves by x; if none can, the union bursts to every phase x is made from."""
+    def _moved(self, hyps, x):
+        """Every hypothesis moves by x; if none can, the union bursts to every phase x is made from. Returns (the
+        union, its size if it burst, else None)."""
         f, new = self.fac, {}
 
         def go(phase, coord, lw):
@@ -110,7 +105,7 @@ class Column:
                 new[key] = logsumexp([new.get(key, NEG_INF), lw])
             return nxt is not None
 
-        hyps = self.l6.hyps if self.union else dict([max(self.l6.hyps.items(), key=lambda kv: kv[1])])
+        hyps = hyps if self.union else dict([max(hyps.items(), key=lambda kv: kv[1])])
         expected = [go(phase, coord, lw) for (phase, coord), lw in hyps.items()]
         if not any(expected) and self.union:            # bursting: the coordinate moves on, the phase widens
             origins = f.origins.get(x, {})
@@ -118,53 +113,86 @@ class Column:
             for (_, coord), lw in hyps.items():
                 for phase, n in origins.items():
                     go(phase, coord, lw + math.log(n / total))
-            self.l6.hyps = self._normalize(new)
-            if self.l6.hyps:
-                self.bursts += 1
-                self.burst_sizes.append(len(self.l6.hyps))
-            return
+            out = self._normalize(new)
+            return out, (len(out) if out else None)
         if not self.union and new:
             new = dict([max(new.items(), key=lambda kv: kv[1])])
-        self.l6.hyps = self._normalize(new)
+        return self._normalize(new), None
+
+    def _seeded(self, place):
+        """Part 10: the union from a known place: one hypothesis per frame place of that name, (its phase, its
+        coordinate), weighted by how often it was lived through."""
+        seeds = {}
+        for h, n in self._at.get(place, ()):
+            seeds[h] = logsumexp([seeds.get(h, NEG_INF), math.log(n)])
+        return self._normalize(seeds)
+
+    # ---- the column's state, as a function (part 10: the thalamus simulates with it) --------------------------------
+    def advance(self, place, hyps, x, sensor, moves, content):
+        """(place, union) after input x, without changing the column. Returns (place, union, the union's size if it
+        burst, else None)."""
+        burst = None
+        if content and self.fac is not None and hyps:
+            hyps = self._weighed(hyps, x, sensor)
+        if moves and place is not None:
+            place = self.l5.move(place, x)
+        if moves and self.fac is not None and hyps:
+            hyps, burst = self._moved(hyps, x)
+        if moves and self.fac is not None and not hyps and place is not None and self.union:
+            hyps = self._seeded(place)                  # amendment 1: the place says where, the union in what context
+        return place, hyps, burst
+
+    def components(self, place, hyps, sensor):
+        """The prediction's mixture components [(log-weight, {input: n}, N)]: the union's hypotheses where it has
+        counts, else the place's content (information.py)."""
+        if self.fac is not None and hyps:
+            comps = [(lw,) + self._counts(h, sensor) for h, lw in hyps.items()]
+            if any(N for _, _, N in comps):
+                return comps
+        c = self.l23.counts(place, sensor)
+        return [(0.0, c, sum(c.values()))] if c else []
+
+    def name(self, place, hyps):
+        """The symbol whose own position is the state's coordinate (part 5's naming), or None."""
+        if self.fac is None:
+            return None
+        if hyps:
+            return self.fac.named.get(max(hyps, key=hyps.get)[1])
+        at = self._at.get(place)
+        return self.fac.named.get(max(at, key=lambda hn: hn[1])[0][1]) if at else None
+
+    def start_state(self):
+        return self.l6.start, ({self.l6.fac_start: 0.0} if self.l6.fac_start is not None else {})
 
     # ---- the column's steps ---------------------------------------------------------------------------------------
+    def predict_state(self, place, hyps, sensor="symbols"):
+        comps = self.components(place, hyps, sensor)
+        if not comps:
+            return None
+        if len(comps) == 1:                             # one component: Laplace's rule is monotone in the counts
+            c = comps[0][1]
+            return max(c, key=c.get) if c else None
+        scores = mixture_scores(comps, self.fac.vocab)
+        return max(scores, key=scores.get) if scores else None
+
     def predict(self, sensor="symbols"):
-        if self.fac is not None and self.l6.hyps:
-            if len(self.l6.hyps) == 1:                  # one hypothesis: Laplace's rule is monotone in the counts
-                c, _ = self._counts(next(iter(self.l6.hyps)), sensor)
-                scores = c
-            else:
-                scores = self._scores(sensor)
-            if scores:
-                return max(scores, key=scores.get)
-        return self.l23.predict(self.l6.place, sensor)
+        return self.predict_state(self.l6.place, self.l6.hyps, sensor)
 
     def bits(self, target, sensor, K):
         """The code length of target under this column's prediction (information.py), or None if it predicts
-        nothing: the union's posterior predictive where it has one, else Laplace's rule over the place's content (the
-        same order as `predict`)."""
-        if self.fac is not None and self.l6.hyps:
-            per = [(lw,) + self._counts(h, sensor) for h, lw in self.l6.hyps.items()]
-            if any(N for _, _, N in per):
-                parts = [laplace(c.get(target, 0), N, K) for _, c, N in per]
-                return bits(logsumexp(lw + t for (lw, _, _), (t, _) in zip(per, parts)),
-                            logsumexp(lw + r for (lw, _, _), (_, r) in zip(per, parts)))
-        c = self.l23.counts(self.l6.place, sensor)
-        if c:
-            return bits(*laplace(c.get(target, 0), sum(c.values()), K))
-        return None
+        nothing (the same order as `predict`)."""
+        comps = self.components(self.l6.place, self.l6.hyps, sensor)
+        return mixture_bits(comps, target, K) if comps else None
 
     def step(self, x, sensor, moves, stamp, content=True):
         """Sense x (unless it is an efference copy, which nothing here predicts) and, if it moves the place, move by
         it."""
         if content:
             self.l4.sense(x, self.predict(sensor))
-            if self.fac is not None and self.l6.hyps:
-                self._weigh(x, sensor)
-        if moves and not self.l6.lost():
-            self.l6.place = self.l5.move(self.l6.place, x)
-        if moves and self.fac is not None and self.l6.hyps:
-            self._move(x)
+        self.l6.place, self.l6.hyps, burst = self.advance(self.l6.place, self.l6.hyps, x, sensor, moves, content)
+        if burst is not None:
+            self.bursts += 1
+            self.burst_sizes.append(burst)
         self.stamp = stamp
 
     def route(self, goal=None):
@@ -196,3 +224,11 @@ class Column:
                 self.l5.build_words(orbit.modules)
         self.fac = frame.factored if coordinates else None
         self.l6.fac_start = self.fac.start if self.fac is not None else None
+        self._at = {}                                   # part 10: a place's name -> [((phase, coordinate), times)]
+        if self.fac is not None:
+            lived = {}
+            for place, sensor, x, n in frame.content:
+                lived[place] = lived.get(place, 0) + n
+            for place, ph in self.fac.phase.items():
+                if place in self.fac.coord:
+                    self._at.setdefault(name(place), []).append(((ph, self.fac.coord[place]), lived.get(place, 0) + 1))

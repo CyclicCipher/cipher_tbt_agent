@@ -50,12 +50,17 @@ class Bus:
         self.sent = {}                                  # id(column) -> the stamp last sent to it
         self.efference = set(config.efference)
 
-    def publish(self, sensor, x, learn=True):
+    OWN = object()                                      # publish's default: the cortex's location is a column's place
+
+    def publish(self, sensor, x, learn=True, where=OWN):
         """Stamp x and deliver it. Returns the stamp."""
         self.t += 1
         self.inputs.add(x)
         content = sensor not in self.efference
-        where = self.where(sensor) if self.locations else None
+        if not self.locations:
+            where = None
+        elif where is Bus.OWN:                          # part 10: the thalamus may give the brain's best estimate
+            where = self.where(sensor)
         self.hippocampus.step(x, sensor, sensor in self.moving, learn, content, where)
         for c, moves in self.routes[sensor]:
             if c.stamp != self.sent.get(id(c), 0):     # it missed a message, or applied one twice
