@@ -1335,3 +1335,96 @@ No chain was ever trained on.
    - **Why:** with probabilities, accuracy hides the difference between a confident right answer and a lucky one.
      Cross-entropy is the code length of the answers (prequential MDL), the currency NEURAL_COLUMN.md §4 needs for
      model comparison.
+   - **The form** (the user, 2026-10-29): that of Barron, Gnanapragasam & Tschannen 2026, "A fix for softmax and
+     cross-entropy" (arXiv 2610.31642).
+     - **The loss:** softplus(−m), with the margin m = log p(target) − log p(everything else).
+     - **The rest's mass** is computed directly (with Laplace's rule, exactly from integers), never as 1 − p(target).
+     - **Why:** a confident right answer's loss otherwise rounds to exactly 0. Checked: a rest of 10⁻²⁰ gives 1.44 ·
+       10⁻²⁰ bits, where the naive −log₂ p gives 0. `architecture/information.py`.
+2. **The prediction comes from the union first.**
+   - **The rule:** each hypothesis's likelihood is its cell's content, where the frame has a place with that phase and
+     coordinate (`Factored.cells`), and otherwise its phase's (naming, or counts). The column's place gives the
+     prediction only when the union is empty.
+   - **Why** (found on a smoke case outside the pre-registration, p = 7, seed 5, in the {+} world):
+     - since part 5, the rings of one group share one code, so the place "after the digit 6" and the place "after
+       a + b = 6" are one L2/3 place;
+     - its content mixes the contexts: "+" after a digit, "=" after a result, the answer after "=";
+     - in an A1 chain the place path is never lost, and it predicted that mix: chains at 0.000, though the union
+       tracked the right phases.
+   - **What it is:** the phase is the context, the code the shared part (NEURAL_COLUMN.md §2, point 1). A cell is
+     their conjunction.
+3. **Bursting is for a transition no hypothesis has.**
+   - **The rule:** a hypothesis whose phase has a transition by x, but no shift, is dropped without a burst. This is
+     the case of a phase left out of the coordinate, after "a ×".
+   - **Why:** x was expected there; only the coordinate is lost. Bursting would reinterpret × as + or −, and (with
+     amendment 2) override the place's right answer. When every hypothesis drops, the union is empty, and the place
+     answers as before.
+
+## Part 9 results (2026-10-29; `runs/a9.txt`, `runs/a9.json`)
+
+**Built:**
+- **`column.py`:** the union of hypotheses. Bayes' rule with Laplace's smoothing (`_weigh`); moving or bursting
+  (`_move`); the posterior predictive (`_scores`, `bits`); each hypothesis's cell first (amendment 2); bursting only
+  for an unknown transition (amendment 3).
+- **`l6.py`:** the union, with `fac` as its most probable hypothesis.
+- **`frameLearning`:** each phase's counts, each input's origins, each cell's content. Part 7's `_merge_phases` is
+  deleted.
+- **`information.py`:** the fixed cross-entropy.
+- **`Brain(union=)` and `Brain.bits`.**
+- **`tests/test_a9.py`.**
+
+**J1, J2, J4: accuracy** (every seed; the bits are the cross-entropy of the answers, amendment 1):
+
+| world | p | held-out singles | chains of 2, 3, 4 operations | bits per answer | control: chains |
+|---|---|---|---|---|---|
+| {+, −} | 13 | 1.000 | 1.000, 1.000, 1.000 | 1.06–1.09 | 0.000 |
+| {+, −} | 97 | 1.000 | 1.000, 1.000, 1.000 | 1.01–1.02 | 0.000 |
+| {+} | 13 | 1.000 | 1.000, 1.000, 1.000 | 1.53–1.59 | 0.000 |
+| {+} | 97 | 1.000 | 1.000, 1.000, 1.000 | 1.58–1.59 | 0.000 |
+
+The control's singles are 1.000 everywhere.
+
+**J3: the mechanism** (every seed, both worlds, every chain):
+- a chain of k operations bursts exactly k − 1 times, once at each operator after a result;
+- each burst leaves exactly one hypothesis;
+- single equations never burst.
+
+**J5: no regression.**
+- **Parts 3, 5 (F1–F3), 6 and 8:** reproduce exactly.
+- **Part 4:** the walk checks reproduce exactly, except A₅'s known part-5 difference (seeds 0 and 2). Both shortcut
+  tests reproduce exactly.
+- **Part 7's accuracies** (the {+, −} world's singles and chains, as built and for the control) reproduce exactly.
+  The merge they used is gone.
+
+**J6: cost** (training and sleep at p = 97): 9.7–10.4 s in the {+, −} world, 3.2–3.5 s in the {+} world.
+
+**Verdicts:** J1–J6 confirmed in every seed.
+
+**What this shows:**
+1. **One mechanism, no merge rule.**
+   - **The result:** the column holds its state as a posterior. When no hypothesis can make a move, it bursts to every
+     context the move is made from. Chains of any length are then answered in both worlds.
+   - **A1 included:** a digit is always followed by "+" there, and a result always by "=". The merge rule couldn't
+     treat the result as a value; bursting does, without deciding anything.
+   - **Part 7's question no longer arises:** the burst does what the merge did, and it doesn't need the contexts to
+     agree.
+2. **A cell is the minicolumn and its context.**
+   - **The bug amendment 2 fixed:** the rings of one group share one code (the minicolumn), so a code's content mixed
+     the contexts.
+   - **The fix:** each hypothesis reads the content of its own (phase, coordinate) cell. This is HTM's split of
+     shared minicolumns and context-specific cells, arrived at by fixing that bug.
+3. **The answers are right, but not confident.**
+   - **The cost:** each right answer costs about 1 bit with {+, −} and 1.6 bits with {+}: a probability of about 0.5
+     and 0.33.
+   - **Why:** Laplace's rule spreads mass over every input the brain knows (K ≈ p + 4, operators and "=" included). An
+     answer cell has seen its answer about K times ({+, −}) or K/2 times ({+}), so the bits are about
+     log₂((n + K)/(n + 1)), nearly the same at p = 13 and 97.
+   - **So:** the prior, not the evidence, sets the code length. Accuracy hid this; cross-entropy shows it.
+
+**Limits:**
+1. **The prior is too broad.** Laplace's add-one over every known input makes the brain underconfident. The prior
+   should be learned (how many inputs actually occur after a phase), a Bayesian question for later. With the fixed
+   cross-entropy, a confident brain's small code lengths will be measured, not rounded to zero.
+2. **Each burst leaves one hypothesis here.** No world yet needs a union of several hypotheses at once.
+3. **No unions over places:** the box still loses its column.
+4. **× is outside the union:** after "a ×" every hypothesis drops, and the place answers (amendment 3).

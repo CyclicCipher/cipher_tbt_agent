@@ -33,11 +33,9 @@ where the moves allow them.
     own shifts. A phase that fits no class is left out of the coordinate.
   - **The relation:** two classes are related by an automorphism x -> k x of the coordinate group, found from the
     inputs both have seen and applied to the rest. For "+" and "−", k = −1.
-- **Phases merge as places do (part 7: P3 lifted to phases).**
-  - **The rule:** two phases of one shift class that share an input are one phase, unless their fold disagrees (an
-    input leading them to phases that can't be one, or contents that can't be one).
-  - **Its effect:** the start and "after +" merge, so "after a digit" and "after a op b" do too. The phase automaton
-    loops, and a chain continues from a result as from a digit.
+- **Counts for the column's union (part 9).** Each phase keeps what came next at its places (the likelihoods), and
+  each input the phases it is made from (the prior a burst falls back to). Part 7's phase merge is gone: the column's
+  union of hypotheses does its job (`column.py`).
 - **One coordinate for every place, and phases (part 5).** Each moving input is one shift of a coordinate shared
   by every place, wherever it is made (P4's regularity across the frame); the start's coordinate is found. Naming (the
   determined symbol that comes next names the place's position) is tested per input and accepted only if consistent;
@@ -104,11 +102,11 @@ class Frame:
 
 
 def consolidate(transitions, contents, start, regularity=True, coordinates=None, factoring=True, end=None,
-                relate=True, merge=True):
+                relate=True):
     """A Frame from the hippocampus's replay: transitions [(place, input, next place, times seen)] and contents
     [(place, sensor, input, times seen)], of episodes that start at start. coordinates = (d, w, seed), or None;
     factoring: part 5's (phase, coordinate) factorization, where there are coordinates; end: the hippocampus's SDR for
-    an episode's end, as content; relate: part 6's relation between shift classes; merge: part 7's phase merge."""
+    an episode's end, as content; relate: part 6's relation between shift classes."""
     places = same_future(transitions, contents)
     pid, P, xid, X = {}, [], {}, []
 
@@ -150,7 +148,7 @@ def consolidate(transitions, contents, start, regularity=True, coordinates=None,
     coords, declined, systems = coordinate(move, maps, P, X, coordinates) if coordinates and U else ([], [], [])
     fac, why = None, None
     if factoring and systems and places.get(start, start) in pid:
-        fac, why = factor(move, cont, pid[places.get(start, start)], P, X, systems, xid.get(end, -1), relate, merge)
+        fac, why = factor(move, cont, pid[places.get(start, start)], P, X, systems, xid.get(end, -1), relate)
     return Frame(places.get(start, start), moves, content, places, inferred, disp, coords, declined, fac, why,
                  len(split))
 
@@ -804,6 +802,10 @@ class Factored:
     relation: dict = field(default_factory=dict)     # (class, class) -> k per module: x -> k x takes one to the other
     left_out: list = field(default_factory=list)     # the phases whose moves contradict every class
     related: list = field(default_factory=list)      # [(class, input)]: shifts given by a relation, never seen
+    counts: dict = field(default_factory=dict)       # part 9: (phase, sensor) -> {input: times it came next there}
+    origins: dict = field(default_factory=dict)      # part 9: input -> {phase: places of it the input was made from}
+    vocab: int = 0                                   # part 9: K, the number of inputs the frame knows
+    cells: dict = field(default_factory=dict)        # part 9: (phase, coordinate) -> {sensor: {input: n}}, a place's
 
 
 class _Forms:
@@ -991,9 +993,10 @@ def _choose(alg, D, cons, limit=2000000):
     return theta
 
 
-def factor(move, cont, start, P, X, systems, end=-1, relate=True, merge=True):
+def factor(move, cont, start, P, X, systems, end=-1, relate=True):
     """Part 5: one coordinate for every place, and phases. Part 6: where one shift per input contradicts the moves,
-    shift classes, and (relate) the relation between them. Part 7 (merge): phases merged as places are. end: the input
+    shift classes, and (relate) the relation between them. Part 9: each phase's counts and each input's origins, for the
+    column's union of hypotheses. end: the input
     id of an episode's end, if any. Returns a Factored, or None (with why) if the frame can't be factored."""
     if not systems:
         return None, "no coordinates"
@@ -1035,8 +1038,6 @@ def factor(move, cont, start, P, X, systems, end=-1, relate=True, merge=True):
     Cv, Dv = sol
     relation, related = _relate(Dv, nX, modules.periods) if relate else ({}, [])
     kind = lambda us, s: _kind(us, s, det, cont, accepted, own, Cv)
-    if merge:
-        phase, cls = _merge_phases(phase, E, cls, Dv, nX, kind, lambda u: det.get(u, {}))
     rep = {}
     for u in range(len(P)):
         rep.setdefault(phase[u], u)
@@ -1071,10 +1072,24 @@ def factor(move, cont, start, P, X, systems, end=-1, relate=True, merge=True):
     nonzero = {k % nX for k, v in Dv.items() if v != zero}
     identities = [X[x] for x in dict.fromkeys(k % nX for k in Dv) if x not in nonzero]
     left = sorted({rep[phase[u]] for u, _, _ in E if phase[u] not in cls})
+    counts, origins = defaultdict(Counter), defaultdict(Counter)
+    for u in range(len(P)):                             # what came next at each phase's places: the likelihoods
+        for s, c in cont[u].items():
+            for x, n in c.items():
+                counts[(ph_sdr[u], s)][X[x]] += n
+    for u, x, v in E:                                   # the phases each input is made from: a burst's prior
+        origins[X[x]][ph_sdr[u]] += 1
+    cells = defaultdict(lambda: defaultdict(Counter))   # a coordinated place's content, by its (phase, coordinate)
+    for u, v in Cv.items():
+        for s, c in cont[u].items():
+            for x, n in c.items():
+                cells[(ph_sdr[u], code(v))][s][X[x]] += n
     return Factored(modules, {P[u]: ph_sdr[u] for u in range(len(P))}, (ph_sdr[start], code(Cv[start])), trans,
                     shifts, coord, content, named, [X[y] for y in accepted], identities, len(set(phase)),
                     {P[rep[ph]]: k for ph, k in cls.items()}, relation, [P[u] for u in left],
-                    [(k // nX, X[k % nX]) for k in related]), None
+                    [(k // nX, X[k % nX]) for k in related],
+                    {k: dict(c) for k, c in counts.items()}, {k: dict(c) for k, c in origins.items()}, len(X),
+                    {k: {s: dict(c) for s, c in v.items()} for k, v in cells.items()}), None
 
 
 def _kind(us, s, det, cont, accepted, own, Cv):
@@ -1089,79 +1104,6 @@ def _kind(us, s, det, cont, accepted, own, Cv):
     if accepted and all(sym in own and own[sym] in Cv and u in Cv and Cv[own[sym]] == Cv[u] for u, sym in syms):
         return ("named", None)
     return None
-
-
-def _merge_phases(phase, E, cls, D, nX, kind, sensed):
-    """Phases merge as places do (part 7: P3 lifted to phases). Two phases are one if they share an input whose shift
-    is the same from both (the evidence: they are in one shift class), and their fold never disagrees:
-    - they are in the same class (so every input they share shifts alike);
-    - every input both make moves by leads them to phases that are again one;
-    - for each sensor, where both predicted something, the merged phase still does (one symbol, or naming).
-    kind(places, sensor): what places predict (`_kind`); sensed(place): the sensors with a determined content there.
-    Returns (each place's phase, each phase's class)."""
-    members, tr = defaultdict(list), defaultdict(dict)  # phase -> its places; phase -> input -> the phases it leads to
-    for u, ph in enumerate(phase):
-        members[ph].append(u)
-    for u, x, v in E:
-        tr[phase[u]].setdefault(x, set()).add(phase[v])
-    parent = {ph: ph for ph in members}
-
-    def find(ph):
-        while parent[ph] != ph:
-            ph = parent[ph]
-        return ph
-
-    def fold(a, b):
-        over, otr, omem = {}, {}, {}
-
-        def f(ph):
-            ph = find(ph)
-            while ph in over:
-                ph = over[ph]
-            return ph
-
-        q = [(a, b)]
-        while q:
-            p, r = q.pop()
-            p, r = f(p), f(r)
-            if p == r:
-                continue
-            if cls.get(p) != cls.get(r):
-                return None
-            tp, tq = otr.get(p, tr[p]), otr.get(r, tr[r])
-            for x in tp.keys() & tq.keys():
-                a_, b_ = {f(t) for t in tp[x]}, {f(t) for t in tq[x]}
-                if len(a_) != 1 or len(b_) != 1:
-                    return None
-                q.append((a_.pop(), b_.pop()))
-            mp, mq = omem.get(p, members[p]), omem.get(r, members[r])
-            for s in {s for u in mp for s in sensed(u)} & {s for u in mq for s in sensed(u)}:
-                if kind(mp, s) is not None and kind(mq, s) is not None and kind(mp + mq, s) is None:
-                    return None
-            otr[p] = {x: tp.get(x, set()) | tq.get(x, set()) for x in tp.keys() | tq.keys()}
-            omem[p] = mp + mq
-            over[r] = p
-        return over, otr, omem
-
-    seeds = defaultdict(list)                           # (class, input) -> the phases that shift by it
-    for ph in sorted(members):
-        if ph in cls:
-            for x in sorted(tr[ph]):
-                if cls[ph] * nX + x in D:
-                    seeds[(cls[ph], x)].append(ph)
-    for key in sorted(seeds):
-        a = seeds[key][0]
-        for b in seeds[key][1:]:
-            if find(a) == find(b):
-                continue
-            done = fold(a, b)
-            if done is not None:
-                over, otr, omem = done
-                for r, p in over.items():
-                    parent[r] = p
-                for p in otr:
-                    tr[p], members[p] = otr[p], omem[p]
-    return [find(ph) for ph in phase], {find(ph): k for ph, k in cls.items()}
 
 
 def _classes(alg, E, phase, C0, nX):

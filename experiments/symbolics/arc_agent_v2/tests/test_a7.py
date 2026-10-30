@@ -30,9 +30,10 @@ SEEDS = (0, 1, 2)
 LENGTHS = (2, 3, 4)
 
 
-def trained(p, seed, phase_merge=True):
-    world = ArithmeticWorld(p=p, ops=("+", "-"), train_frac=0.5, seed=seed)
-    brain = Brain(BrainConfig(ARITHMETIC.sdr, ARITHMETIC.sensors, ARITHMETIC.regions, seed), phase_merge=phase_merge)
+def trained(p, seed, union=True, ops=("+", "-")):
+    """Since part 9 the arms are the union column and its control (part 7's phase merge was replaced by the union)."""
+    world = ArithmeticWorld(p=p, ops=ops, train_frac=0.5, seed=seed)
+    brain = Brain(BrainConfig(ARITHMETIC.sdr, ARITHMETIC.sensors, ARITHMETIC.regions, seed), union=union)
     t = time.time()
     for ep in world.epoch(np.random.default_rng(seed)):
         brain.episode(ep)
@@ -166,12 +167,13 @@ def main(argv):
 
 
 def test_a7_small():
-    """A fast check on p = 13: chains are answered zero-shot, and not without the phase merge."""
+    """A fast check on p = 13: chains are answered zero-shot, and not by the control. Since part 9 the arms are the
+    union column and its control; part 7's merge assertions went with the merge."""
     r = chains(13, 0)
     assert r["merge_single+"] == 1.0 and r["merge_single-"] == 1.0
     assert min(r["merge_chain%d" % n] for n in LENGTHS) >= 0.99
     assert max(r["off_chain%d" % n] for n in LENGTHS) <= 0.05
-    assert r["start_with_plus"] and r["digit_with_result"] and r["minus_apart"] and r["wrong"] == 0
+    assert r["wrong"] == 0
 
 
 if __name__ == "__main__":

@@ -37,6 +37,7 @@ class Bus:
     def __init__(self, config, regions, hippocampus, locations=True):
         self.t, self.faults = 0, 0
         self.locations = locations                      # part 8: give the hippocampus the cortex's location
+        self.inputs = set()                             # part 9: every distinct input received (K, for Laplace)
         self.hippocampus = hippocampus
         self.routes = {s: [] for s in config.sensors}   # sensor -> [(column, moves)]
         self.moving = set()                             # sensors that move some column (and so the hippocampus)
@@ -52,6 +53,7 @@ class Bus:
     def publish(self, sensor, x, learn=True):
         """Stamp x and deliver it. Returns the stamp."""
         self.t += 1
+        self.inputs.add(x)
         content = sensor not in self.efference
         where = self.where(sensor) if self.locations else None
         self.hippocampus.step(x, sensor, sensor in self.moving, learn, content, where)

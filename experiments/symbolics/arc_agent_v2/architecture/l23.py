@@ -17,8 +17,12 @@ class L23:
     def learn(self, place, sensor, x, count=1):
         self.content.store(place, (sensor, x), count)
 
-    def predict(self, place, sensor="symbols"):
+    def counts(self, place, sensor="symbols"):
+        """What came next at this place from this sensor: {input: times}."""
         if place is None:
-            return None
-        came = {x: n for (s, x), n in self.content.recall(place).items() if s == sensor}
+            return {}
+        return {x: n for (s, x), n in self.content.recall(place).items() if s == sensor}
+
+    def predict(self, place, sensor="symbols"):
+        came = self.counts(place, sensor)
         return max(came, key=came.get) if came else None
