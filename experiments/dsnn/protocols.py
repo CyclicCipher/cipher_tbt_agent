@@ -76,29 +76,39 @@ def n6(c=10, s=10, delta=50.0, cond=1, test=1):
     return st
 
 
-def network(depth=2, rate1=20.0, rate2=0.0, top=0.0, contacts=14, ff=16, fb=12, seed=0, T=300.0):
-    """2 cells per layer.
-    - **Two input fibres:** fibre i reaches every layer-1 cell at branch b(i+1).d, `contacts` contacts per spike.
-    - **Feedforward:** cell i of layer l reaches cell j of layer l + 1 at b(i+1).d.
-    - **Feedback:** cell j of layer l + 1 reaches cell i of layer l at t(j+1).d.
-    - **Top-down:** a fibre into the top layer's tufts.
+def branch(prefix):
+    """A branch's three segments, e.g. branch("b1") -> [b1.p, b1.m, b1.d]."""
+    return [INDEX["%s.%s" % (prefix, s)] for s in "pmd"]
+
+
+def network(depth=2, rate1=20.0, rate2=0.0, top=0.0, contacts=44, ff=24, fb=12, seed=0, T=300.0):
+    """2 cells per layer; every connection spreads its contacts evenly over one branch's three segments (a volley on
+    one segment saturates it and never fires the soma: 36 contacts over a branch do).
+    - **Two input fibres:** fibre f hits layer 1's cell f with `contacts` on branch b(f+1), and the other layer-1 cell
+      with half as many on the same branch.
+    - **Feedforward:** cell i of layer l reaches each cell of layer l + 1 on branch b(i+1), `ff` contacts.
+    - **Feedback:** cell j of layer l + 1 reaches each cell of layer l on tuft branch t(j+1), `fb` contacts.
+    - **Top-down:** a fibre into the top layer's tufts, `contacts` per spike over both tuft branches.
     Delays 1.5 ms. Cell index = 2 * layer + column."""
     wiring = Wiring(2 * depth)
     for l in range(depth - 1):
         for i in range(2):
             for j in range(2):
-                wiring.edges.append((2 * l + i, 2 * (l + 1) + j, INDEX["b%d.d" % (i + 1)], ff, 1.5))
-                wiring.edges.append((2 * (l + 1) + j, 2 * l + i, INDEX["t%d.d" % (j + 1)], fb, 1.5))
+                for c in branch("b%d" % (i + 1)):
+                    wiring.edges.append((2 * l + i, 2 * (l + 1) + j, c, ff / 3, 1.5))
+                for c in branch("t%d" % (j + 1)):
+                    wiring.edges.append((2 * (l + 1) + j, 2 * l + i, c, fb / 3, 1.5))
     st = Stim()
     rng = np.random.default_rng((seed, 77))
     for f, rate in enumerate((rate1, rate2)):
         for t in _poisson_times(rng, rate, T):
             for col in range(2):
-                st.contacts(t, INDEX["b%d.d" % (f + 1)], contacts, neuron=col)
+                for c in branch("b%d" % (f + 1)):
+                    st.contacts(t, c, contacts / 3 * (1.0 if col == f else 0.5), neuron=col)
     for t in _poisson_times(rng, top, T):
         for col in range(2):
-            for name in ("t1.m", "t2.m"):
-                st.contacts(t, INDEX[name], contacts / 2, neuron=2 * (depth - 1) + col)
+            for c in TUFT:
+                st.contacts(t, c, contacts / len(TUFT), neuron=2 * (depth - 1) + col)
     return st, wiring
 
 
@@ -278,24 +288,21 @@ def scenarios(cal):
                    ("conditioning alone", dict(c=c6, s=s6, delta=50, cond=1, test=0)),
                    ("both, Δ = 50 ms", dict(c=c6, s=s6, delta=50, cond=1, test=1)),
                    ("both, Δ = 300 ms", dict(c=c6, s=s6, delta=300, cond=1, test=1))]),
-        dict(key="net2", title="Network 2 × 2", T=300.0, traces=tr("soma", "zone"), network=2,
-             question="Two input fibres feed layer 1; layer 1 feeds layer 2's basal branches, and layer 2 feeds back "
-                      "to layer 1's tufts. Change one input at a time and follow the activity.",
+    ] + [
+        dict(key="net%d" % depth, title="Network 2 × %d" % depth, T=300.0, traces=tr("soma", "zone"), network=depth,
+             question=("Fibre 1 drives cell L1a strongly and L1b weakly; fibre 2 the reverse. Each layer feeds the next "
+                       "layer's basal branches, and feeds back to the layer below's tufts. One fibre alone, or both: "
+                       "which cells fire, and does the activity climb the layers?"
+                       if depth == 2 else
+                       "The same, three layers deep: the middle layer gets feedforward input on its basal branches and "
+                       "feedback on its tufts. Follow a volley up, and the feedback down."),
              controls=[rng("rate1", "fibre 1 rate (Hz)", 0, 100, 5, 20), rng("rate2", "fibre 2 rate (Hz)", 0, 100, 5, 0),
-                       rng("top", "top-down rate (Hz)", 0, 100, 5, 0), rng("contacts", "fibre contacts", 0, 40, 1, 14),
-                       rng("ff", "feedforward contacts", 0, 40, 1, 16), rng("fb", "feedback contacts", 0, 40, 1, 12),
+                       rng("top", "top-down rate (Hz)", 0, 100, 5, 0), rng("contacts", "fibre contacts", 0, 80, 1, 44),
+                       rng("ff", "feedforward contacts", 0, 60, 1, 24), rng("fb", "feedback contacts", 0, 60, 1, 12),
                        rng("seed", "seed", 0, 9, 1, 0)],
              runs=[("fibre 1", dict(rate1=20, rate2=0)), ("fibre 2", dict(rate1=0, rate2=20)),
-                   ("both", dict(rate1=20, rate2=20)), ("both + top-down", dict(rate1=20, rate2=20, top=20))]),
-        dict(key="net3", title="Network 2 × 3", T=300.0, traces=tr("soma", "zone"), network=3,
-             question="The same, three layers deep: the middle layer receives feedforward input on its basal "
-                      "branches and feedback on its tufts.",
-             controls=[rng("rate1", "fibre 1 rate (Hz)", 0, 100, 5, 20), rng("rate2", "fibre 2 rate (Hz)", 0, 100, 5, 0),
-                       rng("top", "top-down rate (Hz)", 0, 100, 5, 0), rng("contacts", "fibre contacts", 0, 40, 1, 14),
-                       rng("ff", "feedforward contacts", 0, 40, 1, 16), rng("fb", "feedback contacts", 0, 40, 1, 12),
-                       rng("seed", "seed", 0, 9, 1, 0)],
-             runs=[("fibre 1", dict(rate1=20, rate2=0)), ("fibre 2", dict(rate1=0, rate2=20)),
-                   ("both", dict(rate1=20, rate2=20)), ("both + top-down", dict(rate1=20, rate2=20, top=20))]),
+                   ("both", dict(rate1=20, rate2=20)), ("both + top-down", dict(rate1=20, rate2=20, top=20))])
+        for depth in (2, 3)
     ]
 
 

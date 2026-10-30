@@ -137,6 +137,57 @@ Also compartment updates per second.
    - w's threshold-level step is that same smallest step, with spiking off;
    - N5's rate searches use seed 0.
 
+### Run 1 (2026-10-30, at commit 265ec00; `runs/e0_dt0.05.json`): void, because the dCaAP check failed
+
+**What the rules set:**
+- **dCaAP:** the zone's threshold current is 270 pA, and w = 320 pA.
+- **N2:** the pulse is 1950 pA, and n = 30 tuft contacts.
+- **N3:** n = 17.
+- **N6:** c = 9, and s = 40, which is the rule's cap.
+
+The input resistance is 70.1 MΩ. The pre-registration's 80 MΩ was the lumped soma alone; the dendrites lower it.
+
+**The check on the apparatus failed:**
+- **The numbers:** for steps of 1, 1.5 and 2 times the threshold current, the measured K is 0.998, 0.932 and 0.780.
+  Gidon's curve gives 1.0, 0.189 and 0.036.
+- **Why:** the zone is a small compartment coupled to a large load, the trunk and the soma. Most of a step's excess
+  current charges those neighbours, so C·dV/dt at the crossing is a small part of I − I_th. My measure of the input's
+  strength does not implement Gidon's curve.
+- **So:** by the pre-registration, no verdict of this run counts.
+
+**What the run shows anyway** (a diagnosis, not verdicts):
+
+| # | outcome | what it shows |
+|---|---|---|
+| N1 | the same-branch ratio peaks at 1.17 (k = 6), then falls to 0.65 at k = 20; the other-branch ratio stays between 0.89 and 1.10 | the NMDA nonlinearity is there in the branch, but at the soma, saturation swamps it. A thin segment near 0 mV stops passing current |
+| N2 | pulse alone 1 spike, tuft alone 0. Together: 3 spikes at Δt = −10, **26 at −5**, then 2, 1, 1, 1, 1 at Δt = 0 to 20 | as predicted, a dCaAP that the bAP triggers has a small K (0.32 at Δt = 2, 0 at 5). And a pathology: the soma has no refractory period, so after the 1 ms hold the depolarized dendrite fires it again at once, a spike every 1.1 ms |
+| N3 | spikes: neither 0, A 10, B 10, A+B 2. K: A 0.79, A+B 0.08 | the XOR mechanism works in the dendrite, where K falls tenfold. But A+B's direct input fires 2 spikes, and A alone fires 10 spikes about 1 ms apart (the same pathology) |
+| N4 | inward/outward between 1.01 and 1.11 | order matters in the right direction, but too weakly with 3 segments per branch |
+| N5 | passes as written. Doubling basal input adds 5.0 events/s, doubling apical adds 1.5. The burst fraction changes by +0.044 with basal and −0.113 with apical | not the phenomenon: the burst fraction **falls** with apical input. My criterion took absolute values, which was a mistake. Also, r′ hit the grid's floor (0.5 Hz), and with about 10 events per run, the fraction is noise |
+| N6 | no spikes anywhere; the test rule hit its cap of 40 | a volley on one distal segment can't fire the soma at any size. It saturates: none up to 240 contacts, measured afterwards. The same volley spread over a branch's 3 segments fires it at 36 |
+| cost | 1.46 s per simulated second for one cell; 2.27 for 12 as a batch (0.19 each); 1.61 for the 2 × 3 network | the prediction (under 5 s) holds |
+
+**The step-size check:** not run, since the run is void.
+
+**After the run, outside E0's scoring:** for the viz, the networks' connections were changed (`protocols.network`).
+Each connection now spreads its contacts over one branch's three segments, and the two input fibres are asymmetric. The
+cost figure for the network above used the old wiring.
+
+**Proposed for run 2** (for the user to approve; nothing is changed yet):
+2. **The dCaAP's input strength:** read Gidon's stimulus current directly. That is the injected and synaptic current
+   into the apical subtree (the zone and the tuft) at the crossing, against I_th, instead of C·dV/dt.
+   - **For current steps:** it reproduces Gidon's curve exactly, so the shape check becomes a check of the code.
+   - **The consequence:** a bAP arriving from the trunk no longer counts as input. That changes N2's prediction:
+     coincidence bursts become possible.
+3. **A refractory period:** after the 1 ms hold, the soma is held at V_r for 2 ms. Without it, the cell fires at about
+   900 Hz.
+4. **N5's criterion gets a sign,** and more data:
+   - doubling apical input must *raise* the burst fraction at least twice as much as doubling basal input does;
+   - runs of 10 s, so each fraction rests on about 50 events.
+5. **N6's test becomes a 2 ms somatic current pulse:** the largest, in 50 pA steps, that alone gives no spike. A
+   volley on b2.d can't fire the soma at any size.
+6. **N1 stays as it is:** its failure is the model's, not the protocol's.
+
 ### The instrument: `viz/` (not an experiment)
 
 A local web page served by `viz/server.py`. Every simulation runs in the same `sim.py`, so there is one model and no
@@ -148,3 +199,10 @@ second implementation.
 - **Adding a run:** change one input or cell parameter, then add the run as a new row, so the effect of one change
   shows against the others.
 - **Time:** a scrubber and play button animate the morphology through the selected run.
+
+**To open it:** in the desktop app, start the launch configuration `dsnn-neuron-lab`. Or run
+`../venv312/Scripts/python.exe -m dsnn.viz.server` from `experiments/` and open http://localhost:8770.
+- **First start:** it calibrates the cell by its rules, about 10 s, and caches the result in `runs/`.
+- **Keys:** space plays and pauses; ← and → step 0.5 ms; hovering a trace scrubs the time.
+- **To add a variant:** select a run, change one setting, and press "Add run". The new row is labelled with its source
+  run and the change.

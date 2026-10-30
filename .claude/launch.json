@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "dsnn-neuron-lab",
+      "runtimeExecutable": "C:/Users/julia/GitHub/predictive-coding-agent/venv312/Scripts/python.exe",
+      "runtimeArgs": ["C:/Users/julia/GitHub/predictive-coding-agent/experiments/dsnn/viz/server.py", "--port", "8770"],
+      "port": 8770
+    },
+    {
       "name": "trace-viewer",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8765", "--directory", "experiments/symbolic_ai_v2/ctkg/logic"],
