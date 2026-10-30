@@ -1788,3 +1788,23 @@ results stay identical.
    only the new phase's moves.
 3. **The thalamus's day 2:** about 4.5 s for 300 expressions at p = 97, with up to 64 thoughts per input while
    learning.
+
+### The performance step, second round (2026-10-29; the user: "do the first two, then A3")
+
+1. **Factoring's class trials: done.**
+   - **The change:** the solve's propagation is a resumable object (`_Prop`). A trial copies the state kept so far,
+     adds only the new phase's moves, and continues. The elimination (`_eliminate`) is shared with `_solve`.
+   - **Why the result can't change:** whether the constraints can hold doesn't depend on the order of propagation.
+     `_solve` runs the same propagation once, as before.
+   - **Measured** (A2, p = 97): factoring went from 1.92 to 0.93 s, the class trials from 1.27 to 0.33 s, and sleep
+     to 6.7 s.
+   - **The fingerprints:** identical, in all 14 worlds.
+2. **P4's `Pool.add`: tried, refuted, reverted.**
+   - **The attempt:** the same rules on Python dicts instead of numpy rows. The fingerprints were identical, but P4
+     went from 4.3 to 5.0 s.
+   - **Why it lost:** a fill's batch is not a few dozen instances but about 140. Each new move pairs with every move
+     already known at its place, about 97 at p = 97. There, numpy's per-element cost wins.
+   - **What it shows:** P4's cost is in the algorithm, not in overhead. Every pair of inputs at a place is an instance,
+     about 4 million at p = 97, quadratic in the inputs per place.
+   - **What would help:** not instantiating every pair, for example inferring moves from the coordinates once they
+     exist. That changes what P4 computes, so it is a design step, to be pre-registered, not a speedup.

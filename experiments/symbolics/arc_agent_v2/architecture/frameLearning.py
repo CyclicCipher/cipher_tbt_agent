@@ -849,87 +849,142 @@ class _Forms:
         return self.add((f[0], k), (tuple(h * x for x in g[0]), {p: h * v for p, v in g[1].items()}))
 
 
-def _solve(alg, E, N, C0, inputs, check=False):
-    """One coordinate per place and one shift per input with c(v) = c(u) + d(x) for every move (u, x, v) in E, and
-    c(v) = c(w) for every naming pair (v, w) in N. C0: the coordinates known (an orbit's places, as forms). Where the
-    data leave something free, the solution with the most identity shifts (MDL). Returns (C, D) as vectors, or None if
-    the moves contradict each other; with check, only whether they do (True or None).
-    **Propagation:** a move is looked at again whenever one of its three unknowns becomes known, so each move costs a
-    few form additions however many there are."""
-    C, D, cons = dict(C0), {}, []
-    nparam = max([p for f in C0.values() for p in f[1]], default=-1) + 1
-    at, of = defaultdict(list), defaultdict(list)       # place -> its moves (i) and naming pairs (~j); input -> its moves
-    for i, (u, x, v) in enumerate(E):
-        at[u].append(i)
-        at[v].append(i)
-        of[x].append(i)
-    for j, (v, w) in enumerate(N):
-        at[v].append(~j)
-        at[w].append(~j)
-    done, ndone = bytearray(len(E)), bytearray(len(N))  # a move (a pair) whose constraint is recorded
-    queue = deque(list(range(len(E))) + [~j for j in range(len(N))])
-    rank = {x: i for i, x in enumerate(inputs)}
+class _Prop:
+    """The solve's propagation, resumable (the performance step): moves can be added after a fixpoint is reached, and
+    the propagation continues from it. A move is looked at again whenever one of its three unknowns becomes known, so
+    each move costs a few form additions however many there are.
+    - `_solve` runs it once.
+    - `_classes` copies the state kept so far for each trial, and adds only the new phase's moves.
+    Whether the constraints can all hold doesn't depend on the order of propagation."""
 
-    def settle(f):
-        if not alg.zero(f):
-            cons.append(f)
+    def __init__(self, alg, C0):
+        self.alg, self.C, self.D, self.cons = alg, dict(C0), {}, []
+        self.nparam = max([p for f in C0.values() for p in f[1]], default=-1) + 1
+        self.E, self.N = [], []
+        self.at, self.of = defaultdict(list), defaultdict(list)   # place -> moves (i), pairs (~j); input -> moves
+        self.done, self.ndone = bytearray(), bytearray()           # a move (a pair) whose constraint is recorded
+        self.queue = deque()
 
-    while True:
-        while queue:
-            i = queue.popleft()
-            if i >= 0:
-                u, x, v = E[i]
-                cu, dx, cv = C.get(u), D.get(x), C.get(v)
-                if cu is not None and dx is not None:
-                    f = alg.add(cu, dx)
-                    if cv is None:
-                        C[v] = f
+    def copy(self):
+        t = _Prop.__new__(_Prop)
+        t.alg, t.C, t.D, t.cons, t.nparam = self.alg, dict(self.C), dict(self.D), list(self.cons), self.nparam
+        t.E, t.N = list(self.E), list(self.N)
+        t.at = defaultdict(list, {k: list(v) for k, v in self.at.items()})
+        t.of = defaultdict(list, {k: list(v) for k, v in self.of.items()})
+        t.done, t.ndone, t.queue = bytearray(self.done), bytearray(self.ndone), deque(self.queue)
+        return t
+
+    def add(self, E=(), N=()):
+        for m in E:
+            i = len(self.E)
+            self.E.append(m)
+            u, x, v = m
+            self.at[u].append(i)
+            self.at[v].append(i)
+            self.of[x].append(i)
+            self.done.append(0)
+            self.queue.append(i)
+        for pr in N:
+            j = len(self.N)
+            self.N.append(pr)
+            self.at[pr[0]].append(~j)
+            self.at[pr[1]].append(~j)
+            self.ndone.append(0)
+            self.queue.append(~j)
+
+    def run(self, rank):
+        """Propagate to a fixpoint, with a free shift (a parameter) whenever stuck; rank orders ties."""
+        alg, C, D, cons, E, N = self.alg, self.C, self.D, self.cons, self.E, self.N
+        at, of, done, ndone, queue = self.at, self.of, self.done, self.ndone, self.queue
+
+        def settle(f):
+            if not alg.zero(f):
+                cons.append(f)
+
+        while True:
+            while queue:
+                i = queue.popleft()
+                if i >= 0:
+                    u, x, v = E[i]
+                    cu, dx, cv = C.get(u), D.get(x), C.get(v)
+                    if cu is not None and dx is not None:
+                        f = alg.add(cu, dx)
+                        if cv is None:
+                            C[v] = f
+                            queue.extend(at[v])
+                        elif not done[i]:
+                            done[i] = 1
+                            settle(alg.add(cv, f, -1))
+                    elif cu is not None and cv is not None:
+                        D[x] = alg.add(cv, cu, -1)
+                        queue.extend(of[x])
+                    elif dx is not None and cv is not None:
+                        C[u] = alg.add(cv, dx, -1)
+                        queue.extend(at[u])
+                else:
+                    v, w = N[~i]
+                    cv, cw = C.get(v), C.get(w)
+                    if cv is not None and cw is None:
+                        C[w] = cv
+                        queue.extend(at[w])
+                    elif cw is not None and cv is None:
+                        C[v] = cw
                         queue.extend(at[v])
-                    elif not done[i]:
-                        done[i] = 1
-                        settle(alg.add(cv, f, -1))
-                elif cu is not None and cv is not None:
-                    D[x] = alg.add(cv, cu, -1)
-                    queue.extend(of[x])
-                elif dx is not None and cv is not None:
-                    C[u] = alg.add(cv, dx, -1)
-                    queue.extend(at[u])
-            else:
-                v, w = N[~i]
-                cv, cw = C.get(v), C.get(w)
-                if cv is not None and cw is None:
-                    C[w] = cv
-                    queue.extend(at[w])
-                elif cw is not None and cv is None:
-                    C[v] = cw
-                    queue.extend(at[v])
-                elif cv is not None and not ndone[~i]:
-                    ndone[~i] = 1
-                    settle(alg.add(cv, cw, -1))
-        count = Counter(x for u, x, v in E if x not in D and (u in C or v in C))
-        if not count:
-            break
-        x = max(count, key=lambda x: (count[x], -rank[x]))   # a free shift
-        D[x] = alg.param(nparam)
-        nparam += 1
-        queue.extend(of[x])
-    for f in cons:                                      # any contradiction among the moves
-        if not f[1] and any(f[0]):
-            return None
-    while True:                                         # eliminate parameters with a +-1 coefficient
+                    elif cv is not None and not ndone[~i]:
+                        ndone[~i] = 1
+                        settle(alg.add(cv, cw, -1))
+            count = Counter(x for u, x, v in E if x not in D and (u in C or v in C))
+            if not count:
+                return
+            x = max(count, key=lambda x: (count[x], -rank[x]))   # a free shift
+            D[x] = alg.param(self.nparam)
+            self.nparam += 1
+            queue.extend(of[x])
+
+    def consistent(self):
+        """Whether the constraints so far can all hold: the same test as `_solve(check=True)`, on the constraints."""
+        alg, cons = self.alg, list(self.cons)
+        if any(not f[1] and any(f[0]) for f in cons):
+            return False
+        cons = _eliminate(alg, cons, [], [])
+        return cons is not None and _choose(alg, {}, cons) is not None
+
+
+def _eliminate(alg, cons, Cs, Ds):
+    """Eliminate the parameters with a +-1 coefficient, substituting in the constraints and in each dict of forms of Cs
+    and Ds (in place). Returns the remaining constraints, or None on a contradiction."""
+    while True:
         pick = next(((f, i) for f in cons for i, k in f[1].items()
                      if all(k % n == 1 for n in alg.per) or all(k % n == n - 1 for n in alg.per)), None)
         if pick is None:
-            break
+            return cons
         f, i = pick
         s = 1 if all(f[1][i] % n == 1 for n in alg.per) else -1
         rest = (f[0], {p: v for p, v in f[1].items() if p != i})
         g = (tuple(-s * x for x in rest[0]), {p: -s * v for p, v in rest[1].items()})
-        C = {u: alg.subst(h, i, g) for u, h in C.items()}
-        D = {x: alg.subst(h, i, g) for x, h in D.items()}
+        for forms in list(Cs) + list(Ds):
+            for key in list(forms):
+                forms[key] = alg.subst(forms[key], i, g)
         cons = [h for h in (alg.subst(h, i, g) for h in cons) if not alg.zero(h)]
         if any(not h[1] and any(h[0]) for h in cons):
             return None
+
+
+def _solve(alg, E, N, C0, inputs, check=False):
+    """One coordinate per place and one shift per input with c(v) = c(u) + d(x) for every move (u, x, v) in E, and
+    c(v) = c(w) for every naming pair (v, w) in N. C0: the coordinates known (an orbit's places, as forms). Where the
+    data leave something free, the solution with the most identity shifts (MDL). Returns (C, D) as vectors, or None if
+    the moves contradict each other; with check, only whether they do (True or None). The propagation is `_Prop`."""
+    pr = _Prop(alg, C0)
+    pr.add(E, N)
+    pr.run({x: i for i, x in enumerate(inputs)})
+    C, D, cons = pr.C, pr.D, pr.cons
+    for f in cons:                                      # any contradiction among the moves
+        if not f[1] and any(f[0]):
+            return None
+    cons = _eliminate(alg, cons, [C], [D])
+    if cons is None:
+        return None
     theta = _choose(alg, {} if check else D, cons)
     if theta is None:
         return None
@@ -1122,12 +1177,16 @@ def _classes(alg, E, phase, C0, nX):
     moves = defaultdict(list)
     for m in E:
         moves[phase[m[0]]].append(m)
-    cls, kept, n = {}, [], 0
+    cls, kept, keys, n = {}, _Prop(alg, C0), set(), 0
     for ph in sorted(moves, key=lambda ph: (-len(moves[ph]), ph)):
         for k in range(n + 1):
-            trial = kept + [(u, k * nX + x, v) for u, x, v in moves[ph]]
-            if _solve(alg, trial, [], C0, sorted({x for _, x, _ in trial}), check=True):
-                cls[ph], kept, n = k, trial, max(n, k + 1)
+            new = [(u, k * nX + x, v) for u, x, v in moves[ph]]
+            trial = kept.copy()                         # the kept moves are solved already: add only this phase's
+            trial.add(new)
+            ks = keys | {x for _, x, _ in new}
+            trial.run({x: i for i, x in enumerate(sorted(ks))})
+            if trial.consistent():
+                cls[ph], kept, keys, n = k, trial, ks, max(n, k + 1)
                 break
     return cls
 
