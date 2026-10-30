@@ -122,6 +122,21 @@ Also compartment updates per second.
 - **N5 fails:** events and bursts aren't separate channels in this cell, so the burst-dependent rule (DESIGN.md §5,
   candidate 1) has no signal to use.
 
+### Amendments (before the run)
+
+1. **The dCaAP's I_th is a constant of the cell** (2026-10-30, during calibration, before any protocol was scored).
+   - **The problem:** as pre-registered, I_th was the zone's instantaneous outward current at θ. That current goes
+     negative whenever a neighbour is above θ, as the trunk is during a bAP (it reaches +19 mV), and K is then
+     undefined. The first calibration hit this as an overflow.
+   - **The new definition:** I_th is the zone's threshold current for a long step: the smallest 100 ms step, in 5 pA
+     steps, that takes the zone to θ, with no dCaAP and spiking off.
+   - **Why it's closer to Gidon's form:** the threshold current there is a fixed property of the cell, and the
+     stimulus is measured against it. The drive at the crossing is still C·dV/dt.
+2. **Details the pre-registration left open,** decided before the run:
+   - every rule's search runs on the default cell;
+   - w's threshold-level step is that same smallest step, with spiking off;
+   - N5's rate searches use seed 0.
+
 ### The instrument: `viz/` (not an experiment)
 
 A local web page served by `viz/server.py`. Every simulation runs in the same `sim.py`, so there is one model and no
