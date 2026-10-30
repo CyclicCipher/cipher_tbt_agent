@@ -234,7 +234,8 @@ operation.
 |---|---|---|---|
 | A1 | addition mod p (p = 13 and 97), the written equation "a + b = c", every symbol a random SDR, one equation per episode; the only task is to predict the next SDR; train on half the p² equations at random, test the prediction after "=" on the other half (decoded by the world to the nearest symbol) | held-out accuracy ≥ 0.99 | the same brain with frame learning off (memorizing only): chance, 1/p |
 | A2 | three operations mixed (+, −, × mod p), each named by a random SDR | ≥ 0.95 on each (× lives on another coordinate system: the multiplicative group) | as A1 |
-| next | for the user: the evidence scale learned per sensor (calibration), or a learned L4 feature layer; the performance step owed (U11); then the association region (13) | — | to be decided |
+| vision note | what a feature and a location are for 2-D vision (`docs/VISION.md`), and D2 | — | **done**: TBT's feature is a local property at a pose, in the object's frame; part 12's tiles were neither. Hand-computed local orientation over the digit's bounding box carries 11.3 nats per image against the tiles' 1.8, so the criterion would accept the digits (net +9.0) |
+| next | for the user: how V learns local, pose-bound features (a spatial pooler or sparse coding on small patches; tolerance from fixational drift) and the digit's frame (B2); the performance step owed (part 12's U11) | — | to be decided |
 | A3 | base-10 addition of multi-digit numbers (digits as random SDRs), tested 2 digits longer than trained | ≥ 0.95 exact | as A1 |
 
 **B. MNIST, unsupervised.**

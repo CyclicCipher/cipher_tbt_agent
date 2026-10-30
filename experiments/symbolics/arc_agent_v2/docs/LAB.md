@@ -2271,3 +2271,18 @@ training images, labels only to measure. Inked patches only.)
   3's do (0.33 against 0.25).
 - **What this rules out:** a learned L4 feature layer on these tiles (HTM's spatial pooler) re-represents its input
   but can't add what the input lacks. It is not the remedy for this deficit.
+
+**D2: what does carry the digit?** (After the run, for the user's question; `docs/VISION.md` §6–7, predictions
+stated before running; the same 3,000 images.)
+- **The measure:** the true digit partition's content gain, in nats per image, with its net after the partition's
+  2.30:
+  - part 12's tiles: 1.80 (net −0.51);
+  - a local orientation at the same 16 points: 2.53;
+  - the orientation at 49 retinal points: 7.96;
+  - at 49 points over the digit's bounding box: 11.32 (net +9.01);
+  - a silhouette at 49: 3.85.
+- **D2a–D2e confirmed.**
+- **The deficit is TBT's feature and location:** a local property at a pose, in the object's frame. The criterion
+  would accept the digits from such features by a wide margin.
+- **The features were computed by hand:** learning them (a spatial pooler or sparse coding on small patches, now
+  with a nail) is the next design.
