@@ -1241,3 +1241,83 @@ No chain was ever trained on.
 2. **The day's memories are exact keys:** nothing is recalled by similarity of place.
 3. **The box loses the column:** its frame has no coordinates, and a missing move ends the column's knowledge of its
    place.
+
+## Part 9: the union-of-hypotheses column (pre-registered 2026-10-29, before the code)
+
+**Why:**
+- **The user (2026-10-29):** part 7's question ("should these two places merge?") shows the column is too rules-based.
+  A real column never asks it (`docs/NEURAL_COLUMN.md`).
+- **The two operations** it lacks: holding a population of hypotheses, and bursting on surprise.
+- **The user's follow-up:** Bayes (NEURAL_COLUMN.md §4).
+
+**What breaks today:**
+- **The column's factored state is one hypothesis,** (phase, coordinate). Where its phase has no transition for an
+  input, the column is lost.
+- **Part 7's patch:** a rule that merges phases. It fails in A1, where a digit is always followed by "+" and a result
+  always by "=", so the phases disagree and chains are never answered.
+
+### The change
+
+1. **The column's factored state is a weighted union of (phase, coordinate) hypotheses:** a posterior. It starts at
+   the frame's start with weight 1.
+2. **On each content input x, the weights are multiplied by the likelihood** and renormalized (Bayes' rule).
+   - **The likelihood:** P(x | phase, coordinate) by Laplace's rule, (n(x) + 1) / (N + K).
+     - **n(x):** how often x came next at the phase's places;
+     - **N:** the total there;
+     - **K:** the number of inputs the frame knows.
+   - **Where the phase names its coordinate,** n(x) = N for the symbol that names it and 0 for the others.
+   - **Why smoothed:** never seen is not impossible. The reversal's subtractions by digits never subtracted must keep
+     their weight.
+3. **On each moving input x, every hypothesis moves** by its phase's transition and its class's shift. A hypothesis
+   that can't make the move is dropped (its likelihood of x is 0).
+4. **Bursting.**
+   - **When:** no hypothesis can make the move. The column would be lost today.
+   - **What happens:** the union falls back to every phase π from which x is made. Each hypothesis's coordinate c
+     continues as (π's transition by x, c + π's shift of x), with weight w · P(π | x).
+   - **The prior P(π | x):** proportional to the number of places of π from which x was made.
+   - **The coordinate moves whatever the context;** the phase is what the burst widens.
+5. **The prediction** is the posterior predictive: Σ over hypotheses of weight × P(· | hypothesis). It is used where
+   the column's place has no content, as before.
+6. **The housekeeping:**
+   - hypotheses below 10⁻⁶ of the largest weight are dropped, and at most 64 are kept;
+   - `Brain(union=False)` keeps only the most probable hypothesis and never bursts (the control).
+7. **Part 7's phase merge is deleted:** the union does its job (the decisive-cutover rule).
+
+### The line between innate and learned (for the user to check)
+
+- **New innate assumptions:**
+  - the column holds a weighted union of hypotheses, updated by Bayes' rule with Laplace's smoothing;
+  - when no hypothesis can make a move, it falls back to every context the move is made from, weighted by how often.
+- **Learned:** the phases, transitions, shifts and counts (consolidation, as before).
+- **Removed:** part 7's merge rule.
+
+### Worlds
+
+- **A7's world** ({+, −}).
+- **A1's world** ({+} only; the case part 7 could not do).
+- **For both:**
+  - **training:** half of the single equations;
+  - **the test:** the held-out singles, and 1,000 random chains each of 2, 3 and 4 operations, never trained on;
+  - p = 13 and 97, 3 seeds.
+
+### Predictions
+
+| # | prediction |
+|---|---|
+| J1 | {+, −}: chains of 2–4 operations ≥ 0.99; held-out singles ≥ 0.99 |
+| J2 | {+} only: chains of 2–4 "+" ≥ 0.99; held-out singles ≥ 0.99 |
+| J3 | the mechanism. A chain of k operations bursts exactly k − 1 times: once at each operator after a result, never in a single equation. Each burst leaves exactly one hypothesis, since an operator is made from one phase (after a digit). |
+| J4 | the control (`union=False`): chains ≤ 0.05 in both worlds |
+| J5 | no regression: the answers of parts 3, 5 (F1–F3), 6 and 8, and part 4's walk checks and shortcut tests, reproduce. Part 7's accuracies reproduce (1.000 as built; 0.000 for the control). Part 7's merge fields change by construction: 7 phases, not 5, and nothing merged |
+| J6 | cost: training and sleep at p = 97 under 30 s per run |
+
+**What would refute the step:**
+- **J2 failing:** bursting doesn't carry a result on as a digit.
+- **J1 failing:** deleting the merge lost something the union doesn't replace.
+- **J5 failing:** the likelihood weighting or bursting changed answers that didn't need it.
+
+**Not in this step:**
+- **Unions over places:** the box's column still gets lost. Its frame has no coordinates, and joining place
+  hypotheses with coordinates is not designed.
+- **A world needing a union of several hypotheses at once:** here each burst leaves one.
+- **Model comparison and graded arbitration** (NEURAL_COLUMN.md §4, points 2 and 3).
