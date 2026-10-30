@@ -335,9 +335,9 @@
  "E1 torus": {
   "inferred": 6,
   "split": 0,
-  "moves": "c289b2f2c129a90a",
-  "content": "a93eb20d732dd938",
-  "disp": "b38e0ced917be360",
+  "moves": "b927cdffebcd4868",
+  "content": "c8f1971a659899d6",
+  "disp": "212bbfb13fa190fa",
   "coords": [
    [
     60,
@@ -352,10 +352,10 @@
   "declined": [],
   "unfactored": null,
   "phases": 1,
-  "phase": "18f052d727ea9560",
+  "phase": "3ddab53e66949ab5",
   "trans": "ecb2b941755fbdae",
   "shift": "d4e9b5fa2373c431",
-  "coord": "20854c5122c4a2a9",
+  "coord": "fec09bf6208b6a21",
   "named": "3011955e507d3971",
   "cls": "60aa4b3e2ca0667d",
   "relation": [],
@@ -366,9 +366,9 @@
  "E2 cycle": {
   "inferred": 5,
   "split": 0,
-  "moves": "1f0c8b49412f3974",
-  "content": "2a41c586958d5e3c",
-  "disp": "cc2307707171fa97",
+  "moves": "71aba9c52e879cc1",
+  "content": "a35d7e9022a26bb8",
+  "disp": "e9e19cf6c1ab5833",
   "coords": [
    [
     60,
@@ -383,10 +383,10 @@
   "declined": [],
   "unfactored": null,
   "phases": 1,
-  "phase": "53ffb6eb3087c6e1",
+  "phase": "208164ccf43c9b1b",
   "trans": "59472010867954e8",
   "shift": "2e965f707bb5835a",
-  "coord": "490360ac7f47345f",
+  "coord": "ae507d324fa18162",
   "named": "1b89607ac6fa0bfa",
   "cls": "60aa4b3e2ca0667d",
   "relation": [],
@@ -397,9 +397,9 @@
  "O1 A5": {
   "inferred": 0,
   "split": 0,
-  "moves": "0c2fefee83bf1e2b",
-  "content": "7a37af1b5f8b9da6",
-  "disp": "220b7f0e61a05f82",
+  "moves": "b76beca3ae8da2bf",
+  "content": "f8cdea85352cff7f",
+  "disp": "234a47041e821812",
   "coords": [],
   "declined": [
    [
@@ -412,8 +412,8 @@
  "O2 box": {
   "inferred": 0,
   "split": 12,
-  "moves": "fbd6cafb58c6aa27",
-  "content": "a60f3eb74445d60d",
+  "moves": "a90ebb8e6dba2a5d",
+  "content": "71f26a8691a56432",
   "disp": "e3b0c44298fc1c14",
   "coords": [],
   "declined": [

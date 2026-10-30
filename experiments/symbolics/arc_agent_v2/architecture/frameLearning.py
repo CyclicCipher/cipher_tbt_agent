@@ -99,6 +99,7 @@ class Frame:
     factored: object = None                             # part 5: a Factored, or None
     unfactored: str = None                              # why not, if not
     split: int = 0                                      # part 6: the pairs P4 took per context (0: none refuted)
+    objects: list = field(default_factory=list)         # part 12: [objects.Obj], learned after the frame
 
 
 def consolidate(transitions, contents, start, regularity=True, coordinates=None, factoring=True, end=None,

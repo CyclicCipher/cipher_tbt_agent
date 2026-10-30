@@ -1,5 +1,8 @@
 """The audit (docs/AUDIT.md section 1): where each mechanism fires, by world. Counters are wrapped around v2's functions
-from outside, with no change to architecture/. Run from experiments/symbolics: python -m arc_agent_v2.tests.audit_fire."""
+from outside, with no change to architecture/. Run from experiments/symbolics: python -m arc_agent_v2.tests.audit_fire.
+
+It measures the brain as it was at the audit (commit d660898): part 12 replaced the day memory's override and the
+thalamus's best place, which the walk counters read, so check out that commit to reproduce runs/audit_fire.json."""
 import json
 import os
 from collections import Counter

@@ -433,6 +433,33 @@ class Modules:
         return self.code(np.zeros(len(self.periods), np.int64))
 
 
+class Retinotopic:
+    """An innate 2-D sheet (docs/LAB.md part 12): a grid code over H x W positions, `Modules` with periods (H, W).
+    A shift by (dr, dc) is the code of (dr, dc), so binding it moves any position by it: the motor map is aligned with
+    the sheet, as the superior colliculus's is with the retina. The code wraps, so it is exact while the sheet isn't
+    left. The genome gives it twice, to the body (the gaze's efference copies) and to the cortex (an innate frame)."""
+
+    def __init__(self, d, w, shape, seed=0):
+        self.shape = tuple(int(n) for n in shape)
+        R = max(1, min(d // sum(self.shape), -(-w // len(self.shape))))
+        self.modules = Modules(d, self.shape, R, seed)
+
+    def code(self, r, c):
+        H, W = self.shape
+        return self.modules.code((r % H, c % W))
+
+    def shift(self, dr, dc):
+        return self.code(dr, dc)
+
+    def positions(self):
+        H, W = self.shape
+        return [(r, c) for r in range(H) for c in range(W)]
+
+    def shifts(self):
+        """Every shift but none: one code per (dr, dc) mod the sheet."""
+        return [self.code(r, c) for r, c in self.positions() if (r, c) != (0, 0)]
+
+
 # ---- encoders: where data becomes SDRs -------------------------------------------------------------------------------
 class CategoryEncoder:
     """A random SDR per category, the same every run (seeded by the category's text). Categories share nothing: the

@@ -41,7 +41,7 @@ None of these knows what an input means.
 """
 import math
 
-from arc_agent_v2.architecture.information import NEG_INF, logsumexp, mixture_bits, mixture_logp, mixture_scores
+from arc_agent_v2.architecture.information import NEG_INF, logsumexp, mixture_bits, mixture_scores
 
 PRUNE = math.log(1e6)
 MAX_THOUGHTS = 64
@@ -64,10 +64,11 @@ class Thought:
 
 
 class Thalamus:
-    def __init__(self, column, read, enabled=True):
+    def __init__(self, column, read, enabled=True, field=None):
         """column: the column whose working memory this is; read: the sensors whose inputs are read (content that moves
-        the place)."""
+        the place); field: the sensors its column receives (part 12: inputs from elsewhere don't reach it)."""
         self.column, self.read, self.enabled = column, frozenset(read), enabled
+        self.field = frozenset(field) if field is not None else None
         self.counts = {}                                # (kind, context) -> [no, yes]
         self.thoughts = None
 
@@ -139,33 +140,39 @@ class Thalamus:
                                    path=t1.path + ((ctx, 0),) if learn else t1.path))
         return out
 
+    def receives(self, sensor):
+        return self.field is None or sensor in self.field
+
     def observe(self, x, sensor, moves, content, learn):
-        """Branch by the gate and weigh by x (before moving by it). Returns the most probable place: the brain's best
-        estimate of where x came (amendment 5), or None if the thalamus is inactive."""
+        """Branch by the gate and weigh by x (before moving by it). Returns where x came, [(state, probability)] over
+        the thoughts' unions once weighed by x (part 12, in place of amendment 5's best place), or None if the
+        thalamus is inactive."""
+        if not self.receives(sensor):
+            return None
         if self.thoughts is None:
             self.thoughts = self._start(learn)
         if self.thoughts is None:
             return None
-        col, K = self.column, self.column.fac.vocab
+        col = self.column
         read = moves and content and sensor in self.read
         if content:                                     # amendment 6: x is weighed before the gate responds to it
             for t in self.thoughts:
-                t.lw += mixture_logp(col.components(t.place, t.hyps, sensor), x, K)
+                t.lw += col.logp(t.place, t.hyps, x, sensor)
         thoughts = [b for t in self.thoughts for b in (self._decide(t, x, sensor, learn) if read else [t])]
         self.thoughts = self._prune(thoughts)
-        return self.best_place()
-
-    def best_place(self):
-        """The place with the most posterior weight, summed over the thoughts at it (amendment 5), or None. The thoughts
-        that have lost their place count together as one candidate, "no known place"."""
+        if not content:
+            return []
         mass = {}
-        for t in self.thoughts or ():
-            mass[t.place] = mass.get(t.place, 0.0) + math.exp(t.lw)
-        return max(mass, key=mass.get) if mass else None
+        for t in self.thoughts:
+            hyps = col._weighed(t.hyps, x, sensor) if t.hyps else {}
+            for state, p in col.locations(hyps):
+                mass[state] = mass.get(state, 0.0) + math.exp(t.lw) * p
+        z = sum(mass.values())
+        return [(st, m / z) for st, m in mass.items()] if z else []
 
     def advance(self, x, sensor, moves, content):
         """Every thought moves by x."""
-        if not self.thoughts:
+        if not self.thoughts or not self.receives(sensor):
             return
         col = self.column
         read = moves and content and sensor in self.read
@@ -205,20 +212,25 @@ class Thalamus:
         for t in self.thoughts or ():
             comps = col.components(t.place, t.hyps, sensor)
             if comps:
-                z = logsumexp(lw for lw, _, _ in comps)
-                out += [(t.lw + lw - z, c, N) for lw, c, N in comps]
+                z = logsumexp(lw for lw, _ in comps)
+                out += [(t.lw + lw - z, c) for lw, c in comps]
         return out
 
     def predict(self, sensor):
+        if not self.receives(sensor):
+            return None
         comps = self._components(sensor)
         if not comps:
             return None
-        scores = mixture_scores(comps, self.column.fac.vocab)
+        scores = mixture_scores(comps, self.column.known.get(sensor, ()))
         return max(scores, key=scores.get) if scores else None
 
-    def bits(self, target, sensor, K):
+    def bits(self, target, sensor, known=()):
+        if not self.receives(sensor):
+            return None
         comps = self._components(sensor)
-        return mixture_bits(comps, target, K) if comps else None
+        known = tuple(self.column.known.get(sensor, ())) + tuple(known)
+        return mixture_bits(comps, target, known) if comps else None
 
     def p_yes(self, kind, ctx):
         """The gate's learned P(yes) in a context (for the harness), or None if it never met the context."""

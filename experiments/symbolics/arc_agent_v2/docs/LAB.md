@@ -2057,3 +2057,198 @@ no measured number for it, and give none.
 - a learned visual frame, and overlap in P3 and P4 (B2);
 - feedback between regions;
 - merging objects after they are made.
+
+### Part 12 amendments (2026-10-29, during the build, before the run)
+
+**What was looked at during the build:**
+- **Pre-registered cases:** two of the suite's fast tests, which are pre-registered battery cases:
+  - `test_a10_small` (precedence, p = 13, seed 1);
+  - `test_a8_small` (the torus, seed 0).
+- **Smoke cases, outside the pre-registration:** the joint brain at seed 5, with 500 and 3,000 images.
+- **Not looked at:** no seed of the joint run (0, 1, 2), and no other pre-registered case.
+
+1. **Objects: generalize, then split** (`architecture/objects.py`), in place of the sequential seating of the change's
+   item 3.
+   - **Why sequential seating is wrong** (an analysis, before any run): a lone episode, compared with small early
+     objects, is coded better by a new object whenever any of its content is stochastic. An equation's first digit
+     is such content, so arithmetic would fall into one object per first digit.
+   - **The search:**
+     - every episode starts in one object;
+     - an object is split in two if that shortens the code length (the content, each observation coded by its
+       object's other episodes, plus the partition's Chinese-restaurant prior);
+     - then each half is tried again.
+   - **The proposal of a split** (bisecting 2-means): two seeds, the episode the object codes best and the one farthest
+     from it. Episodes then join the half whose content codes them better, until none moves (at most 40 passes). A
+     half's prior is its parent's content (one pseudo-observation of it).
+   - **Found on the smoke cases:**
+     - with the flat prior, a half of one episode codes every other episode about 18 nats worse than the whole, so it
+       never grows;
+     - with the parent as its prior, a half grows, and at 5 passes it hadn't stopped.
+   - **What is unchanged:** the test is the code length, with the flat prior the column uses.
+2. **The cap of 64 counts states, not objects** (`Column._normalize`).
+   - **The rule:** objects at a kept state are all kept unless PRUNE below the best.
+   - **Why:** the objects at a state move together, so the cost is per state. And the first patch, at (0, 0), is
+     usually blank, so pruning objects after it would discard them at random.
+3. **The temper is 1/2w, not 1/w** (`information.py`).
+   - **Found on `test_a10_small`:**
+     - with 1/w, precedence fell to 0.437 (part 10: 1.000);
+     - with Laplace's rule put back into the same code, it was 1.000 again, so the content model was the cause.
+   - **The reason, independent of precedence:** the pre-registration's identity limit doesn't hold with 1/w.
+     - **Why:** two random SDRs are told apart by 2w bits (x's on, the other's off), and that is one event, so 1/w
+       counts it twice.
+     - **The check:** against the Dirichlet process's rule (α = 1, a vocabulary of 17), a cell that saw one input N
+       times gives, in nats:
+
+       | N | seen, 1/w | seen, 1/2w | seen, DP | unseen, 1/w | unseen, 1/2w | unseen, DP |
+       |---|---|---|---|---|---|---|
+       | 0 | −4.93 | −2.46 | −2.83 | −4.93 | −2.46 | −2.83 |
+       | 1 | −1.17 | −0.58 | −0.64 | −5.82 | −2.91 | −3.53 |
+       | 5 | −0.34 | −0.17 | −0.17 | −7.70 | −3.85 | −4.62 |
+       | 20 | −0.09 | −0.05 | −0.05 | −10.09 | −5.05 | −5.88 |
+
+   - **After the change:** `test_a10_small` passes.
+4. **Today's object is always in the union:** the Chinese restaurant's new table, whose content is the day's memory
+   (the prior where nothing is filed yet).
+   - **Found on `test_a8_small`:** when today's object joined only at an episode's start, and only once the day held
+     something, day 2's single long episode never had it. Revisits were 0 of 129.
+   - **After the change:** it passes.
+5. **The order of a step:**
+   - the thalamus's thoughts weigh and move by an input before the bus delivers it;
+   - the columns weigh it before the hippocampus files it.
+
+   So no state is ever weighed by a memory of the input itself.
+6. **L4's surprise** is an input whose likelihood under the column is below the prior's. L4 no longer asks for a full
+   prediction at every input, which over hundreds of objects and thousands of patches would dominate the cost.
+   Nothing reads L4's counts.
+7. **The hippocampus's sensed context** is the content inputs that don't move. A read symbol is its own move, so
+   arithmetic's places are unchanged.
+   - **The consequence for U9:** the walk worlds' place codes change, and so do their fingerprints' digests.
+   - **So U9's fingerprints are checked as follows:**
+     - the arithmetic worlds: identical;
+     - the walks: their structure (inferred moves, split pairs, orbits and periods, declined, phases).
+8. **The episodes:** the hippocampus keeps each episode's content in order, for the objects.
+   - The 100-cluster score labels each object by the majority of its own episodes.
+9. **A diagnosis on the 3,000-image smoke case, recorded before the run as a forecast.**
+   - **The code lengths** (labels used only here), in nats:
+
+     | partition | content | partition's prior | total |
+     |---|---|---|---|
+     | one object | −48,817 | −8 | −48,825 |
+     | the true 10 digits | −43,426 | −6,920 | −50,346 |
+     | 0 against the rest | −47,775 | −1,005 | −48,780 |
+     | random, 10 | −50,163 | −6,927 | −57,090 |
+
+   - **What it says:**
+     - **The criterion is sane:** a random partition codes far worse, and the true digits code the content better.
+     - **But the digits pay 1.8 nats per episode, and their labels cost 2.3** (log 10). So with this content model
+       and this encoder, the code prefers one object, or a few ("0 against the rest" just pays).
+   - **The forecast:** U1, U2 and U3 fail. V gets at most a few objects. The smoke case found one (its proposal
+     doesn't find "0 against the rest").
+
+## Part 12 results (2026-10-29; `runs/a12.txt`, `runs/a12.json`, `runs/a12_battery1.txt`, `runs/a12_battery2.txt`)
+
+**Built:**
+- **`information.Content`:** content by overlap, with an SDR weighed as one event (amendment 3).
+- **`architecture/objects.py`:** objects by generalize-then-split on the code length (amendment 1).
+- **`architecture/innate.py`:** the retinotopic frame; `HDClibrary.Retinotopic`, `config.retinotopy` and
+  `config.JOINT`.
+- **The column:** a union of (object, phase, coordinate), with today's memory as an object (amendment 4). The cap
+  counts states (amendment 2).
+- **The hippocampus:** the sensed context in DG (amendment 7); episodes (amendment 8); the day memory filed by the
+  cortex's posterior.
+- **The bus and the brain:** the order of a step (amendment 5); one frame per receptive field.
+- **The thalamus:** its own field; locations in place of the best place.
+- **`worlds/mnist_world.py`** and **`tests/test_a12.py`.**
+- **The fingerprint baseline:** re-saved for amendment 7. All 10 arithmetic cases are identical to the old baseline;
+  the 4 walks differ only in their place codes' digests.
+
+**U1–U4: MNIST** (3,000 training and 1,000 test images per seed):
+
+| seed | V's objects | sizes | 100 clusters | 10 clusters | the encoder's 1-NN |
+|---|---|---|---|---|---|
+| 0 | 1 | 3,000 | 0.118 | 0.118 | 0.851 |
+| 1 | 1 | 3,000 | 0.099 | 0.113 | 0.843 |
+| 2 | 2 | 1,676, 1,324 | 0.194 | 0.196 | 0.835 |
+
+**U5–U8: arithmetic, non-interference, today's object.**
+- **U5:** S has 1 object in every joint brain, as do the battery's A1, A2 and reversal brains (3 seeds each), and
+  every walk's day 1.
+- **U6:** A2's held-out accuracy in the joint brain is 1.000 on +, − and ×, every seed.
+- **U7** (seed 0): without images, S's frame (its fingerprint) and every answer are identical. Without equations, V's
+  objects (every member) and scores are identical.
+- **U8:** part 8's three arms reproduce in every walk and seed, to the count.
+  - **Arm (a):** E1 125–137 of 125–137 revisits; E2 123–134; A₅ 137–143; the box 41 of 41 where it knows its place.
+  - **Arms (b) and (c):** 0.
+
+**U9: the battery.**
+- **Tier 1** (p = 13, 3 seeds) and **tier 2** (p = 97, seed 0):
+  - parts 3, 5 (F1–F3), 6 (A2 and the reversal), 4 and 8 reproduce exactly;
+  - part 9's accuracies reproduce exactly;
+  - part 10: 2 operations exact (1.000, sensitive included); 3 operations within 0.017 (p = 13: 0.878, 0.866, 0.879
+    against 0.880, 0.867, 0.872; p = 97: 0.853 against 0.870).
+- **Fields that changed:**
+  - every bits field;
+  - the learned gate's values (at p = 13, every hold context but (+, ×), (−, ×) and (×, ×) stays at or below 0.26);
+  - one more: part 9's "one hypothesis after a chain" is now 0.0, since today's object always sits beside the known
+    one (amendment 4).
+- **The fingerprints:** the arithmetic worlds are identical, the p = 97 ones included. The walks' structure is
+  identical (amendment 7).
+
+**U10: the answers' cross-entropy** (part 9's arms, in bits; part 9's in brackets):
+
+| world | single | chain 2 | chain 3 | chain 4 |
+|---|---|---|---|---|
+| {+, −}, p = 13 | 0.25–0.26 (1.07–1.09) | 0.24–0.25 (1.06–1.07) | 0.25–0.26 (1.06–1.07) | 0.32–0.33 (1.06–1.07) |
+| {+}, p = 13 | 0.43–0.44 (1.58–1.59) | 0.41–0.42 (1.54–1.55) | 0.42–0.43 (1.55) | 0.43–0.44 (1.53–1.55) |
+| {+, −}, p = 97 | 0.22 (1.01) | 0.22 (1.01) | 0.24 (1.01) | 1.04 (1.01) |
+| {+}, p = 97 | 0.40 (1.59) | 0.40 (1.59) | 0.40 (1.58) | 0.56 (1.58) |
+
+**U11: cost.**
+- **Part 12's run:** 97.8 s.
+  - **Per joint seed:** 15–27 s; the sleep was 7–19 s, most of it V's split proposals.
+- **Tier 1:** 82.4 s, with the suite (42 tests) at 52.8 s: 135 s together.
+- **Tier 2:** 187.8 s, with the full fingerprints apart at 46 s.
+
+**Verdicts:**
+- **U1, U2, U3 refuted**, as amendment 9 forecast.
+- **U4 refuted, narrowly:** 0.851, 0.843, 0.835 against ≥ 0.85.
+- **U5, U6, U7, U8, U9 confirmed.**
+- **U10:** confirmed at p = 13 and for every p = 97 field but one. Refuted for 4-operation chains at p = 97: 1.04
+  bits in {+, −}, 0.56 in {+}.
+- **U11:** confirmed for part 12's run. Refuted for both regression tiers.
+
+**What this shows:**
+1. **One brain holds both domains, with no domain flag.** Arithmetic is untouched by the images, and the images by
+   arithmetic, to the last bit (U7). The regions differ only in wiring.
+2. **The general changes cost arithmetic nothing in accuracy** (U5, U6, U9), and cut its answers' code length by about
+   a factor of 4 (U10).
+   - **The changes:** content by overlap, a prior of one pseudo-observation, objects, today's memory as an object.
+   - **Part 9's limit is answered:** "the Laplace prior is too broad".
+   - **Today's object** does what part 8's override did, to the count (U8), by evidence instead of by rule.
+3. **The images are not learned.** The objects' code length keeps one object (seeds 0 and 1) or two (seed 2).
+   - **The cause, measured** (amendment 9): the true digits code the patches better by 1.8 nats per image, but naming
+     the digit costs 2.3. A random partition codes far worse, so the criterion sees structure. The evidence is just too
+     small for its price.
+   - **Not representation collapse:** the encoder is fixed and keeps the digits apart (its 1-NN is 0.84–0.85, U4).
+     What fails is model selection, which is cluster collapse in a mixture's sense: the likelihood term is weak
+     against the partition's prior, so one component takes everything.
+4. **Why the evidence is small. Two causes, both general:**
+   - **The encoder:** a stroke shifted by a pixel changes about 10 of a patch's 49 pixels. After a random projection
+     and winner-take-all, two such patches share a few of their 40 bits. So the patches of one digit are spread, not
+     concentrated. (U4's narrow refutation is the same fact, seen through the 1-NN.)
+   - **The evidence scale:** amendment 3 fixed it at 1/2w, from the identity limit, where an SDR is a codeword.
+     - **For patches:** with the pre-registered 1/w, the digits would pay 3.6 nats per image against 2.3, and objects
+       would form.
+     - **For symbols:** 1/w double-counts, and it broke precedence.
+     - **So one hand-set scale can't serve both:** a symbol is one of about 17 events, a patch one of thousands.
+
+**Limits, and what they call for (not designed; for the user's decision):**
+1. **The evidence scale should be learned, per sensor, not set.** A transformer's logit scale is a learned weight,
+   not a constant. The candidate: the temper that best predicts each sensor's held-out inputs, chosen at sleep from
+   the episodes. It is general: every sensor, the same rule, and calibration is its only aim.
+2. **The encoder's similarity is too sharp for strokes.** The retina is the world's transduction, and it was fixed in
+   the pre-registration. A learned L4 feature layer (HTM's spatial pooler) is the general alternative: features that
+   come from the data's own statistics.
+3. **The regression is too slow** (U11): the per-bit likelihood costs numpy calls where Laplace's rule cost a lookup.
+   A performance step, with identical results, is owed.
+4. **4-operation chains at p = 97 cost more than they did** (1.04 bits): not diagnosed.

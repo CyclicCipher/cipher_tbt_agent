@@ -150,16 +150,19 @@ The brain's files are all in `architecture/` except the config.
 |---|---|---|
 | `HDClibrary.py` | the SDR and every operation on it | **built** |
 | `config/config.py` | hyperparameters; the regions; efference copies | **built** |
-| `brain.py` | builds the regions, columns, bus and hippocampus from a config; awake steps; sleep (consolidation) | **built** (parts 3–6) |
+| `brain.py` | builds the regions, columns, bus and hippocampus from a config; awake steps; sleep: each region consolidates its own receptive field, then learns its objects (part 12) | **built** (parts 3–12) |
 | `bus.py` | the thalamocortical bus: stamped, exactly-once delivery of every input by receptive field; efference copies | **built** (part 4) |
-| `thalamus.py` | the active gate on the bus: holding, gating and routing values into argument slots (`docs/CHAINS.md` §6) | not designed yet |
-| `column.py` | the coordinator: owns one column's four layers and passes SDRs between them in a fixed order each step | **built** |
+| `thalamus.py` | working memory and its gate: continue, hold and release as weighted hypotheses, taught by prediction error (`docs/CHAINS.md`) | **built** (part 10; its gate's contexts and operations to be replaced, AUDIT §2.3) |
+| `column.py` | the coordinator: owns one column's four layers; its state, a union of (object, phase, coordinate) hypotheses, with today's memory as one more object | **built** (parts 3–12) |
 | `l6.py` | the coordinate system: the column's place, and its (phase, coordinate) | **built** |
-| `l4.py` | the argument slots: the place(s) the current input sits at; feedforward input arrives here | **built** (sensing only) |
+| `l4.py` | the argument slots: the place(s) the current input sits at; feedforward input arrives here, and its surprise is counted | **built** (sensing only) |
 | `l5.py` | the operation: the moves and shifts that take a place to the next | **built** |
 | `l23.py` | content: what is at each place | **built** |
 | `hippocampus.py` | episodes: fast, one-shot memory of what happened (DG and CA3; CA1 not built), and episode ends | **built** |
 | `frameLearning.py` | consolidation: P3, P4 (per context), coordinates, factoring, shift classes and their relation | **built** (parts 3–6) |
+| `innate.py` | innate frames, where biology gives them (rule 5): a retinotopic sheet, path-integrated from the gaze | **built** (part 12) |
+| `objects.py` | L2/3's objects: hidden causes of what is at each state, learned at sleep by generalize-then-split on the code length | **built** (part 12) |
+| `information.py` | content (per-bit counts, an SDR weighed as one event) and code lengths (the fixed cross-entropy) | **built** (parts 9, 12) |
 
 **The layers on milestone A** (a direction, to be pre-registered in detail with the code, `docs/LAB.md` part 3). The
 input is the written equation, "a + b = c", one random SDR per symbol, one equation per episode. The brain's only task
@@ -231,6 +234,7 @@ operation.
 |---|---|---|---|
 | A1 | addition mod p (p = 13 and 97), the written equation "a + b = c", every symbol a random SDR, one equation per episode; the only task is to predict the next SDR; train on half the p² equations at random, test the prediction after "=" on the other half (decoded by the world to the nearest symbol) | held-out accuracy ≥ 0.99 | the same brain with frame learning off (memorizing only): chance, 1/p |
 | A2 | three operations mixed (+, −, × mod p), each named by a random SDR | ≥ 0.95 on each (× lives on another coordinate system: the multiplicative group) | as A1 |
+| next | for the user: the evidence scale learned per sensor (calibration), or a learned L4 feature layer; the performance step owed (U11); then the association region (13) | — | to be decided |
 | A3 | base-10 addition of multi-digit numbers (digits as random SDRs), tested 2 digits longer than trained | ≥ 0.95 exact | as A1 |
 
 **B. MNIST, unsupervised.**
@@ -303,7 +307,7 @@ in `docs/LAB.md`, built, run, and recorded.
 | union column | the column's state as a weighted union of (phase, coordinate) hypotheses: Bayesian filtering, bursting on surprise; replaces part 7's merge (`docs/NEURAL_COLUMN.md`) | part 9 | **done**: chains 1.000 in {+, −} and in {+} only (part 7 couldn't); k − 1 bursts per chain; control 0.000; answers ~1–1.6 bits (the Laplace prior is too broad) |
 | A3, step 1 | two-digit numerals mod 100, measured (`docs/A3.md`) | part 11 | **done**: held-out 1.000; the chain found is CRT (2, 4, 5, 25), not decimal; tens shift = 10 × units, unrelated; no naming; withheld answers 0.000 (no coordinate: one position's moves are paths, the wrap is the carry) |
 | audit | every mechanism against the general-learner standard: where each fires across 10 worlds, and a verdict (`docs/AUDIT.md`) | — | **done**: parts 5–10 fire only in arithmetic, except the context split, fixed points and shift classes. Replace or remove: the relation (x ↦ kx), the thalamus's gate contexts and operations, recency as an override. Limits for the joint experiment: identity-only comparison, cycles-only coordinates, one frame per brain |
-| joint, next | arithmetic and MNIST in one brain, unlabeled and unsupervised (the user); scored by §6's A and B measures. The design (`docs/JOINT.md`): a region per sensor (S learned, V innate retinotopic); content by overlap; the hippocampus conjoins what was sensed; objects as hidden causes (L2/3), which also replace recency; one frame per receptive field. Then the association region (13), the thalamus's replacements (14), the relation's general form (15) | 12 | **pre-registered** (`docs/LAB.md` part 12: U1–U11); the build next |
+| joint | arithmetic and MNIST in one brain, unlabeled and unsupervised (the user); `docs/JOINT.md` | 12 | **done**: one brain, no domain flag. Arithmetic unchanged in accuracy (A2 1.000; the battery reproduces), answers ~4x cheaper in bits, the domains bit-identical with and without each other, today's memory as an object reproduces part 8. MNIST not learned: V keeps 1-2 objects (clusters 0.10-0.20), since the digits buy 1.8 nats per image against 2.3 to name them. Regression over 2 minutes |
 | A3 | the general learner on the data a human gets for multi-digit addition, all the digits and the number line shown, against that human (`docs/A3.md` §4) | — | waits for the joint experiment |
 | chains B | precedence ("a + b × c ="): working memory in a `thalamus.py`; the gate's operations as hypotheses, taught by prediction error | part 10 | **done**: 2-operation expressions 1.000 (precedence learned from 300 examples; gate off 0.000 on the sensitive ones); 3 operations 0.85–0.88 (releases before + and − unlearnable from 2-operation data); the run 3.4 min, over its 2-minute target |
 

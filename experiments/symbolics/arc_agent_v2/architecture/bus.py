@@ -6,8 +6,13 @@ places silently out of step, and nothing downstream can tell.
 
 **What it does:**
 - **Stamping:** each input from a sensor is stamped with the next step number.
-- **Delivery:** in step order and exactly once, to the hippocampus (which hears everything) and to every column whose
-  region receives that sensor (`config`: the region's feedforward sources). That is each column's receptive field.
+- **Delivery:** in step order and exactly once, to every column whose region receives that sensor (`config`: the
+  region's feedforward sources), then to the hippocampus, which hears everything. A region's feedforward sources are
+  its columns' receptive field.
+  - **The order (part 12):** the columns weigh an input before the hippocampus files it under their location, so no
+    column is shown a memory of the input it is weighing.
+- **The location (part 8; part 12):** with each input, the hippocampus is given where the cortex is, as the first
+  column's [(state, probability)] once it has weighed the input, or the thalamus's estimate.
 - **Roles:** for each column, the bus says whether the input moves its place (an efference copy, or a symbol read in
   sequence: the region's `moves`) or is sensed at it, and whether it is content. An efference copy never is
   (`config.efference`): the agent's own action is not something a place predicts.
@@ -24,9 +29,8 @@ places silently out of step, and nothing downstream can tell.
 and what it does in each column's frame is that column's own move (L5). So a column whose frame is different learns
 its own meaning for the same copy.
 
-**Not built yet:**
-- the thalamus's change of frame (egocentric to allocentric), which no region needs yet;
-- a separate consolidation per receptive field (B1).
+**Not built yet:** the thalamus's change of frame (egocentric to allocentric), which no region needs yet. (A separate
+consolidation per receptive field is built: part 12, `brain.sleep`.)
 
 The efference copy's route up the hierarchy (L5a to a higher region, through the thalamus) is the same delivery,
 once there are regions above.
@@ -37,7 +41,8 @@ class Bus:
     def __init__(self, config, regions, hippocampus, locations=True):
         self.t, self.faults = 0, 0
         self.locations = locations                      # part 8: give the hippocampus the cortex's location
-        self.inputs = set()                             # part 9: every distinct input received (K, for Laplace)
+        self.inputs = set()                             # part 9: every distinct input received
+        self.inputs_by = {}                             # part 12: sensor -> its inputs, in the order first received
         self.hippocampus = hippocampus
         self.routes = {s: [] for s in config.sensors}   # sensor -> [(column, moves)]
         self.moving = set()                             # sensors that move some column (and so the hippocampus)
@@ -50,27 +55,26 @@ class Bus:
         self.sent = {}                                  # id(column) -> the stamp last sent to it
         self.efference = set(config.efference)
 
-    OWN = object()                                      # publish's default: the cortex's location is a column's place
+    OWN = object()                                      # publish's default: the cortex's location is a column's
 
     def publish(self, sensor, x, learn=True, where=OWN):
-        """Stamp x and deliver it. Returns the stamp."""
+        """Stamp x and deliver it: to the columns first, then to the hippocampus, so that no column weighs x by a
+        memory of x itself (part 12). Returns the stamp."""
         self.t += 1
         self.inputs.add(x)
+        self.inputs_by.setdefault(sensor, {})[x] = None
         content = sensor not in self.efference
-        if not self.locations:
-            where = None
-        elif where is Bus.OWN:                          # part 10: the thalamus may give the brain's best estimate
-            where = self.where(sensor)
-        self.hippocampus.step(x, sensor, sensor in self.moving, learn, content, where)
+        first = []
         for c, moves in self.routes[sensor]:
             if c.stamp != self.sent.get(id(c), 0):     # it missed a message, or applied one twice
                 self.faults += 1
                 c.l6.place = None
-            c.step(x, sensor, moves, self.t, content)
+            loc = c.step(x, sensor, moves, self.t, content)
+            first = first or loc
             self.sent[id(c)] = self.t
+        if not self.locations:
+            where = None
+        elif where is Bus.OWN:                          # part 10: the thalamus may give the brain's estimate instead
+            where = first
+        self.hippocampus.step(x, sensor, sensor in self.moving, learn, content, where)
         return self.t
-
-    def where(self, sensor):
-        """The cortex's location for this sensor (the entorhinal input, part 8): the place of the first column it
-        reaches that knows its place, or None."""
-        return next((c.l6.place for c, _ in self.routes.get(sensor, []) if not c.l6.lost()), None)

@@ -44,6 +44,7 @@ class Region:
     feedback: tuple = ()
     note: str = ""
     moves: tuple = None                 # the sources whose inputs move the place (None: every source)
+    shape: tuple = None                 # part 12: an innate retinotopic sheet's positions (rows, columns)
 
     def moving(self):
         return tuple(self.feedforward) if self.moves is None else tuple(self.moves)
@@ -75,6 +76,8 @@ class BrainConfig:
                     raise ValueError("%s receives from unknown %s" % (r.name, src))
             if r.columns < 1 or not (r.frame == "learned" or r.frame.startswith("innate:")):
                 raise ValueError("bad region %s" % r.name)
+            if r.frame == "innate:retinotopic-2d" and (r.shape is None or len(r.shape) != 2):
+                raise ValueError("%s: a retinotopic sheet needs its shape" % r.name)
             if not set(r.moving()) <= set(r.feedforward):
                 raise ValueError("%s moves on a source it doesn't receive" % r.name)
         order, done = [], set(self.sensors)
@@ -101,7 +104,7 @@ WALK = BrainConfig(
 
 MNIST = BrainConfig(
     sensors=("retina",),
-    regions=(Region("V1", 16, "innate:retinotopic-2d", ("retina",), ("IT",),
+    regions=(Region("V1", 16, "innate:retinotopic-2d", ("retina",), ("IT",), shape=(4, 4),
                     note="milestone B: each column senses a patch; its place is given by the innate 2-D frame"),
              Region("IT", 1, "learned", ("V1",),
                     note="the digit: content at places, in a frame learned from the data")))
@@ -109,11 +112,11 @@ MNIST = BrainConfig(
 HUMAN = BrainConfig(                    # the target layout: data only, not wired yet (scaled-down column counts)
     sensors=("retina", "proprioception"),
     regions=(
-        Region("V1", 64, "innate:retinotopic-2d", ("retina",), ("V2",)),
-        Region("V2", 32, "innate:retinotopic-2d", ("V1",), ("V4", "MT")),
+        Region("V1", 64, "innate:retinotopic-2d", ("retina",), ("V2",), shape=(8, 8)),
+        Region("V2", 32, "innate:retinotopic-2d", ("V1",), ("V4", "MT"), shape=(4, 8)),
         Region("V4", 16, "learned", ("V2",), ("IT",), note="ventral stream: what"),
         Region("IT", 8, "learned", ("V4",), ("PFC",), note="objects in their own frames"),
-        Region("MT", 16, "innate:retinotopic-2d", ("V2",), ("PPC",), note="dorsal stream: motion"),
+        Region("MT", 16, "innate:retinotopic-2d", ("V2",), ("PPC",), note="dorsal stream: motion", shape=(4, 4)),
         Region("PPC", 8, "innate:egocentric-2d", ("MT", "V2"), ("PFC", "PMC"), note="where; space for action"),
         Region("EC", 4, "innate:allocentric-grid", ("IT", "PPC"), ("PFC",),
                note="entorhinal: the cortex's gateway to the hippocampus"),
@@ -122,4 +125,19 @@ HUMAN = BrainConfig(                    # the target layout: data only, not wire
         Region("M1", 8, "innate:motor-map", ("PMC", "proprioception"), ("PMC",)),
     ))
 
-PRESETS = {"arithmetic": ARITHMETIC, "walk": WALK, "mnist": MNIST, "human": HUMAN}
+JOINT = BrainConfig(                    # part 12: arithmetic and images in one brain, a region per sensor
+    sensors=("symbols", "retina", "gaze"), efference=("gaze",),
+    regions=(Region("S", 1, "learned", ("symbols",), note="read symbols: arithmetic"),
+             Region("V", 1, "innate:retinotopic-2d", ("retina", "gaze"), moves=("gaze",), shape=(4, 4),
+                    note="a retinal patch, at the place the gaze's innate shifts bring it to")))
+
+PRESETS = {"arithmetic": ARITHMETIC, "walk": WALK, "mnist": MNIST, "human": HUMAN, "joint": JOINT}
+
+
+def retinotopy(config, name):
+    """Part 12: the innate retinotopic code of region `name` (HDClibrary.Retinotopic), the same for the brain's frame
+    and for the body's gaze: one genome."""
+    from arc_agent_v2.architecture.HDClibrary import Retinotopic
+    names = [r.name for r in config.regions]
+    r = config.region(name)
+    return Retinotopic(config.sdr.d, config.sdr.w, r.shape, seed=config.seed * 1000 + 606 + names.index(name))

@@ -26,7 +26,7 @@ from arc_agent_v2.worlds.walk_world import KINDS, WalkWorld
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # arc_agent_v2/
 SEEDS = (0, 1, 2)
-ARMS = {"a": dict(), "b": dict(locations=False), "c": dict(recency=False)}
+ARMS = {"a": dict(), "b": dict(locations=False), "c": dict(today=False)}
 
 
 def day2(kind, seed, **arm):
