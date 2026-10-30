@@ -277,10 +277,180 @@ learned without being shown. Then B, with `thalamus.py` built when the first exp
 2. **For B:** standard precedence (× before +), or left-to-right with parentheses only?
 3. **The gate's learning signal:** prediction error alone, or a reward the world gives?
 
+## 7. The user's choices (2026-10-29), and what designing A found
+
+**The choices:**
+- **A first:** compare one chain in training with none (LAB part 7).
+- **Then B:** standard precedence.
+- **Fix the hippocampus's gaps** (§10).
+
+**Zero-shot may work.**
+- **The evidence it rests on:** part 6 found that the start and "after +" share every digit's shift (one shift class).
+- **The rule:** P3 lifted to phases ("same future, same phase", with an input's shared shift as the evidence). It
+  merges those two phases.
+- **The consequence:** a digit read from either must then lead to one phase, so "after a digit" and "after a op b"
+  merge too.
+- **The result:** the automaton loops, and no chain need be seen.
+
+**One chain is the harder case.**
+- **The split:** the chain "a + b − c = d" gives the place after "a + b" a future ("−") that the other places of
+  result a + b never had. Strict P3 then keeps it apart from them.
+- **Full P3 can't merge it either:** its content ({=, −}, or "−") identifies nothing.
+- **The collisions:** a translation t then maps both it and the merged place of the same result to the place of
+  result a + b + t: two places to one. P4 refutes every such translation. With about 48 digits trained after "a +" at
+  p = 97, that is about half of "+"'s displacements.
+- **So:** a collision must first be tested as a merge (P3's fold), and only then refute.
+
+The chain's own places also need naming to be placed in the right shift class.
+
+## 8. Can local circuits chain, and what holds the state?
+
+**Chaining moves within one frame is local.**
+- **Path integration is chained addition:** a sum of displacements, kept by the entorhinal grid system without the PFC
+  (McNaughton et al. 2006).
+- **A practiced, fixed sequence is local too:**
+  - songbird HVC runs a learned chain of neurons (Long, Jin & Fee 2010);
+  - practiced motor sequences are chunked in striatum and premotor cortex (Graybiel 1998).
+- **Arithmetic shifts with practice:** children move from counting procedures to retrieving the facts, with
+  hippocampal-neocortical reorganization (Qin et al. 2014).
+- **Proposal A is this kind:** the column's coordinate is the running result, as a grid code is the running position.
+
+**The PFC is needed when the chain is novel, or crosses circuits.**
+- A result must be held while something else is computed (precedence: proposal B).
+- A result must be routed from one circuit into another's argument.
+- Each step must be chosen under control (Sackur & Dehaene 2009; Zylberberg et al. 2011).
+
+**Short-term memory is the state; long-term memory is the weights. There is a middle.**
+
+| timescale | what holds it | in v2 |
+|---|---|---|
+| ms–s | activity: the current state (persistent firing, an attractor) | L6's place and (phase, coordinate) |
+| s–min | short-term synaptic change, "activity-silent" (Mongillo et al. 2008; Stokes 2015): fast weights | not built (B's held values) |
+| hours–years | the hippocampus's one-shot plasticity, until consolidated | `hippocampus.py`'s stores |
+| a lifetime | cortical synapses | L5's and L2/3's tables, installed at sleep |
+
+## 9. Working memory: what it is, its limits, what fills the slots
+
+**What it is:** the few things held active and open to manipulation for seconds.
+- **Where:** prefrontal, parietal and sensory cortex, sustained by thalamocortical loops (§3).
+- **Who decides what enters and leaves:** the basal ganglia.
+- **The focus:** one item at a time is directly operated on (Oberauer 2002).
+
+**How many:**
+- Miller's 7 ± 2 (1956) counted chunks, with rehearsal and grouping allowed.
+- With those prevented, about 4 (Cowan 2001).
+- Visual working memory holds about 3–4 objects, each with all its features (Luck & Vogel 1997).
+
+**Why so few: competing accounts, none settled.**
+1. **Interference in one population.** Items held at once compete through lateral inhibition; past a few, they merge
+   or one dies (attractor models: Edin et al. 2009).
+2. **Time-multiplexing.** Each item fires in its own gamma cycle within a theta cycle, and the ratio of the two
+   rhythms is about 4–8 (Lisman & Idiart 1995; Lundqvist et al. 2016 for gamma and beta bursts).
+3. **A shared resource, no slots.** Precision is divided among the items and falls as they increase (Ma, Husain &
+   Bays 2014).
+4. **Binding.** Each item must be bound to a distinct role or position tag, and there are few distinguishable tags.
+
+**What this means for SDRs (my inference, not a source):**
+- **Membership is cheap:** a union of k SDRs (w = 40, d = 2048) still tells its members from non-members for large
+  k.
+- **Roles are not:** which item fills which role is lost unless each item is bound to a distinct role code. The limit
+  that matters for chains is the binding, not the storage.
+
+**What goes in a slot: a chunk, a unit of long-term memory.**
+- **Examples:** a digit, a word, a familiar phrase, an object with its features bound.
+- **Experts hold bigger chunks** (chess: Chase & Simon 1973).
+- **Often a slot holds a pointer:** a cue that retrieves long-term content.
+  - Cowan's "activated long-term memory";
+  - Ericsson & Kintsch's "long-term working memory" (1995);
+  - Kriete et al.'s indirection (§3).
+- **For B:** a slot would hold a pending result (a coordinate) bound to its role, for example "the left operand of the
+  pending +".
+
+## 10. What teaches the gate: the PFC research
+
+**PBWM's gate is trained by dopamine.**
+- **The signal:** dopamine prediction errors, from task reward (O'Reilly & Frank 2006).
+- **The hierarchy:** rostral PFC's content conditions the gating of caudal PFC, so a rule held higher selects which
+  gate opens below (Frank & Badre 2012).
+
+**Dopamine signals more than reward, so a self-supervised signal can train a gate.**
+- Dopamine neurons signal errors in predicting the sensory features of outcomes (Takahashi et al. 2017).
+- Dopamine as a generalized prediction error (Gardner, Schoenbaum & Gershman 2018).
+
+**The thalamus may be where prediction meets outcome** (O'Reilly et al. 2021, deep predictive learning).
+- **The comparison:** every alpha cycle (about 100 ms), the pulvinar gets the cortex's prediction (from L6) and then
+  the actual input (an L5 driver).
+- **The learning:** the difference trains the cortex.
+- **The candidate rule for B:** a gating choice that makes the next symbol predicted is reinforced.
+
+**The medial PFC computes predictions and the value of control.**
+- It predicts outcomes and signals their errors (Alexander & Brown 2011).
+- It decides how much control to apply: expected value minus cost (Shenhav, Botvinick & Cohen 2013).
+
+**The PFC builds reusable rules.**
+- **Task sets:** it clusters contexts into task-sets, and reuses a set in new contexts (Collins & Frank 2013).
+- **Meta-RL** (Wang et al. 2018): dopamine trains the PFC's recurrent dynamics, which then learn a new task within
+  their activity. The slow weights learn how to gate; the fast state does the gating.
+
+**For v2:** B's gate can be taught by v2's own prediction error, with no reward from the world. This is the user's
+option 3 (CHAINS §6), now with a mechanism in the literature.
+
+## 11. The hippocampus's gaps, given attention (to fix: LAB part 8, after A)
+
+**What's built:** the hippocampus is a key-value store. The DG place is the key, what followed is the value, and the
+read is by overlap (§5).
+
+**Its gaps against the attention literature:**
+1. **Its keys have no structure.**
+   - **Today:** a key is the hash of the exact path (the DG conjunction of the previous place and the input), so a
+     new path never overlaps an old one. Recall is a lookup table, not attention.
+   - **In TEM-t** (Whittington et al. 2022), the keys are the position codes the cortex path-integrates.
+   - **The fix:**
+     - after sleep, the hippocampus keys what it stores by the cortex's location (the column's (phase, coordinate),
+       arriving as the entorhinal input);
+     - a new path to a known location then recalls what was stored there;
+     - new content can be learned in one shot at a location the cortex already has.
+   - **A test:** learn a new answer from one episode, then recall it through a different equation with the same
+     result.
+2. **No temporal context.**
+   - **What's missing:** nothing retrieves an item by when it occurred in the episode (CMR's drifting context, which
+     LLM induction heads resemble; Ji-An et al. 2024).
+   - **Why it matters:** B could need it to recall a pending operand. Whether B uses the hippocampus or the
+     thalamus's held values is B's design question.
+3. **No CA1.** Recalled content is never mapped back into the cortex's places. It is not needed until 1 or 2 is.
+
 ## Sources
 
+- Alexander & Brown 2011, "Medial prefrontal cortex as an action-outcome predictor", *Nature Neuroscience* 14.
 - Bolkan et al. 2017, "Thalamic projections sustain prefrontal activity during working memory maintenance", *Nature
   Neuroscience* 20.
+- Chase & Simon 1973, "Perception in chess", *Cognitive Psychology* 4.
+- Collins & Frank 2013, "Cognitive control over learning: creating, clustering, and generalizing task-set structure",
+  *Psychological Review* 120.
+- Edin et al. 2009, "Mechanism for top-down control of working memory capacity", *PNAS* 106.
+- Ericsson & Kintsch 1995, "Long-term working memory", *Psychological Review* 102.
+- Frank & Badre 2012, "Mechanisms of hierarchical reinforcement learning in corticostriatal circuits 1", *Cerebral
+  Cortex* 22.
+- Gardner, Schoenbaum & Gershman 2018, "Rethinking dopamine as generalized prediction error", *Proc. R. Soc. B* 285.
+- Graybiel 1998, "The basal ganglia and chunking of action repertoires", *Neurobiology of Learning and Memory* 70.
+- Lisman & Idiart 1995, "Storage of 7 ± 2 short-term memories in oscillatory subcycles", *Science* 267.
+- Long, Jin & Fee 2010, "Support for a synaptic chain model of neuronal sequence generation", *Nature* 468.
+- Luck & Vogel 1997, "The capacity of visual working memory for features and conjunctions", *Nature* 390.
+- Lundqvist et al. 2016, "Gamma and beta bursts underlie working memory", *Neuron* 90.
+- Ma, Husain & Bays 2014, "Changing concepts of working memory", *Nature Neuroscience* 17.
+- McNaughton et al. 2006, "Path integration and the neural basis of the 'cognitive map'", *Nature Reviews
+  Neuroscience* 7.
+- Miller 1956, "The magical number seven, plus or minus two", *Psychological Review* 63.
+- Oberauer 2002, "Access to information in working memory: exploring the focus of attention", *JEP: Learning, Memory,
+  and Cognition* 28.
+- O'Reilly, Russin, Zolfaghar & Rohrlich 2021, "Deep predictive learning in neocortex and pulvinar", *Journal of
+  Cognitive Neuroscience* 33.
+- Qin et al. 2014, "Hippocampal-neocortical functional reorganization underlies children's cognitive development",
+  *Nature Neuroscience* 17.
+- Shenhav, Botvinick & Cohen 2013, "The expected value of control", *Neuron* 79.
+- Takahashi et al. 2017, "Dopamine neurons respond to errors in the prediction of sensory features of expected
+  rewards", *Neuron* 95.
+- Wang et al. 2018, "Prefrontal cortex as a meta-reinforcement learning system", *Nature Neuroscience* 21.
 - [Bricken & Pehlevan 2021, "Attention approximates sparse distributed memory", NeurIPS](https://proceedings.neurips.cc/paper/2021/hash/8171ac2c5544a5cb54ac0f38bf477af4-Abstract.html).
 - Cowan 2001, "The magical number 4 in short-term memory", *Behavioral and Brain Sciences* 24.
 - Dehaene, Al Roumi, Lakretz, Planton & Sablé-Meyer 2022, "Symbols and mental programs: a hypothesis about human

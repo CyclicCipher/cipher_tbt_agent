@@ -929,3 +929,76 @@ reasoning was wrong.
    - the class trials: about 4 s;
    - installing 28,809 moves into L5: about 4 s.
 4. **Chains are still out:** "+" after a result is a phase transition the data never show (§7).
+
+## Part 7: chained expressions of one precedence level (pre-registered 2026-10-29, before the code)
+
+**Why:**
+- **The next step** in ARCHITECTURE.md §7, proposal A of `docs/CHAINS.md`: "a + b − c =".
+- **The user (2026-10-29):** compare one chain in training with no chains in training. B (precedence) follows.
+
+**What breaks today** (CHAINS.md §1): after "a + b", the phase automaton has no move by an operator, so the column is
+lost, and there is no answer at any length above one operation. The running result is already right: it is the
+coordinate.
+
+### The change
+
+1. **Phases merge as places do** (P3, lifted to phases).
+   - **The rule:** two phases are one phase if both hold:
+     - **positive evidence:** they share an input whose shift is the same from both;
+     - **they never disagree:** for every input both make moves by, the shifts are equal and the phases they lead to
+       are again one phase (a fold, as P3's full form folds places); for each sensor, the merged phase still predicts
+       one symbol, or still names its coordinate, wherever both did.
+   - **The expected effect:**
+     - the start and "after +" share every digit's shift (part 6, G4), so they merge;
+     - the phases their digits lead to must then be one phase: "after a digit" and "after a op b";
+     - the automaton becomes a loop: digit, operator, digit, …, "=". No chain need have been seen.
+2. **A collision is a merge before it is a refutation** (P4).
+   - **The rule:** when a displacement would map two places to one (or one to two), the two places are first tried as
+     one place by P3's fold. Only if the fold disagrees is the displacement refuted.
+   - **Why:** a chain gives one result place a future its siblings lack ("a + b" followed by "−"). P3 then keeps it
+     apart from the other places of the same result, and every translation through it collides. Without this, one
+     chain would refute about half of the displacements of "+" (worked out in CHAINS.md).
+3. **Shift classes are tried with naming.**
+   - **The rule:** generalize, then correct. The classes are chosen with the naming pairs in the trials. If the final
+     solve then fails, they are chosen again without them.
+   - **Why:** a chain's last places are pinned only by naming (its answer names its result). Without that, the greedy
+     can put them in the wrong class, and then naming fails everywhere.
+
+### The line between innate and learned (for the user to check)
+
+- **New innate assumptions:**
+  - phases that share an input's shift, and never disagree, are one phase;
+  - a collision is first tested as one place.
+- **Learned:**
+  - which phases merge;
+  - that a result continues like a digit;
+  - which operators may follow it.
+
+### Worlds
+
+- **Training** (both arms): A2's world restricted to {+, −}: half of the 2p² equations "a op b = c".
+- **Arm "no chains":** that only.
+- **Arm "one chain":** that, plus one chain "a op b op′ c = d", drawn at random once per seed.
+- **Test:**
+  - 1,000 random chains each of 2, 3 and 4 operations (3–5 operands), the operators random from {+, −};
+  - the held-out single equations.
+- p = 13 and 97, 3 seeds.
+
+### Predictions
+
+| # | prediction |
+|---|---|
+| H1 | single equations: held-out + and − ≥ 0.99 in both arms (A2's level) |
+| H2 | no chains in training: chains of 2, 3 and 4 operations ≥ 0.99 (zero-shot) |
+| H3 | one chain in training: chains of 2, 3 and 4 operations ≥ 0.99 |
+| H4 | the mechanism: {start, after "+"} and {after a digit, after "a op b"} merge in both arms; in the one-chain arm, the chain's own phases merge into these; every move of the frame is the world's (part 6's check) |
+| H5 | controls: with the phase merge off, chains ≤ 0.05 in both arms; with the collision merge off, the one-chain arm's held-out + falls below 0.99 |
+| H6 | no regression in the answers of parts 3, 5 and 6 and the walks. Phase counts fall as change 1 predicts: A1 from 6 to 4, A2 from 8 to 6 |
+| H7 | cost: training and sleep at p = 97 under 30 s per run |
+
+**What would refute the step:**
+- **H2 failing:** shared shifts don't identify phases, or the loop doesn't form without seeing a chain.
+- **H3 failing while H2 holds:** one chain hurts. The collision merge isn't enough.
+- **H6 failing in the answers:** the merges changed single-operation worlds.
+
+**Not in this step:** precedence ("a + b × c", part B), × in chains, parentheses.
