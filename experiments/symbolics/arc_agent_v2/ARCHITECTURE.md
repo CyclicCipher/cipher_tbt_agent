@@ -40,6 +40,17 @@ Started 2026-10-29 (the user). **This is the one agent under development.** **Pr
 - **The test for any mechanism:** would it learn MNIST, or a game, unchanged? If it needs to know that its inputs are
   numbers, it breaks the rule.
 
+**The general-learner standard** (the user, 2026-10-29): "The moment you start thinking about modifying what is
+supposed to be a general-purpose learner so that 'I can get this many coordinates or this specific outcome' you have
+failed and started cargo-culting... You would not do this to a transformer, hold this model by the same standard."
+- **Two levers only:**
+  1. **The data:** feed it what a human learning the task would get, and ask "does this learn as well or better than a
+     human with the same information?"
+  2. **Sound architectural choices** that make it a better general learner, justified across diverse worlds, never by
+     one milestone's target.
+- **Milestones measure the general learner.** They are not specifications for new parts: no "place-value module", no
+  "carry register", no change of notation to suit the learner.
+
 ## 1. The theory
 
 From `arc_agent/docs/DESIGN.md` §1a (the user's derivation, 2026-10-29):
@@ -283,7 +294,7 @@ in `docs/LAB.md`, built, run, and recorded.
 | hippocampus | keys by the cortex's location (TEM); a day's memory first; relabelled walk worlds | part 8 | **done**: revisits by new paths recalled 100% where the column knows its place; 0% without location keys or without recency |
 | union column | the column's state as a weighted union of (phase, coordinate) hypotheses: Bayesian filtering, bursting on surprise; replaces part 7's merge (`docs/NEURAL_COLUMN.md`) | part 9 | **done**: chains 1.000 in {+, −} and in {+} only (part 7 couldn't); k − 1 bursts per chain; control 0.000; answers ~1–1.6 bits (the Laplace prior is too broad) |
 | A3, step 1 | two-digit numerals mod 100, measured (`docs/A3.md`) | part 11 | **done**: held-out 1.000; the chain found is CRT (2, 4, 5, 25), not decimal; tens shift = 10 × units, unrelated; no naming; withheld answers 0.000 (no coordinate: one position's moves are paths, the wrap is the carry) |
-| A3, step 2 | coordinates per digit position, joined by the carry (`docs/A3.md` §4: choices (a)–(c)) | — | awaiting the user's choice |
+| A3, next | the general learner on the data a human gets for multi-digit addition, against that human (`docs/A3.md` §4; the general-learner standard, §0) | — | to be proposed |
 | chains B | precedence ("a + b × c ="): working memory in a `thalamus.py`; the gate's operations as hypotheses, taught by prediction error | part 10 | **done**: 2-operation expressions 1.000 (precedence learned from 300 examples; gate off 0.000 on the sensitive ones); 3 operations 0.85–0.88 (releases before + and − unlearnable from 2-operation data); the run 3.4 min, over its 2-minute target |
 
 **Next, proposed in the order the goal needs (for the user to confirm, 2026-10-29).** Analogy and the reversal curse
