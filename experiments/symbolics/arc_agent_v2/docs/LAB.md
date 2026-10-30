@@ -1895,3 +1895,165 @@ Any of these would change the plan.
    - **With answers withheld,** nothing remains (0.000), against part 5's 1.000 for single digits.
 2. **Step 2 must give coordinates to places whose moves are paths, not cycles** (one position's digits), and join the
    positions by the carry. This is the extension structure of `docs/A3.md` §1, now measured.
+
+## Part 12: arithmetic and MNIST in one brain (pre-registered 2026-10-29, before the code)
+
+**Why:**
+- **The user's terms:**
+  - "your next experiment will have to do both math and MNIST digit prediction with the same model. Mind you, it will
+    be unlabeled, unsupervised learning";
+  - "the same brain instance with no domain flag anywhere, and regions differing only in their wiring".
+- **The design:** `docs/JOINT.md` (the research, the brain's shape, the general changes).
+- **The audit** (`docs/AUDIT.md`): parts 5–10 were exercised only by arithmetic. This part is their first test
+  outside it, and it removes two of AUDIT §3's limits (identity-only content, one frame per brain).
+
+**What breaks today:**
+- **Content is compared by identity.** MNIST's patches never repeat exactly, so no content would ever be recognized.
+- **The prior is too broad.** Laplace's rule (n + 1) / (N + K) adds one pseudo-count per possible input.
+  - **For images,** K is in the tens of thousands, so a model never refutes anything: an unseen patch costs it almost
+    nothing.
+  - **For symbols,** part 9 measured the same breadth: answers cost 1–1.6 bits where they were certain.
+- **The hippocampus mixes episodes.** Two images seen along the same gaze path share every place, because sensed
+  content doesn't enter DG.
+- **There are no objects.** What is at a place can't depend on which digit is there.
+- **The brain has one frame.** Two sensory regions would be consolidated into one.
+
+### The change
+
+1. **Content by overlap: one content model for every region** (`information.py`, the column).
+   - **A cell's content** for a sensor is N, the inputs seen there, and c_i, how many of them had bit i active.
+   - **The prior:** one pseudo-observation of an average SDR, each bit active with probability w/d. So
+     p_i = (c_i + w/d) / (N + 1).
+   - **An input's likelihood:** log L(x) = (1/w) [Σ_{i∈x} log p_i + Σ_{i∉x} log(1 − p_i)].
+     - **The 1/w:** an SDR's w bits come from one event. Taking them as w independent observations would make every
+       comparison w times too confident. This is tempered (generalized) Bayes, with learning rate 1/w (Bissiri,
+       Holmes & Walker 2016).
+   - **A probability over inputs,** where one is needed (a prediction, the bits measure): L normalized over the inputs
+     the region has received.
+   - **The prediction:** the known input with the highest predictive probability, as now.
+   - **What it replaces:** Laplace's rule, wherever the brain weighs or predicts: the union, the thalamus's thoughts,
+     the mixture, and the bits measure. The hippocampus's own recall stays exact counts, since it memorizes.
+   - **The identity limit:** two random SDRs share about 0.8 of 40 bits. So for symbols, a cell predicts what it saw,
+     as before, only more sharply.
+2. **The hippocampus conjoins what was sensed** (`hippocampus.py`).
+   - **The next place:** DG(place, moving input, the content sensed at the place since the last move).
+   - **Unchanged:** arithmetic, whose symbols are both content and moving input, so nothing is sensed between moves.
+3. **Objects as hidden causes** (L2/3: the column and consolidation).
+   - **Cells:** content is kept per (object, phase, coordinate), or (object, place) where a frame isn't factored.
+   - **Learned at sleep, per region** (hard EM with a Chinese-restaurant prior):
+     - **A known object k** has prior weight n_k, the episodes it explains.
+     - **A new object** has prior weight α = 1, the same strength as the content prior (1). Its content is that
+       prior (p_i = w/d).
+     - **Pass 1:** in replay order, each episode joins the object (known or new) that maximizes prior times
+       likelihood, its content summed over its cells. The cells are updated as it joins.
+     - **Then:** each episode is taken out and placed again in the same way, until none moves, at most 5 passes.
+   - **Each object gets a random SDR,** its identity (published upward from part 13).
+   - **Awake:** the union's hypotheses are (object, phase, coordinate).
+     - **The start:** an episode starts with every object at the start, weighted by n_k.
+     - **Pruning:** the start union isn't pruned; pruning (to 64) happens after the first content input has weighed
+       it.
+     - **The posterior:** what the region recognizes is the posterior over objects.
+   - **Today's memory is one more object**, replacing the override of part 8 and part 10's best place (AUDIT §2.3).
+     - **Before a sleep,** the day's memory is the content of a new object, "today", with prior weight α.
+     - **Filing:** it is filed under each hypothesis's place, weighted by that hypothesis's posterior.
+     - **Reading:** each hypothesis reads it at its own place.
+     - **Clearing:** sleep consolidates and clears it, as now.
+4. **One frame per receptive field** (`brain.sleep`).
+   - **Each region** consolidates from the hippocampus's replay restricted to its own sensors, into its own frame.
+   - **A one-region brain** is unchanged.
+5. **The innate frame** (`config` "innate:retinotopic-2d"; rule 5, B1).
+   - **The frame:** V's places are the 4 × 4 patch positions, a grid code (`Modules`) given, not learned.
+   - **The gaze:** its efference copy is the shift's code in that frame. That is a motor map aligned with the
+     retinotopy, as the superior colliculus's is.
+   - **At sleep:** an innate region learns only its objects.
+
+### The line between innate and learned (for the user to check)
+
+- **New innate assumptions:**
+  - content as per-bit counts, with a prior of one average SDR, and an SDR weighed as one observation (1/w);
+  - objects as hidden causes, with a Chinese-restaurant prior of the same strength (α = 1);
+  - the hippocampus conjoins everything at a moment;
+  - a frame per receptive field;
+  - V's retinotopic frame and its gaze map (biology, rule 5);
+  - the retina's transduction, a fixed random projection (the sensor, not the learner).
+- **Learned:**
+  - the objects: how many, what each holds at each position, which episodes are which;
+  - today's environment;
+  - everything S learned before.
+- **Not given:**
+  - labels;
+  - the number of digits;
+  - which patches go together;
+  - that S's inputs are symbols and V's are images.
+
+### Worlds
+
+- **MNIST** (`worlds/mnist_world.py`):
+  - **The data:** the idx files at `C:/Users/julia/GitHub/data/MNIST/raw/`, outside the repository.
+  - **Per seed (0, 1, 2):** a random 3,000 of the 60,000 training images, and a random 1,000 of the 10,000 test
+    images.
+  - **An image:** 4 × 4 patches of 7 × 7 pixels.
+  - **The retina:** a patch's 49 pixels as ±1 (on above 127). A fixed Gaussian matrix (d × 49, the world's seed)
+    projects them, and the top w = 40 of the d sums are kept. This is random projection and winner-take-all (Dasgupta,
+    Stevens & Navlakha 2017, *Science* 358:793): similar patches overlap, and a blank patch always gives one SDR.
+  - **An episode:** the patch at (0, 0), P1's start, then the other 15 in a random order, each after the gaze shift
+    that brings it.
+  - **Labels** are used only to score.
+- **The joint stream** (per seed):
+  - A2's training equations at p = 13 (half of the 3p², as part 6), and the 3,000 images, interleaved by a seeded
+    shuffle;
+  - one day, then one sleep;
+  - the test: A2's held-out equations, and the 1,000 test images, with learning off.
+- **The brain** (`config.JOINT`):
+  - **S:** learned frame, fed by `symbols`, which move it;
+  - **V:** innate:retinotopic-2d, fed by `retina` and `gaze`, moved by `gaze`.
+- **The controls** (seed 0): the same stream without images, and without equations.
+- **The battery:** tier 1 and tier 2, since the column and consolidation change.
+
+### Predictions
+
+**The scores' rules:**
+- **The k-cluster score:**
+  - take the k largest objects (by training episodes);
+  - read each test image as its most probable object among them (the brain's posterior, restricted);
+  - k = 100: label each object by its training majority;
+  - k = 10: match objects to labels one-to-one (Hungarian).
+- **The 1-NN check:** each test image's nearest training image, by the summed overlap of their patch SDRs at each
+  position, with the label taken from it.
+
+| # | prediction |
+|---|---|
+| U1 | MNIST, 100 clusters: ≥ 0.90 in every seed (B1) |
+| U2 | MNIST, 10 clusters: ≥ 0.60 in every seed (B1) |
+| U3 | V's objects: more than 10 and at most 300, in every seed |
+| U4 | the encoder keeps what matters (the apparatus): 1-NN ≥ 0.85 |
+| U5 | S learns one object, in the joint brain and in A1, A2 and the reversal (the battery's brains); the walks' day 1, one object |
+| U6 | arithmetic in the joint brain: A2's held-out accuracy 1.000 on each operation (as part 6), every seed |
+| U7 | non-interference (seed 0): S's frame and answers are identical with and without images; V's objects (every assignment) and scores are identical with and without equations |
+| U8 | part 8's relabelled walks: arm (a) 100% of the revisits where the column knows its place; arm (b) (no location keys) and arm (c) (today's object off, in place of recency off) as part 8's (b) and (c) |
+| U9 | the battery: every accuracy of parts 3, 5, 6, 9 and 10 reproduces at p = 13 (3 seeds) and at p = 97 (seed 0); the frame fingerprints are identical; precedence K1 ≥ 0.95, and K2 within 0.03 of part 10's. Fields of bits and weights change, and are recorded as the new baseline |
+| U10 | the cross-entropy of part 9's held-out answers: under 0.5 bits (part 9: about 1–1.6) |
+| U11 | cost: part 12's run under 2 minutes; tier 1 with the suite under 2 minutes; tier 2 under 2 minutes |
+
+**My expectation, beside the criteria:** U1 and U2 are B1's success criteria, not my forecast. I expect U3 and U4
+to hold. For U1 and U2 I have no basis for a forecast: this learner has never seen an image. The literature's k-means on
+raw pixels (about 0.53–0.59 with 10 clusters) is the only reference point.
+
+**The human comparison:** a person who has never seen digits, sorting these images by shape with no names. I know of
+no measured number for it, and give none.
+
+**What would refute the step:**
+- **U4 failing:** the apparatus. The encoder loses the digits, and U1–U3 say nothing about the learner.
+- **U1 or U2 failing with U4 holding:** the objects don't capture the digits, although the input does.
+- **U5 failing:** the object prior is too eager, and arithmetic is fragmented into objects.
+- **U6 or U9 failing:** the content model changes what arithmetic learned.
+- **U7 failing:** wiring alone doesn't keep the regions apart, so a domain leaks into the other.
+- **U8 failing:** today's object doesn't do what the override did.
+
+**Not in this step:**
+- the association region and the multimodal equations (part 13);
+- the thalamus's replacements (part 14);
+- the relation's general form (part 15);
+- a learned visual frame, and overlap in P3 and P4 (B2);
+- feedback between regions;
+- merging objects after they are made.

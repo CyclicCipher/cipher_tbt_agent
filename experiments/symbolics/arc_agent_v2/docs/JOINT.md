@@ -12,6 +12,17 @@
 
 Nothing here is built. Part 12's pre-registration follows from §8.
 
+**Settled in part 12's pre-registration** (`docs/LAB.md` part 12), where this note left them open:
+- **The content model (§3.1):** per-bit counts with a prior of one average SDR, p_i = (c_i + w/d) / (N + 1), and an
+  SDR weighed as one observation (log-likelihood × 1/w).
+  - **Why the 1/w:** without it, a symbol's 40 bits would make every comparison 40 times too confident.
+  - **What it replaces:** Laplace's rule, everywhere the brain weighs or predicts.
+- **The Chinese-restaurant concentration (§3.3):** α = 1, the same strength as the content prior.
+- **EM:** until no episode moves, at most 5 passes.
+- **The k-cluster scores:** the k largest objects, with the brain's posterior restricted to them.
+- **MAX_HYPS:** the start union holds every object, and is pruned only after the first input has weighed it.
+- **The size:** 3,000 training and 1,000 test images per seed.
+
 ## 1. What the brain does (a short search)
 
 1. **Convergence-divergence zones** ([Meyer & Damasio 2009, *Trends Neurosci.* 32:376](https://en.wikipedia.org/wiki/Convergence-divergence_zone);
