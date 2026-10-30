@@ -1,11 +1,16 @@
 # CLAUDE.md — Cipher's TBT Agent
 
-## ⚠ NO CURRENT PROJECT (2026-10-29): arc agent v2 is CLOSED; ask the user which line is next
-The user ended the symbolic / TBT line after v2's part 12 and D2: "Symbolic models will never be able to work in a
-domain they weren't written for, or even particularly well in domains they were written for. Every TBT approach so far
-has been a dead end and it appears fundamental." The ideas may still apply to neural networks, where they came from.
-Don't resume v2, v1 or any other line until the user picks one. v2's record: `experiments/symbolics/arc_agent_v2/`
-(ARCHITECTURE.md §7, `docs/LAB.md`, `docs/VISION.md`).
+## ⚠ THE CURRENT PROJECT (user, 2026-10-30): dsnn, a dendritic spiking neural network — `experiments/dsnn/`
+**START HERE:** `experiments/dsnn/DESIGN.md`. Work only on dsnn unless the user decides otherwise.
+- **The goal** (the user): "to perfect a model of the human neuron and how to run it efficiently". Also a training
+  algorithm that doesn't require differentiability, found by investigating dendrites.
+- **The networks:** 2 wide × 2 deep, and 2 wide × 3 deep.
+- **The workflow:** pre-register each experiment in `experiments/dsnn/LAB.md` before code.
+
+**Closed (2026-10-29): arc agent v2, and with it the symbolic / TBT line.** The user: "Symbolic models will never be
+able to work in a domain they weren't written for, or even particularly well in domains they were written for. Every
+TBT approach so far has been a dead end and it appears fundamental." v2's record is in
+`experiments/symbolics/arc_agent_v2/` (ARCHITECTURE.md §7, `docs/LAB.md`, `docs/VISION.md`).
 
 ## (Closed) arc agent v2, `experiments/symbolics/arc_agent_v2/` — kept as reference
 
