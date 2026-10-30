@@ -62,6 +62,7 @@ class Params:
     V_detect: float = 0.0      # a spike is a crossing of this
     V_spike: float = 30.0      # the soma is held here for t_spike: the spike's waveform, and so the bAP
     t_spike: float = 1.0
+    t_ref: float = 2.0         # ms held at Vr after the spike's hold (amendment 3)
     # the dCaAP (Gidon et al. 2020's model, as in Hashemi et al. 2025)
     dca_theta: float = -36.0
     dca_tauA: float = 3.0

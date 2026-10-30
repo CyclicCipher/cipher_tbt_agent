@@ -6,17 +6,17 @@
 - **Backward Euler** for the leak, the coupling and the synaptic conductances (stable for thin branches).
 - **From the previous step:** the NMDA Mg2+ block, the AdEx exponential, the adaptation and the dCaAP current.
 - **A spike:** the soma crosses V_detect. It is then held at V_spike for t_spike (its waveform, which is the bAP
-  through the coupling), and reset to Vr.
+  through the coupling), then at Vr for t_ref (refractory; LAB.md E0, amendment 3).
 - **A dCaAP:** the zone crosses dca_theta upward outside its refractory period. Its strength
-  K = exp(-(C dV/dt) / (tauK I_th)), capped at 1, with I_th the zone's threshold current for a long step
-  (LAB.md E0, amendment 1).
+  K = exp(-(I_in - I_th) / (tauK I_th)), capped at 1. I_in is the injected and synaptic current into the zone and the
+  tuft at the crossing (amendment 2); I_th is the zone's threshold current for a long step (amendment 1).
 """
 from dataclasses import dataclass, field
 import math
 
 import numpy as np
 
-from .cell import Cell, Params, SOMA, ZONE
+from .cell import Cell, Params, SOMA, TUFT, ZONE
 
 DT = 0.05            # ms
 REC_EVERY = 10       # record every 0.5 ms
@@ -128,7 +128,8 @@ def simulate(stims, T, p: Params, wiring: Wiring = None, dt=DT, rec_every=REC_EV
     dAd, dAr = math.exp(-dt / p.ampa_decay), math.exp(-dt / p.ampa_rise)
     dNd, dNr = math.exp(-dt / p.nmda_decay), math.exp(-dt / p.nmda_rise)
     ii = np.arange(N)
-    gL0, Cz = cell.gL[SOMA], cell.C[ZONE]
+    gL0 = cell.gL[SOMA]
+    APICAL = [ZONE] + list(TUFT)
     if p.dca_w > 0 and p.dca_Ith <= 0:
         raise ValueError("the dCaAP needs dca_Ith (its rule: protocols.zone_rheobase)")
 
@@ -169,18 +170,16 @@ def simulate(stims, T, p: Params, wiring: Wiring = None, dt=DT, rec_every=REC_EV
             rhs[:, ZONE] += np.where(on, I_d, 0.0)
         A[:] = M0
         A[:, ii, ii] += gs
-        held = clamp > 0
+        held = clamp > 0                          # the spike's hold at V_spike, then the refractory hold at Vr
         if held.any():
             A[held, SOMA, :] = 0.0
             A[held, SOMA, SOMA] = 1.0
-            rhs[held, SOMA] = p.V_spike
+            rhs[held, SOMA] = np.where(clamp[held] > p.t_ref + 1e-9, p.V_spike, p.Vr)
         Vn = np.linalg.solve(A, rhs[..., None])[..., 0]
 
-        # spikes: release the hold, detect new crossings
+        # spikes: count down the hold, detect new crossings
         if held.any():
             clamp[held] -= dt
-            done = held & (clamp <= 1e-9)
-            Vn[done, SOMA] = p.Vr
         new = spiking & ~held & (Vn[:, SOMA] >= p.V_detect)
         if new.any():
             for s in np.flatnonzero(new):
@@ -191,7 +190,7 @@ def simulate(stims, T, p: Params, wiring: Wiring = None, dt=DT, rec_every=REC_EV
                         ring[(k + dl) % len(ring), sid(b, dst), c] += n
                         if keep_syn:
                             syn_log[b].append(((k + dl) * dt, dst, c, n))
-            clamp[new] = p.t_spike
+            clamp[new] = p.t_spike + p.t_ref
             w[new] += p.b
             Vn[new, SOMA] = p.V_spike
         w += np.where(spiking, dt / p.tau_w * (p.a * (V[:, SOMA] - p.EL) - w), 0.0)
@@ -199,9 +198,9 @@ def simulate(stims, T, p: Params, wiring: Wiring = None, dt=DT, rec_every=REC_EV
         # the dCaAP: onset, its strength K, its time course
         if p.dca_w > 0:
             cross = (V[:, ZONE] < p.dca_theta) & (Vn[:, ZONE] >= p.dca_theta) & (d_ref <= 0)
-            if cross.any():
-                drive = Cz * (Vn[:, ZONE] - V[:, ZONE]) / dt
-                Kv = np.minimum(1.0, np.exp(-np.maximum(0.0, drive) / (p.dca_tauK * p.dca_Ith)))
+            if cross.any():                       # the input: injected and synaptic current into the zone and tuft
+                I_in = (inj[k % CHUNK][:, APICAL] - gs[:, APICAL] * Vn[:, APICAL]).sum(1)
+                Kv = np.minimum(1.0, np.exp(-np.maximum(0.0, I_in - p.dca_Ith) / (p.dca_tauK * p.dca_Ith)))
                 for s in np.flatnonzero(cross):
                     dca[s].append((t, float(Kv[s])))
                 d_on[cross] = 0.0

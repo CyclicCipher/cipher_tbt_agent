@@ -188,6 +188,28 @@ cost figure for the network above used the old wiring.
    volley on b2.d can't fire the soma at any size.
 6. **N1 stays as it is:** its failure is the model's, not the protocol's.
 
+### Amendments 2–5 (approved by the user 2026-10-30, before run 2)
+
+2. **The dCaAP's input strength:** I_in is the injected and synaptic current into the zone and the six tuft segments,
+   at the crossing step. K = exp(−max(0, I_in − I_th) / (0.3·I_th)), capped at 1, with I_th as in amendment 1. Current
+   arriving through the trunk (a bAP) is not input.
+3. **A refractory period:** after the 1 ms hold at +30 mV, the soma is held at V_r for t_ref = 2 ms, and only then
+   released.
+4. **N5:**
+   - **Signed criterion:** doubling basal input must raise the event rate, and by at least twice the absolute change
+     that doubling apical input gives. Doubling apical input must *raise* the burst fraction, and by at least twice the
+     absolute change that doubling basal input gives.
+   - **Longer runs:** each scored condition runs 10 s, not 2 s. The rate rules keep their 2 s searches.
+5. **N6's test:** a 2 ms somatic current pulse at 10 + Δ ms. Its amplitude is the largest, in 50 pA steps, that alone
+   gives no spike in the test window. The window, the conditioning and the criterion are unchanged.
+
+**Predictions for run 2:**
+- **The dCaAP check:** passes, by construction (it now checks the code).
+- **N2:** may now pass, since a bAP meeting tuft input that is just below threshold gives a full-strength dCaAP.
+- **N3:** still fails at A+B if the direct input alone fires the soma. Spike counts drop with the refractory period.
+- **N5:** uncertain.
+- **N6:** passes at Δ = 50, and is uncertain at Δ = 100.
+
 ### The instrument: `viz/` (not an experiment)
 
 A local web page served by `viz/server.py`. Every simulation runs in the same `sim.py`, so there is one model and no

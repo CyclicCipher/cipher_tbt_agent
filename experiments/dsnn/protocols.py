@@ -66,13 +66,13 @@ def n5(r_b=4.0, r_a=4.0, seed=0, T=2000.0):
     return st
 
 
-def n6(c=10, s=10, delta=50.0, cond=1, test=1):
-    """Conditioning: c contacts on b1.d at 10 ms. Test: s contacts on b2.d at 10 + delta."""
+def n6(c=10, pulse=500.0, delta=50.0, cond=1, test=1):
+    """Conditioning: c contacts on b1.d at 10 ms. Test: a 2 ms somatic current pulse at 10 + delta (amendment 5)."""
     st = Stim()
     if cond:
         st.contacts(T0, INDEX["b1.d"], c)
     if test:
-        st.contacts(T0 + delta, INDEX["b2.d"], s)
+        st.current(T0 + delta, T0 + delta + 2.0, SOMA, pulse)
     return st
 
 
@@ -171,10 +171,10 @@ def strengths(p, dt):
     d = INDEX["b1.d"]
     long = [b for b in range(len(cs)) if _longest_above(r.V[b, 0, d], -40.0, r.t) >= 30.0]
     out["n6_c"] = float(cs[long[0]])
-    ss = np.arange(1, 41)
-    r = simulate([n6(s=s, delta=0.0, cond=0) for s in ss], 150.0, p, dt=dt)
-    quiet = [b for b in range(len(ss)) if not r.spikes[b][0]]
-    out["n6_s"] = float(ss[quiet[-1]]) if quiet else 0.0
+    pulses = np.arange(50.0, 5050.0, 50.0)            # the test: the largest pulse that alone gives no spike
+    r = simulate([n6(pulse=a, delta=0.0, cond=0) for a in pulses], 60.0, p, dt=dt)
+    quiet = [b for b in range(len(pulses)) if not r.spikes[b][0]]
+    out["n6_pulse"] = float(pulses[quiet[-1]]) if quiet else 0.0
     return out
 
 
@@ -239,7 +239,7 @@ def scenarios(cal):
                                                      default=default)
     tr = lambda *names: list(names)
     k, pulse, nt, n3n = 12, cal["n2_pulse"], cal["n2_tuft"], cal["n3_n"]
-    c6, s6 = cal["n6_c"], cal["n6_s"]
+    c6, s6 = cal["n6_c"], cal["n6_pulse"]
     return [
         dict(key="n1", title="N1 · Do inputs add?", T=100.0, traces=tr("soma", "b1.d", "b1.m", "b2.d"),
              question="Two groups of synapses, first on the same thin branch, then on two different branches. "
@@ -280,14 +280,15 @@ def scenarios(cal):
              runs=[("basal low, tuft low", dict(r_b=4, r_a=2, seed=0)), ("basal high, tuft low", dict(r_b=8, r_a=2, seed=0)),
                    ("basal low, tuft high", dict(r_b=4, r_a=8, seed=0))]),
         dict(key="n6", title="N6 · A plateau as memory", T=400.0, traces=tr("soma", "b1.d", "b2.d"),
-             question="A strong input to one branch starts an NMDA plateau. A weak test input to another branch comes "
-                      "Δ ms later. Does the cell still 'remember' the first input when the second arrives?",
+             question="A strong input to one branch starts an NMDA plateau. Δ ms later, a small current pulse into the "
+                      "soma, too weak to fire it alone. Does the cell still 'remember' the first input when the "
+                      "pulse arrives?",
              controls=[rng("delta", "test delay Δ (ms)", 10, 380, 10, 50), rng("c", "conditioning contacts", 0, 60, 1, c6),
-                       rng("s", "test contacts", 0, 60, 1, s6), tog("cond", "conditioning"), tog("test", "test")],
-             runs=[("test alone", dict(c=c6, s=s6, delta=50, cond=0, test=1)),
-                   ("conditioning alone", dict(c=c6, s=s6, delta=50, cond=1, test=0)),
-                   ("both, Δ = 50 ms", dict(c=c6, s=s6, delta=50, cond=1, test=1)),
-                   ("both, Δ = 300 ms", dict(c=c6, s=s6, delta=300, cond=1, test=1))]),
+                       rng("pulse", "test pulse (pA)", 0, 5000, 50, s6), tog("cond", "conditioning"), tog("test", "test")],
+             runs=[("test alone", dict(c=c6, pulse=s6, delta=50, cond=0, test=1)),
+                   ("conditioning alone", dict(c=c6, pulse=s6, delta=50, cond=1, test=0)),
+                   ("both, Δ = 50 ms", dict(c=c6, pulse=s6, delta=50, cond=1, test=1)),
+                   ("both, Δ = 300 ms", dict(c=c6, pulse=s6, delta=300, cond=1, test=1))]),
     ] + [
         dict(key="net%d" % depth, title="Network 2 × %d" % depth, T=300.0, traces=tr("soma", "zone"), network=depth,
              question=("Fibre 1 drives cell L1a strongly and L1b weakly; fibre 2 the reverse. Each layer feeds the next "

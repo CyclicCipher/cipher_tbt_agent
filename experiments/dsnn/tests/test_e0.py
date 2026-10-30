@@ -94,11 +94,12 @@ def n5(p, dt):
     if not (rb == rb and ra == ra):                        # a rule found no rate (nan)
         return dict(out, passed=False, note="a rate rule found no rate on its grid")
     conds = [(x, y, s) for x in (rb, 2 * rb) for y in (ra, 2 * ra) for s in (0, 1, 2)]
-    r = simulate([P.n5(x, y, s) for x, y, s in conds], 2000.0, p, dt=dt)
+    T = 10000.0                                            # amendment 4: 10 s per scored condition
+    r = simulate([P.n5(x, y, s, T=T) for x, y, s in conds], T, p, dt=dt)
     ev, bf = {}, {}
     for i, c in enumerate(conds):
         n, _, f = P.events(r.spikes[i][0])
-        ev[c], bf[c] = n / 2.0, f
+        ev[c], bf[c] = n / (T / 1000.0), f
     mean = lambda d, pairs: float(np.mean([d[b] - d[a] for a, b in pairs]))
     basal_pairs = [((rb, y, s), (2 * rb, y, s)) for y in (ra, 2 * ra) for s in (0, 1, 2)]
     apical_pairs = [((x, ra, s), (x, 2 * ra, s)) for x in (rb, 2 * rb) for s in (0, 1, 2)]
@@ -107,11 +108,12 @@ def n5(p, dt):
     table = [dict(r_b=x, r_a=y, seed=s, events_per_s=ev[(x, y, s)], burst_fraction=bf[(x, y, s)]) for x, y, s in conds]
     return dict(out, table=table, d_events_basal=d_ev_b, d_events_apical=d_ev_a, d_bf_basal=d_bf_b,
                 d_bf_apical=d_bf_a,
-                passed=abs(d_ev_b) >= 2 * abs(d_ev_a) and abs(d_bf_a) >= 2 * abs(d_bf_b))
+                passed=(d_ev_b > 0 and d_ev_b >= 2 * abs(d_ev_a)            # amendment 4: signed
+                        and d_bf_a > 0 and d_bf_a >= 2 * abs(d_bf_b)))
 
 
 def n6(p, cal, dt):
-    c, s = cal["n6_c"], cal["n6_s"]
+    c, s = cal["n6_c"], cal["n6_pulse"]
     rows = []
     for d in (50.0, 100.0, 300.0):
         r = simulate([P.n6(c, s, d, 1, 0), P.n6(c, s, d, 0, 1), P.n6(c, s, d, 1, 1)], 400.0, p, dt=dt)
