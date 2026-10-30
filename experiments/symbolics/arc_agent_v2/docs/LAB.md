@@ -2232,10 +2232,9 @@ no measured number for it, and give none.
    - **Not representation collapse:** the encoder is fixed and keeps the digits apart (its 1-NN is 0.84–0.85, U4).
      What fails is model selection, which is cluster collapse in a mixture's sense: the likelihood term is weak
      against the partition's prior, so one component takes everything.
-4. **Why the evidence is small. Two causes, both general:**
-   - **The encoder:** a stroke shifted by a pixel changes about 10 of a patch's 49 pixels. After a random projection
-     and winner-take-all, two such patches share a few of their 40 bits. So the patches of one digit are spread, not
-     concentrated. (U4's narrow refutation is the same fact, seen through the 1-NN.)
+4. **Why the evidence is small.**
+   - **Not the encoder, as first written here.** The diagnostic D1 below refutes that.
+   - **The tile:** a 7 × 7 tile at a fixed retinal position carries little of the digit, even in raw pixels.
    - **The evidence scale:** amendment 3 fixed it at 1/2w, from the identity limit, where an SDR is a codeword.
      - **For patches:** with the pre-registered 1/w, the digits would pay 3.6 nats per image against 2.3, and objects
        would form.
@@ -2246,9 +2245,29 @@ no measured number for it, and give none.
 1. **The evidence scale should be learned, per sensor, not set.** A transformer's logit scale is a learned weight,
    not a constant. The candidate: the temper that best predicts each sensor's held-out inputs, chosen at sleep from
    the episodes. It is general: every sensor, the same rule, and calibration is its only aim.
-2. **The encoder's similarity is too sharp for strokes.** The retina is the world's transduction, and it was fixed in
-   the pre-registration. A learned L4 feature layer (HTM's spatial pooler) is the general alternative: features that
-   come from the data's own statistics.
+2. **What V senses is not TBT's feature** (D1, below).
+   - **TBT's feature:** a local property at a pose, such as Monty's surface orientation and curvature at a point. The
+     object is their arrangement, at locations in its own frame.
+   - **V's:** a sixteenth of a digit, at a retinal position, carrying all the handwriting's variability.
+   - **Not designed:** research first (what features and locations are for 2-D vision; V1's simple and complex
+     cells; fixational eye movements, which our episodes omit, against "not less than a human gets").
 3. **The regression is too slow** (U11): the per-bit likelihood costs numpy calls where Laplace's rule cost a lookup.
    A performance step, with identical results, is owed.
 4. **4-operation chains at p = 97 cost more than they did** (1.04 bits): not diagnosed.
+
+**D1: does the retina's encoder keep similarity?** (After the run, for the user's question; MNIST's first 3,000
+training images, labels only to measure. Inked patches only.)
+
+| comparison | pixels shared (Jaccard) | SDR bits shared |
+|---|---|---|
+| a patch, and the same patch after the image moves a pixel right / down | 0.60 / 0.63 | 0.28 / 0.31 (chance 0.02) |
+| two patches at (1, 1), same digit | 0.334 | 0.113 |
+| two patches at (1, 1), different digits | 0.250 | 0.069 |
+| same ÷ different | 1.34 | 1.65 |
+
+- **What the encoder does:** it halves raw similarity, but keeps the contrast between same and different digits,
+  even sharpening it.
+- **Where the weakness is:** in the tile itself. Two 7s' tiles at one position overlap barely more than a 7's and a
+  3's do (0.33 against 0.25).
+- **What this rules out:** a learned L4 feature layer on these tiles (HTM's spatial pooler) re-represents its input
+  but can't add what the input lacks. It is not the remedy for this deficit.
