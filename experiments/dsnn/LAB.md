@@ -1127,3 +1127,40 @@ needs more, I stop and ask.
 3. **Option 1's cost:** 338 s of compute over the two runs (the fit 251 s), and about 590 lines of code: `dcaap_fit.py` 201,
    `tests/test_e0c.py` 286, and about 100 in `sim.py`, `cell.py` and `protocols.py`. Of those 100, the Ca²⁺-current
    output is shared with E1.
+
+### E1 amendments (2026-10-30, during the build, before the run)
+
+**What ran before these were written:** only the fast test: one 100 ms run of type B, to check that a pathway's
+calcium is read. No protocol and no fit.
+
+**Which cells:**
+- **E0c-A's fit failed,** so by the comparison rule E1 runs on E0b's type A only, and the comparison of option 1
+  against option 2 for type A rests on E0c's results and its exploration (amendment 9).
+- **E0c-B identified no port bug,** so type B is E0b's.
+
+**Details the pre-registration left open:**
+1. **E0b's saved rule-set values are reused, not recomputed** (`runs/e0b_dt0.05.json`).
+   - **The values:** type A: τ_K 11.58 ms, post pulse 4100 pA, n3_n 27, n6_c 18. Type B: post pulse 1450 pA,
+     n2_tuft 34.
+   - **Why that's safe:** the simulator's change for E0c reproduces E0b to the last digit (E0c's amendments).
+2. **"Small" and "large" EPSPs:** n on 1–400. The EPSP is the soma's peak within 130 ms of one activation, measured
+   from rest.
+3. **Timing:**
+   - Every protocol's first pairing is at 500 ms, and the run ends 1 s after the last input.
+   - Sjöström's 0.1 Hz pairings are 1 s apart.
+   - A post burst is 3 pulses 5 ms apart, each 2 ms at the cell's post-pulse amplitude.
+   - ±10 is measured from the first pulse's onset.
+4. **The DC step** (F2, F3) is on a 0–2000 pA grid. It runs from 0 ms to the end of the protocol.
+5. **L4's current** is searched on 50–5000 pA. Its run puts the post pulse at 150 ms, and the step alone's spike
+   count at that amplitude is reported.
+6. **A1's dispersed arm:** n6_c contacts spread over the basal group (both basal paths) by length. Its change is the
+   mean over compartments, weighted by contacts, of one contact's change. So is any pathway spread over several
+   compartments.
+7. **A3:** the zone's drive (n3_n or n3_n − 4 contacts) arrives at the same times as the pathway's spikes. Its own
+   calcium is reported too.
+8. **T5:** the tuft and basal pathways run together, in one cell.
+9. **The fit's grids:**
+   - θ: 40 log-spaced values from (the smallest fit-set peak of c)/20 to the largest fit-set peak, with θ_d < θ_p;
+   - γ_p/γ_d: 16 log-spaced values over 0.1–100;
+   - k_d: 21 log-spaced values over 0.01–100 per s.
+10. **Parallel processes** run the settings and the protocols. The arithmetic is unchanged.
