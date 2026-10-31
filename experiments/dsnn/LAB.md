@@ -1680,3 +1680,120 @@ your implementation."
   will change.
 - **To review:** type B's synapses. They are the same human L2/3 conductances with "typical" kinetics, not values
   measured for L5.
+
+## E0e: type A rebuilt faithfully, and Gidon's Fig. 3 replicated (pre-registered 2026-10-30)
+
+**The user's decisions (2026-10-30), after the audit:**
+1. "Yes" to E0e.
+2. XOR is read "as the paper does", at the dendrite. The soma's output is optional: "you could do both."
+3. The graded first dCaAP is pursued "only if relevant". Fig. 3's XOR doesn't use it, so it's parked.
+
+The user's statement of the XOR test is two separate synaptic inputs that, firing together, push past the threshold.
+
+**The question:** with type A built as Gidon et al. built it, does the model compute XOR at the dendrite, as their
+Fig. 3 shows? And what does the soma do (their Fig. S9)?
+
+**Sources:**
+- the paper's Fig. 3 (seen in the PDF), and its text;
+- ModelDB 254217 (`xor.hoc`, `syns.hoc`, `biophys.hoc`, `dCaAP.mod`, `Traub.mod`, the synapse `.mod` files, the
+  morphology's `celldef`, `TPointList.setrand`);
+- its screenshots, digitized before any of this code was written.
+
+### The cell (type A, rebuilt; it replaces the earlier type A)
+1. **The morphology:** the full reconstruction 171122005, every section, **scaled by 1.25** in length and diameter
+   (their `geom()`).
+   - **The axon:** 1000 µm long and 1 µm thick, attached at soma(1).
+   - **The cut, NEURON's:** apical sections into 1 + 2·int(L/30) segments, all others into 1 + 2·int(L/60). Each
+     segment is a compartment, as `cells/l5.py` builds type B.
+2. **Passive everywhere:** Rm 37,000 Ω·cm², Cm 0.45 µF/cm², Ra 100 Ω·cm, E_L −74 mV.
+3. **The soma and axon:** Traub's channels (`Traub.mod`) in place of the leak.
+   - **Na⁺:** m²h, g 0.1 S/cm², E_Na 90 mV.
+   - **K⁺:** n, g 0.045 S/cm², E_K −80 mV.
+   - **Leak:** 1/37,000 S/cm² at −74 mV.
+   - **Kinetics:** v_shft 50, Q₁₀ 3 from 32 °C to 35 °C.
+   - A spike is the soma crossing 0 mV, their `APCount` threshold. The AdEx soma goes.
+4. **The dCaAP, exactly as `dCaAP.mod`:**
+   - **Onset:** at the first time step that starts with the site's V > θ = −36 mV, outside the 200 ms refractory
+     period.
+   - **K:** K = exp(−(V − θ)/((θ − V_rest)·D)), capped at 1, with V_rest −75 and D 0.3.
+   - **The current:** w·K·(A − B), with A and B logistic from 0.001 (τ_A 3, τ_B 0.4 ms), B starting Δ = 21 ms after
+     the onset.
+   - **w** is their density times the area of the one segment that holds the site:
+     - uncoupled (Fig. 3): apic[76](0.214), 1.6 mA/cm²;
+     - coupled (Fig. S9): apic[60](0.99), 4 mA/cm².
+   - **τ_K is deleted** (E0b's K from V̇), with its fit, its rheobase rule and E0b's check 4.
+5. **Synapses, theirs** (`syns.hoc`, "as in Eyal et al. 2018"):
+
+   | type | peak conductance | rise / decay | reversal | other |
+   |---|---|---|---|---|
+   | AMPA | 0.7 nS | 0.3 / 1.8 ms | 0 mV | |
+   | NMDA | 1.3 nS | 8 / 35 ms | 0 mV | Mg²⁺ 1 mM, γ 0.077, 3.57 |
+   | GABA "martinotti" | 0.5 nS | 2 / 23 ms | −75 mV | |
+   | GABA "basket" | 0.5 nS | 0.5 / 5 ms | −75 mV | |
+
+   - **Every synapse** is a point on a section, placed uniformly by length over its list (their `setrand`).
+   - **Its spikes:** an independent Poisson train at 20 Hz from 100 ms to the end of the run.
+   - **The simulator changes for this:**
+     - a synapse type list replaces "one AMPA + NMDA contact", and each cell carries its own kinetics;
+     - events can be AMPA alone (the background), AMPA + NMDA (the pathways), or GABA.
+6. **The run, as theirs:** dt 0.025 ms (NEURON's default; their XOR runs don't switch on CVODE), from V = −75 mV.
+
+**Positions and spike times** use our random generator, not NEURON's, so each condition runs on 3 seeds (positions
+and trains), and the verdicts must hold on each.
+
+### The protocols
+**Check M, the scale:** the path distance from the soma to apic[76](0.214) is about 536 µm (the paper: about 550).
+Reported with the soma's input resistance; the recorded cell's is 41 MΩ.
+
+**Check T, their test pulse (uncoupled):**
+- **The protocol:** a current step at apic[76](0.214) from 200 ms to 1200 ms, 0.18–0.30 nA in steps of 0.01.
+- **Passes if** the smallest step that fires a dCaAP is 0.22 ± 0.01 nA. The paper: "The dCaAP threshold was set to
+  −36 mV with 220 pA current step."
+- **Reported:** the first dCaAP's peak, and the later ones. Their screenshot shows every step's first dCaAP reaching
+  about the same height, and the later ones smaller.
+
+**F3, XOR at the dendrite (uncoupled; Fig. 3B–E):**
+- **The setup:** the dCaAP at apic[76](0.214).
+- **The synapses:**
+  - 100 background AMPA synapses over every section but the axon;
+  - pathways X and Y, 25 AMPA + NMDA synapses each, over the "subdomain" (apic[60]'s subtree without apic[60]);
+  - for the inhibition condition, 20 martinotti GABA synapses over the same subdomain.
+- **Conditions:** X, Y, X+Y, X+Y+inhibition, each 4 s.
+- **A large dCaAP:** a dCaAP whose site voltage peaks above 0 mV, as their figure draws it against its 0 mV line.
+- **Their model, digitized:** 7 large dCaAPs in 4 s for X (peaks 7–13 mV, the dendrite between −49 and −41 mV), 9 for
+  X+Y+inhibition (1–8 mV, between −39 and −29 mV), and none for X+Y (Fig. 3D).
+- **Passes if,** on each seed: X ≥ 3, Y ≥ 3, X+Y ≤ 1, X+Y+inhibition ≥ 3 large dCaAPs.
+- **Reported:** every dCaAP's K, the site's voltage, and the soma's spikes. Their Fig. 3 soma doesn't fire: the site
+  is uncoupled.
+
+**S9, the soma's output (coupled; Fig. S9), as the user allowed:**
+- **The setup:** the dCaAP at apic[60](0.99).
+- **The synapses:**
+  - 100 background synapses;
+  - X and Y with 35 synapses each over the subdomain;
+  - "distal inhibition": 35 martinotti synapses at subdomain points more than 700 µm from the soma;
+  - "proximal inhibition": 35 basket synapses over the basal dendrites.
+- **Conditions,** each 20 s, as theirs: X, Y, X+Y, X+Y+distal inhibition, X+proximal inhibition.
+- **Scored as "XOR at the soma"** if, on each seed, the soma's rate for X and for Y each exceeds X+Y's, and distal
+  inhibition raises X+Y's rate.
+- **Reported:** every rate, and the dCaAPs.
+- **I don't have Fig. S9's numbers** (it's in the supplement), so this is scored by its pattern only.
+
+### Predictions (2026-10-30, before the code)
+
+| | prediction | confidence |
+|---|---|---|
+| check M | about 536 µm; the soma's R_in falls from 61 toward 40 MΩ | high |
+| check T | 0.22 ± 0.01 nA | medium–high: their model at their scale, with the same rules |
+| F3: X, Y | ≥ 3 large dCaAPs each | medium–high |
+| F3: X+Y | ≤ 1: the steady depolarization sits above θ, so each re-fire after the refractory period has a small K | medium–high |
+| F3: inhibition | ≥ 3 | medium |
+| S9 | the pattern holds | medium |
+
+**Compute:** about 3 minutes over 7 processes. The full cell has about 640 compartments, and S9's 20 s runs are the
+bulk.
+
+**Next, not part of E0e:**
+- re-run E1's type A protocols on this cell;
+- re-validate a reduced type A against it, for cost;
+- the graded first dCaAP, if it turns out to matter.
