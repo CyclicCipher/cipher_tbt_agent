@@ -1620,3 +1620,63 @@ from E_L, as type B's is after 20 s.
    - the candidate's constants replace the transplant's;
    - its rest is settled for 2 s;
    - stage 1 runs in 30 chunks of 20 over 7 processes, and stage 2's refinements one per process.
+
+### E0d step 4: cancelled by the user (2026-10-30), before it finished. No result.
+
+### The audit against Gidon et al. 2020 and their XOR model (2026-10-30)
+
+**What prompted it:** the user, after reading the paper: "I think the Gidon paper might reveal broader problems in
+your implementation."
+
+**What I read:**
+- the paper's main text (`research papers/Gidon et al.pdf`; the supplement isn't included);
+- their Fig. 3 / S9 model in full (ModelDB 254217: `xor.hoc`, `syns.hoc`, `biophys.hoc`, `dCaAP.mod`, the synapse
+  `.mod` files, the morphology's `celldef`);
+- its three screenshots.
+
+**What the paper and their code say:**
+- **The dCaAP:** TTX doesn't block it; Cd²⁺ does. Its width is 4.4 ± 1.4 ms and its amplitude at threshold
+  43.8 ± 13.8 mV (n = 32).
+- **The graded amplitude in the recordings** (Fig. 2E) is that of the **first** dCaAP in each current step.
+- **Their XOR is a simulation only (Fig. 3).**
+  - **The inputs:** two pathways, X and Y, of 25 synapses each (AMPA + NMDA). They're placed at random over the
+    "subdomain": apic[60]'s subtree, the tuft.
+  - **The timing:** each synapse fires as an independent Poisson train at 20 Hz for the whole run (4 s shown). On top
+    of that, 100 AMPA synapses over the whole tree fire at 20 Hz, as background.
+  - **The dCaAP:** at apic[76](0.214), about 550 µm from the soma, with w = 1.6 mA/cm². The site is uncoupled: its
+    dCaAPs don't fire the soma.
+  - **The read-out is the dCaAP's amplitude at the dendrite:** high for X alone and for Y alone, low for X + Y, and
+    high again when 20 GABA synapses fire in the same region. In their scheme the soma computes OR.
+  - **Fig. S9, the coupled case:** the site is apic[60](0.99) with w = 4 mA/cm², and 35 synapses per pathway. There
+    the somatic firing *rate* is the output.
+- **K in their code** (`dCaAP.mod`) is set at the first time step above θ: K = exp(−(v − θ)/(θ − V_rest)/D).
+  - **At a crossing,** v − θ is one solver step's overshoot. That is under 0.1 mV at NEURON's fixed 0.025 ms, so
+    K ≈ 1 whatever the input.
+  - **K < 1 only** when the 200 ms refractory period ends with the dendrite already held above θ, that is, for the
+    *repeated* dCaAPs of a sustained drive. Their test-pulse screenshot shows exactly that: every step's first dCaAP
+    reaches the same height, about +35 mV, and only the later ones shrink with current.
+  - The code's comment: "we just skip the first spike."
+- **So both of Gidon's models grade only the repeated dCaAPs,** never the first: the phenomenological one (here) and
+  the channel one (E0d run 2). The graded *first* dCaAP of their own recordings (Fig. 2E) has no mechanism in either.
+
+**What's wrong in ours, from the most consequential:**
+
+| | ours | theirs | what it affects |
+|---|---|---|---|
+| 1. **The morphology's scale** | the 3-D points as read | their `geom()` multiplies every length and diameter by 1.25, correcting the imaging's 20% shrinkage. Their model runs at this scale | **every type A result**: distances are 20% short (the XOR site at 429 µm, not 536), membrane area is 36% too small, input resistances too high (our soma 61 MΩ; the recorded cell 41 MΩ). Check 2 compared ours with ours, both unscaled, so it couldn't see this |
+| 2. **K** | K = exp(−(level + τ_K·V̇)/…), with τ_K = 11.6 ms fitted so that the *first* event follows the recorded curve | K ≈ 1 at every crossing; K < 1 only when the refractory period ends with the zone above θ | E0, E0b, E0c and E0d all chased a graded *first* event, which their model never produces |
+| 3. **The XOR protocol** | N3: one synchronous volley of n contacts onto one compartment | two pathways of 25 synapses spread over the tuft, each synapse a Poisson train at 20 Hz for seconds, with background activity | N3 tested a regime where their dCaAP model doesn't compute XOR |
+| 4. **The XOR site and read-out** | the zone at apic[60](0.99), Fig. S9's coupled site (w = 4); somatic spikes required | apic[76](0.214), uncoupled (w = 1.6); the dCaAP's amplitude at the dendrite | N3's pass criterion asks for something their Fig. 3 doesn't claim |
+| 5. **Synapses** | AMPA 0.88 nS (0.3/1.8 ms); NMDA 1.31 nS, rise/decay 2/70 ms, γ 0.062 (E0: "kinetics typical") | AMPA 0.7 nS (0.3/1.8); NMDA 1.3 nS, **8/35 ms**, γ 0.077 (Rhodes 2006), "as in Eyal et al. 2018" | NMDA's decay of 70 against 35 ms: plateau durations (N6), and E1's calcium (S2's failure came from NMDA bridging pairings) |
+| 6. **The soma** | AdEx with E0's generic constants | Traub Na⁺/K⁺ channels in the soma and a 1 mm axon, at 35 °C | the somatic threshold and rheobase: the recorded 0.4 nA was never fitted |
+| 7. **Background and inhibition** | none: the cells have no background activity and no inhibitory synapses | 100 background AMPA synapses at 20 Hz; 20 GABA synapses (0.5 nS, 2/23 ms, E −75) for the inhibition condition | XOR's recovery with inhibition, and the depolarized operating point XOR depends on |
+| 8. Minor | every section cut at ≤ 30 µm | basal sections not cut (nseg 1), apical ones at ≤ 30 µm | ours is the finer of the two |
+
+**What each earlier result now means:**
+- **Still valid:** check 1 (the solver), check 3 (type B's port), E0c-B (Bahl's protocol), E0d's check P, and the
+  finding that Gidon's channel model grades only repeated events. None depends on type A's geometry.
+- **Re-run needed:** every type A number in E0b, E0c-A, E0d step 3, and E1's A1–A3. They used the unscaled cell, E0's
+  synapses, the coupled site and single volleys. A1's clustering result may survive qualitatively, but its numbers
+  will change.
+- **To review:** type B's synapses. They are the same human L2/3 conductances with "typical" kinetics, not values
+  measured for L5.
