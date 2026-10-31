@@ -2024,3 +2024,59 @@ peak current (w = 1278 pA).
    - the coupled dCaAP's drive to the soma differs: rates 4–10 times below theirs once heights are matched.
 4. **What would settle all three:** running their own files in NEURON. NEURON has no pip wheel for this Python on
    Windows (E0b); an official installer, or a Linux environment, would be needed. That's the user's call.
+
+### The user's decision after E0e (2026-10-30): "Option 2"
+- **The replication stands as it is:** the mechanism is reproduced, and the three quantitative gaps are recorded.
+- **NEURON isn't installed.**
+- **Next:** re-run E1's type A plasticity tests on the corrected cell (E1b), then build a cheaper reduced type A for
+  the networks (E0f).
+
+## E1b: the calcium rule on the corrected type A (pre-registered 2026-10-30)
+
+**The question:**
+- On type A as rebuilt in E0e, what does E1's calcium rule do at the synapses: plateau LTP (A1), STDP (A2), the
+  dCaAP as a teacher (A3)?
+- And, new: what do the synapses of Gidon's XOR pathways learn when the dendrite computes the anti-coincidence (A4)?
+
+**Fixed from before:**
+- **The rule:** E1 run 1's, unchanged (θ_d 1.12 µM, θ_p 27.2 µM, γ_p/γ_d 39.8, k_d 0.063/s). It was fitted on type B,
+  which hasn't changed.
+- **The calcium model:** E1's. The NMDA calcium uses each cell's own synapse kinetics, so type A now gets Gidon's
+  (NMDA 8/35 ms, γ 0.077).
+- **E1's protocols and amendment 11:** a post spike at every pairing in trains.
+
+**The cell:**
+- type A from E0e: the full rebuilt reconstruction;
+- its dCaAP at the XOR site, apic[76](0.214), with w = 701 pA (E0e run 2, by the supplement's rule);
+- dt 0.05 ms.
+
+**The rule-set values, recomputed on this cell by E1's rules:**
+- the post pulse: the smallest 2 ms somatic pulse giving exactly 1 spike;
+- small EPSPs: ≥ 1 mV at the soma, n ≤ 400, at b1.m and at the zone;
+- n6_c: the smallest count on b1.d giving > −40 mV for ≥ 30 ms;
+- n3_n: the smallest count at the zone whose single volley gives a dCaAP.
+
+**Protocols:**
+- **A1, plateau LTP, scored as in E1:** n6_c contacts at 8 Hz for 60 s, clustered on b1.d, and dispersed over both
+  basal paths. Passes if clustered gives LTP (> 1.1) and dispersed doesn't (≤ 1.1).
+- **A2, reported:** +10 and −10 at 0.1 and 20 Hz on a small b1.m pathway.
+- **A3, reported:** a small zone pathway at 1 Hz × 100, with the zone driven by n3_n contacts (a dCaAP), against
+  n3_n − 4 (none).
+- **A4, reported, new: the XOR pathways' own plasticity.**
+  - **The setup:** E0e's F3 setup (uncoupled site, background, X and Y of 25 synapses each, 20 GABA), on seeds 0–2.
+  - **Conditions:** X, X+Y, X+Y+inhibition, each run for 20 s.
+  - **The measure:** the rule's change at each of X's 25 synapses, computed from its own compartment and its own
+    spike train; reported as their mean.
+  - **What it asks:** does the dendrite's anti-coincidence (small dCaAPs under X+Y) give X's synapses a different
+    sign or size of change from X alone?
+
+**Predictions:**
+
+| | prediction | confidence |
+|---|---|---|
+| A1 | passes again | medium: Gidon's NMDA decays in 35 ms, against 70 before, so plateaus are shorter and need more contacts |
+| A4 | X+Y gives X's synapses **more** LTP than X alone: the calcium follows the dendrite's steady depolarization (about −17 mV under X+Y), not the dCaAP's height. So the anti-coincidence isn't a teaching signal under this rule | medium |
+| A4 | inhibition lowers X's LTP toward X alone | medium |
+
+**Compute:** about 10 CPU-minutes (the cell has 1006 compartments; A1, A3 and A4 are the long runs), about 2 minutes
+over 7 processes.
