@@ -1525,3 +1525,25 @@ from E_L, as type B's is after 20 s.
   during a sustained step, not for the first event, which is all a brief synaptic input makes. Their XOR model then
   relies on the phenomenological rule for something their channel model doesn't do.
 - **N3 passes in step 3 or 4:** XOR on synaptic input from channels, for the first time in this project.
+
+### E0d amendments (2026-10-30, during the build, before the run)
+
+**What ran before these were written:**
+- The fast tests: the port rests at −86 mV, and the detector finds one 50 mV test spike.
+- E0b's check 1 and check 3 after the simulator change, both unchanged to the last digit.
+- No step of E0d.
+
+1. **Two reference numbers were mis-transcribed** in the pre-registration's check P. The median height after the
+   first event, from the digitized lists in the same table, is **32.6 mV** at 0.45 nA (written 33.5) and **18.0 mV**
+   at 0.475 nA (written 18.4). The code computes all four medians from the digitized lists.
+2. **The cutover:** the simulator's channel-dCaAP slot now holds Gidon's mechanism (`dcaap_channels.py`,
+   `cell.ChannelDCaAP`). E0c's single channel, its fit (`dcaap_fit.py`) and `tests/test_e0c.py`'s part A are removed.
+   They're reproducible at commit ee235ab. Part B (Bahl's protocol) stays.
+3. **Implementation details:**
+   - **Calcium and E_Ca:** the Ca²⁺ shell is advanced by exponential Euler on the step's Ca²⁺ current at the new
+     voltage. E_Ca is Nernst at 6.3 °C from the step's starting [Ca]i.
+   - **The port:** recorded every 0.1 ms, then binned into the screenshot's columns.
+   - **D1:** records the zone every 0.1 ms, and its step grid runs from 5 to 2000 pA.
+   - **The settled rest:** type A with the transplant keeps the zone's channel state ("Q") with its voltages. The
+     AdEx soma's adaptation starts at 0, as in E0b.
+   - **Step 4's fit** is built only if step 3 fails.

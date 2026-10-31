@@ -1,13 +1,11 @@
-"""E0c: a channel dCaAP for type A, and type B's N2 diagnosed with Bahl's own protocol (LAB.md E0c). Run from
-experiments/:
-    ../venv312/Scripts/python.exe -m dsnn.tests.test_e0c                 (the run, dt 0.05; writes dsnn/runs/e0c_dt0.05.json)
-    ../venv312/Scripts/python.exe -m dsnn.tests.test_e0c --part B        (one part only)
+"""E0c-B: type B's N2 diagnosed with Bahl's own protocol (LAB.md E0c). Run from experiments/:
+    ../venv312/Scripts/python.exe -m dsnn.tests.test_e0c                 (writes dsnn/runs/e0c_dt0.05_B.json)
     ../venv312/Scripts/python.exe -m pytest dsnn/tests/test_e0c.py -q    (a fast check)
 
-**What it scores:**
-- E0c-A: the fit (check 4 for the channel); then, held out, the bAP gives no event, and N1, N3, N4, N6 (required),
-  N2 and N5 (reported), with E0b's rules and "gives an event" for "gives a dCaAP";
-- E0c-B: the port against Bahl et al. 2012's model 2 numbers (Fig. 8), and the diagnosis of N2.
+**What it scores:** the port against Bahl et al. 2012's model 2 numbers (Fig. 8), and the diagnosis of N2.
+
+E0c-A (one inactivating Ca²⁺ channel as the dCaAP) failed and was replaced by E0d's channel model; its code is at
+commit ee235ab (`dcaap_fit.py`, this file's part A).
 """
 import json
 import math
@@ -18,59 +16,12 @@ import time
 
 import numpy as np
 
-from dsnn import dcaap_fit as F
 from dsnn import protocols as P
 from dsnn.cells import l5
 from dsnn.sim import Stim, simulate
 from dsnn.tests import test_e0b as E
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # dsnn/
-
-
-# ---- E0c-A ------------------------------------------------------------------------------------------------------
-def channel_peaks(cell, stims, T, dt):
-    """The channel's peak inward current in each run, as a fraction of its I_th peak."""
-    r = simulate(stims, T, cell, dt=dt, **P.zone_record(cell))
-    return [round(float(-r.i_ca(b, cell.cach.zone).min()) / cell.cach.i_ref, 3) for b in range(len(stims))]
-
-
-def part_a(dt):
-    t0 = time.time()
-    f = F.fit(dt)
-    best = f["best"]
-    out = dict(fit=dict(best=best, checks=f["checks"], passed=f["passed"], reference=f["reference"], top=f["top"],
-                        stage2=f["stage2"], seconds=round(time.time() - t0, 1)),
-               stage1=f["stage1"])
-    if not f["passed"]:
-        return out
-    cell, cal = P.calibrate(F.with_channel(best["x"], best["i_ref"]), "A", dt)
-    out["calibration"] = cal
-    out["cell"] = dict(N=cell.N, channel=dict(zip(F.NAMES, best["x"]), i_ref=best["i_ref"]))
-    bap = channel_peaks(cell, [P.n2(cell, pulse=cal["n2_pulse"], use_tuft=0)], 120.0, dt)[0]
-    out["bAP"] = dict(peak_fraction=bap, passed=bap < 0.5)
-    for name, fn in (("N1", lambda: E.n1(cell, dt)), ("N2", lambda: E.n2(cell, cal, dt)),
-                     ("N3", lambda: E.n3(cell, cal, dt)), ("N4", lambda: E.n4(cell, dt)),
-                     ("N5", lambda: E.n5(cell, dt)), ("N6", lambda: E.n6(cell, cal, dt))):
-        t = time.time()
-        out[name] = fn()
-        out[name]["seconds"] = round(time.time() - t, 1)
-    n = cal["n3_n"]
-    out["N3"]["channel_peaks"] = dict(zip(("none", "A", "B", "A+B"), channel_peaks(
-        cell, [P.n3(cell, n, a, b) for a, b in ((0, 0), (1, 0), (0, 1), (1, 1))], 120.0, dt)))
-    out["seconds"] = round(time.time() - t0, 1)
-    return out
-
-
-def explore_a(dt, best):
-    """Amendment 9, exploratory (no verdict): the bAP check and N3 on the fit's best channel, though the fit failed."""
-    t0 = time.time()
-    cell, cal = P.calibrate(F.with_channel(best["x"], best["i_ref"]), "A", dt)
-    bap = channel_peaks(cell, [P.n2(cell, pulse=cal["n2_pulse"], use_tuft=0)], 120.0, dt)[0]
-    n3 = E.n3(cell, cal, dt)
-    n = cal["n3_n"]
-    n3["channel_peaks"] = dict(zip(("none", "A", "B", "A+B"), channel_peaks(
-        cell, [P.n3(cell, n, a, b) for a, b in ((0, 0), (1, 0), (0, 1), (1, 1))], 120.0, dt)))
-    return dict(calibration=cal, bAP_peak_fraction=bap, N3=n3, seconds=round(time.time() - t0, 1))
 
 
 # ---- E0c-B ------------------------------------------------------------------------------------------------------
@@ -205,34 +156,6 @@ def part_b(dt, workers=7):
 # ---- the run ----------------------------------------------------------------------------------------------------
 def report(res, say=print):
     say("E0c at dt = %g ms (%.1f s)" % (res["dt"], res["seconds"]))
-    if "A" in res:
-        a = res["A"]
-        f = a["fit"]
-        b = f["best"]
-        say("  A fit (%.1f s): reference a %.1f mV, width %.1f ms" % (f["seconds"], f["reference"]["a"],
-                                                                    f["reference"]["width"]))
-        say("    best E %.3f: I_th %.0f pA, a %.1f mV, width %.1f ms, K(1.5) %.3f, K(2) %.3f, a(0.8) %.1f mV" % (
-            b["E"], b["I_th"], b["a"], b["width"], b["K15"], b["K2"], b["a08"]))
-        say("    constants %s" % {k: round(v, 3) for k, v in zip(F.NAMES, b["x"])})
-        say("    checks %s -> %s" % (f["checks"], "PASS" if f["passed"] else "FAIL"))
-        if f["passed"]:
-            pf = lambda r: "PASS" if r.get("passed") else "FAIL"
-            say("    calibration %s" % {k: (round(v, 3) if isinstance(v, float) else v)
-                                        for k, v in a["calibration"].items()})
-            say("    bAP: channel peak %.3f of I_th's -> %s" % (a["bAP"]["peak_fraction"], pf(a["bAP"])))
-            say("    N1 max same %.2f, other [%.2f, %.2f] -> %s" % (a["N1"]["max_same_ratio"], *a["N1"]["other_range"],
-                                                                  pf(a["N1"])))
-            say("    N2 (reported) %s -> %s" % ({k: a["N2"][k] for k in ("pulse_alone", "tuft_alone",
-                                                                         "spikes_within_30ms")}, pf(a["N2"])))
-            say("    N3 n %s spikes %s, channel peaks %s -> %s" % (a["N3"]["n"], a["N3"]["spikes"],
-                                                                  a["N3"]["channel_peaks"], pf(a["N3"])))
-            say("    N4 %s -> %s" % (" ".join("s%d/%g %.2f" % (x["s"], x["interval"], x["ratio"])
-                                              for x in a["N4"]["rows"]), pf(a["N4"])))
-            n5 = a["N5"]
-            say("    N5 (reported) r %s r' %s; d events basal %s apical %s; d burst fraction basal %s apical %s -> %s"
-                % (n5.get("r"), n5.get("r_prime"), n5.get("d_events_basal"), n5.get("d_events_apical"),
-                   n5.get("d_bf_basal"), n5.get("d_bf_apical"), pf(n5)))
-            say("    N6 %s -> %s" % (a["N6"]["rows"], pf(a["N6"])))
     if "B" in res:
         b = res["B"]
         say("  B: soma threshold (5 ms) %.0f pA (Bahl 900) -> %s" % (b["soma_threshold"],
@@ -251,32 +174,17 @@ def report(res, say=print):
 
 def main(argv):
     dt = 0.05
-    part = argv[argv.index("--part") + 1] if "--part" in argv else "AB"
     t0 = time.time()
-    res = dict(dt=dt, amendment=8)
-    if "B" in part:
-        res["B"] = part_b(dt)
-    if "A" in part:
-        res["A"] = part_a(dt)
-    if "explore" in part:                      # amendment 9: on run 1's best channel
-        with open(os.path.join(HERE, "runs", "e0c_run1_dt0.05.json"), encoding="utf-8") as fh:
-            best = json.load(fh)["A"]["fit"]["best"]
-        res["explore_A"] = explore_a(dt, best)
-        print("explore A:", json.dumps(res["explore_A"], default=float)[:1500])
+    res = dict(dt=dt, amendment=8, B=part_b(dt))
     res["seconds"] = round(time.time() - t0, 1)
     os.makedirs(os.path.join(HERE, "runs"), exist_ok=True)
-    name = "e0c_dt%g%s.json" % (dt, "" if part == "AB" else "_" + part.replace("+", "_"))
-    with open(os.path.join(HERE, "runs", name), "w", encoding="utf-8") as fh:
+    with open(os.path.join(HERE, "runs", "e0c_dt0.05_B.json"), "w", encoding="utf-8") as fh:
         json.dump(res, fh, indent=1, default=float)
     report(res)
 
 
 def test_e0c_small():
-    """Fast: the channel runs and is read; Bahl's current is the published shape."""
-    cell = F.with_channel(F.from_unit(np.full(7, 0.5)), i_ref=1.0)
-    z = cell.site("zone")
-    r = simulate([Stim(spiking=False).current(10, 60, z, 300.0)], 70.0, cell, **P.zone_record(cell))
-    assert r.i_ca(0, z).min() < 0 and P.zone_event(cell, r, 0)
+    """Fast: Bahl's current is the published shape."""
     st = epsc(Stim(), 0.0, 1, 1000.0)
     peak = max(a for _, _, _, _, a in st.steps)
     assert abs(peak - 1000.0 * 0.8 * math.exp(-2 * math.log(5) / 8)) < 5.0

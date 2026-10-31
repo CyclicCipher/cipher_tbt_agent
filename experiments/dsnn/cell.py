@@ -68,24 +68,26 @@ class DCaAP:
 
 
 @dataclass(frozen=True)
-class CaChannel:
-    """The channel dCaAP (LAB.md E0c-A): g·m·h·(V − E_Ca) at the zone, E_Ca = 140 mV; m and h first order, with
-    m∞ = 1/(1 + exp(−(V − Vm)/km)), h∞ = 1/(1 + exp((V − Vh)/kh)), and time constants independent of voltage."""
+class ChannelDCaAP:
+    """The channel dCaAP (LAB.md E0d): Gidon et al.'s Ca_HVA + BK + Ca²⁺ shell (`dcaap_channels.py`) at one
+    compartment, as total conductances, the shell's calcium computed over `area` (their compartment's membrane)."""
     zone: int
-    g: float                   # nS
-    Vm: float                  # mV
-    km: float
-    taum: float                # ms
-    Vh: float
-    kh: float
-    tauh: float
-    i_ref: float = 0.0         # pA: the peak of its current in the I_th step (an "event" reaches half of it)
+    g_ca: float                # nS, Ca_HVA's maximal total
+    g_bk: float                # nS, BK's maximal total
+    area: float = 31101.767    # µm², the pool's membrane (their compartment: L 100, diam 99)
+    ma: float = 1.0
+    mb: float = 1.0
+    ha: float = 1.0
+    hb: float = 1.0
+    mtf: float = 0.2           # BK's mtau_factor
+    htf: float = 0.02          # BK's htau_factor
+    zhalf: float = 0.01        # mM
+    taur: float = 60.0         # ms
+    i_ref: float = 0.0         # pA: Ca_HVA's peak in the first event of the I_th step (an "event" reaches half)
 
-    def minf(self, v):
-        return 1.0 / (1.0 + math.exp(-(v - self.Vm) / self.km))
-
-    def hinf(self, v):
-        return 1.0 / (1.0 + math.exp((v - self.Vh) / self.kh))
+    def q(self):
+        """The constant rows of `dcaap_channels` (Q_*)."""
+        return (self.ma, self.mb, self.ha, self.hb, self.mtf, self.htf, self.zhalf, self.taur, self.area)
 
 
 @dataclass
@@ -106,7 +108,7 @@ class Cell:
     dcaap: DCaAP = None
     hh: object = None          # channels.HH
     rest: dict = None          # the initial state: {"V": (N,), and for hh cells the gates}
-    cach: CaChannel = None     # the channel dCaAP (E0c-A), in place of `dcaap`
+    cach: ChannelDCaAP = None  # the channel dCaAP (E0d), in place of `dcaap`
 
     @property
     def N(self):
