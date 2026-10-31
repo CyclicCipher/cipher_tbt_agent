@@ -1343,3 +1343,14 @@ calcium is read. No protocol and no fit.
      and there the bAP does wane.
 3. **The dCaAP:** the phenomenological one stays. A channel model would need a second mechanism, which is open
    research.
+
+**E0c's predictions, scored:**
+
+| prediction | outcome |
+|---|---|
+| E0c-A's fit fails on the steepness (0.35 that it passes) | right that it fails, and more than predicted: the size and width fail too. Large events never fall |
+| no bAP event | right (exploratory only: 0.000 of the I_th peak) |
+| N3 passes, if the fit passes | not run as a verdict. Explored, there is no XOR: A+B's event is 0.95 of A's, and too small to fire the soma |
+| the port passes at a tuft compartment (0.6) | wrong: the thresholds are 2–3.6 times lower than Bahl's |
+| the verdict is "the criterion" | half: by the pre-registered order it's "the port", but the criterion holds too (2 spikes, never ≥ 3, with Bahl's own input) |
+| the comparison: E2 keeps E0b's type A | right |
