@@ -1922,3 +1922,48 @@ bulk.
    some placements only.
 3. **At the soma, in the coupled arrangement, the cell computes something like OR.** The dCaAP's smaller amplitude
    doesn't stop it firing the soma.
+
+### What the supplement says (2026-10-30; the user found it: `research papers/gidon et al supplementary.pdf`)
+- **Their model's soma:** R_in **39 MΩ** and τ_m 17 ms. Ours is 39.5 MΩ, so the rebuilt cell's passive structure
+  matches theirs.
+- **w:** "w was 1.6 and 4 such that the dCaAP amplitude was about **50 mV and 60 mV at threshold** in Fig. 3 and in
+  Fig. S9."
+- **Fig. S9:**
+  - **The site:** 287 µm from the soma. Ours is 273.6 µm from the soma's edge; NEURON measures from the soma's centre.
+  - **Its threshold** I_rhe = **500 pA**.
+  - **The soma's rates:** X **1.7 Hz**, X+Y **0.54 Hz**, X+Y+distal inhibition **1.5 Hz**, X+proximal inhibition
+    **0.25 Hz**. So their soma does compute the anti-coincidence.
+- **Fig. S12** says of their channel model: "For the sake of simplicity we did not use additional mechanism to reduce
+  the high amplitude of the first dCaAP in each trace as observed in vitro". That is E0d's finding, in their words.
+- **Fig. S10:** dCaAPs evoked by transient (synaptic-like) currents also shrink with input, in vitro. This bears on
+  the parked first-dCaAP question.
+- **Their `plots.hoc`** sets dt = 1/20 = **0.05 ms** before every run. So their runs use 0.05 ms, not NEURON's default
+  0.025 that I pre-registered.
+
+**The discrepancy:** in E0e's run, our first dCaAP at threshold is **90 mV** tall: −36 mV to +54 mV, from a 772 pA
+peak current (w = 1278 pA).
+- **Theirs:** about 50 mV, their stated target. Their test-pulse screenshot's lowest first peaks sit at about +14 mV,
+  which agrees.
+- **What I checked:** the morphology file is identical to ModelDB's, the segmentation matches theirs, the current's
+  units and size check out, and dt (0.05 against 0.025) changes nothing.
+- **Unresolved:** what in NEURON makes their event 0.55 times ours.
+- **Why it matters:** a dCaAP 1.8 times too tall is why our shrunken dCaAPs (K about 0.45) still fire the soma in S9,
+  where theirs (0.54 Hz) mostly don't.
+
+### E0e amendment 8 (after run 1, before run 2)
+
+8. **w is set by their stated rule,** not by density × segment area:
+   - **The target:** the first dCaAP at the threshold step is **50 mV** tall at the uncoupled site and **60 mV** at
+     the coupled site, ± 1 mV.
+   - **The threshold step:** on their test-pulse grid (uncoupled 0.18–0.30 nA by 0.01; coupled 0.48–0.60 by 0.02),
+     1 s steps from 200 ms.
+   - **Its height:** the peak minus the mean of the 1 ms before onset.
+   - **The search:** w by bisection. w doesn't move the threshold, since the onset comes before the current.
+   - **Why this is their rule, not tuning:** it fixes the dCaAP's own waveform to the authors' stated value (and the
+     recordings': 43.8 ± 13.8 mV), without looking at any XOR or soma outcome. Run 1's S9 failure is what sent me
+     looking for the cause. The cause is the event's size, and the fix uses their number for it.
+9. **dt = 0.05 ms,** as their `plots.hoc` sets it.
+10. **Check T2 (scored):** the coupled site's threshold on their grid is 0.50 ± 0.02 nA (the supplement: 500 pA).
+11. **S9's reference numbers** are now known (1.7, 0.54, 1.5, 0.25 Hz). Its pass criterion stays as pre-registered:
+    the pattern on each seed. The rates are reported against theirs.
+12. **Run 2 reruns** check T, check T2, F3 and S9, on the same seeds and the same criteria.
