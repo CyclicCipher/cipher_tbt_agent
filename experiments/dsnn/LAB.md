@@ -2179,3 +2179,48 @@ for.
 3. **The dendrite's XOR is no teaching signal for this rule** (A4). Under Gidon's 20 Hz drive every pathway synapse
    saturates at LTP, whatever the dCaAP does: X 1.54, X+Y 1.57, X+Y+inhibition 1.56. A rule that read the dCaAP's
    size, rather than total calcium, would be needed for that. That is not designed yet.
+
+## E0f: a cheaper type A, checked against the full rebuilt cell (pre-registered 2026-10-30)
+
+**The question:** does the reduced type A reproduce the full rebuilt cell (E0e, 1006 compartments) on what the
+networks will use? And how much cheaper is it?
+
+**The reduced cell** (`l23(reduced=True)`, 309 compartments): E0b's reduction rule at the corrected scale.
+- **Modelled:** the trunk, the two tuft paths, the two basal paths, and the axon, cut at ≤ 30 µm. Both dCaAP sites
+  lie on these paths.
+- **Lumped:** every other subtree is a Rall equivalent cylinder attached where it attaches.
+- **Everything else is E0e's:** Traub soma and axon, the dCaAP, synapses, passive constants.
+- **Placing synapses:** the same random draw gives the same points on the full tree in both cells. A point on a
+  lumped section goes to its subtree's cylinder at the same electrotonic distance from the subtree's start, capped at
+  the cylinder's end (`protocols.comp_at`).
+
+**Checks, the reduced cell against the full one:**
+- **R1, passive** (Traub and the dCaAP removed, as E0b's check 2):
+  - R_in at the soma and at both dCaAP sites, and the steady transfer from each site to the soma: each within 10%;
+  - the bAP at each site, for E0b's somatic clamp: within 20%.
+- **R2, the thresholds:** check T and T2 on the reduced cell equal the full cell's (0.21 and 0.50 nA) within one step
+  of their grids.
+- **R3, w** by the supplement's rule (50 and 60 mV at threshold): within 10% of the full cell's (701 and 2110 pA).
+- **R4, paired behaviour:**
+  - **The setup:** seeds 0–4, each with the same synapse points and spike trains in both cells; E0e's F3 conditions
+    (uncoupled, 4 s) and S9 conditions (coupled, 20.5 s); each cell with its own calibrated w.
+  - **Passes if every (condition, seed) pair holds:**
+    - the site's median voltage within 2 mV;
+    - the dCaAP count within 20% + 1;
+    - F3's large dCaAPs within ±2;
+    - S9's somatic spike count within 20% + 1.
+  - **Reused:** the full cell's seeds 0–2 come from E0e run 2, unchanged. Seeds 3–4 run new.
+- **R5, the cost:** seconds per simulated second for 2 s of F3's X condition, for each cell. Reported, with the
+  speed-up.
+
+**Predictions:**
+
+| | prediction | confidence |
+|---|---|---|
+| R1 | passes: R_in is already within 2% (soma 39.0 against 39.5 MΩ; the XOR site 183.7 against 181.6) | high |
+| R2 | passes | medium–high |
+| R3 | passes | medium |
+| R4 | fails somewhere: a synapse mapped onto a cylinder sees a different local voltage from the thin branch it came from, so NMDA recruitment differs. Most pairs pass | medium |
+| R5 | about 3× faster | high |
+
+**Compute:** about 8 CPU-minutes (25 reduced S9 runs of 20 s, and 10 full ones), about 2 minutes over 7 processes.
