@@ -1224,3 +1224,122 @@ calcium is read. No protocol and no fit.
     - **The rule:** fitted on F1–F3 in run 1, it is applied unchanged to the rerun protocols.
     - **Why this isn't tuning to outcomes:** it restores the protocol the experiment ran. The pulse is set by spike
       counts alone, with the plasticity outcomes unseen by the search.
+
+### E1 run 2 (2026-10-30, at commit 04b1edf; `runs/e1_run2_dt0.05.json`): the train protocols, 74 s
+
+- **The post pulses (amendment 11):**
+  - Type B: 1500 pA (S1 at 10 Hz), 1600 (S1 at 20, S2 at 10), 1650 (S1 at 40, S2 at 20), 1750 (S1 at 50, S3).
+  - Type A at 20 Hz: 4900 and 5000 pA.
+- **Every train pairing now fires exactly once:** 75 of 75 in each.
+
+**E1's results** (the rule fitted in run 1: θ_d 1.12 µM, θ_p 27.2 µM, γ_p/γ_d 39.8, k_d 0.063/s; LTP > 1.1, LTD
+< 0.9):
+
+| | protocol | change (w_after/w_before) | slice | verdict |
+|---|---|---|---|---|
+| F1–F3 | the fit set | 1.037, 1.374, 0.653 | 1.0, 1.36, 0.645 | fitted |
+| S1 | +10 at 10, 20, 40, 50 Hz | 1.463, 1.528, 1.520, 1.516 | LTP, rising with frequency | **fail**: all LTP, but the rule saturates near 1.52 (its ceiling is 1.57), so the order breaks by 0.01 |
+| S2 | −10 at 0.1, 10, 20 Hz | 0.688, **1.116, 1.523** | LTD at each | **fail** |
+| S3 | −10 at 50 Hz | 1.514 | LTP | pass |
+| S4 | +10 at 0.1 Hz, large EPSP | 1.218 | LTP | pass |
+| L1 | single spike, +10: proximal, distal | 1.044, **1.431** | distal LTD, below proximal | **fail** |
+| L2 | bursts, +10: proximal, distal | 1.378, **1.504** | LTP, LTD | **fail** |
+| L3 | bursts, −10: proximal, distal | 0.538, 1.433 | LTD, LTP | pass |
+| L4 | +10 with BAC current: proximal, distal | 1.428, **1.523** | LTP, LTD | **fail** |
+| A1 | type A, 8 Hz for 60 s: clustered, dispersed | 1.550, 0.586 | LTP, not LTP | pass |
+
+**Reported** (from run 1, all at 1 Hz, so valid):
+
+| | without | with | the difference |
+|---|---|---|---|
+| T5, the tuft pathway | 1.434 | 1.527 | +0.092 |
+| T5, the basal pathway | 1.101 | 1.388 | **+0.287** |
+| A3, the zone pathway (with n3_n − 4 and n3_n zone contacts) | 1.45 | 1.49 | +0.04 |
+| A2, b1.m (+10 at 0.1 and 20 Hz; −10 at 0.1 and 20 Hz) | — | — | 1.270, 1.532, 0.708, 1.515 |
+
+**Why each failure happens** (from the saved calcium):
+- **S2 at 10–20 Hz:** the presynaptic spike 10 ms after post spike k is 40–90 ms before post spike k + 1. The NMDA
+  conductance (τ 70 ms) is still open then, so the next bAP drives c above θ_p: 0.39 s above θ_p at 10 Hz, 2.9 s at
+  20 Hz.
+  - **What the rule lacks:** a rule on summed calcium can't tell "after this spike" from "before the next one" once
+    NMDA outlasts the interval.
+  - **What the slices need:** Sjöström's LTD at 20 Hz needs a timing-specific depression term, beyond total calcium.
+    His own model gave LTD-favouring interactions only to nearest neighbours.
+- **Distal (L1, L2, L4):**
+  - **The cause: the bAP is bigger distally than proximally.** Bahl's apical trunk carries Na⁺ channels, so during L1
+    apical.4 peaks at +15.5 mV. The basal compartment, one cylinder with no Na⁺ channels, peaks at −36.6 mV.
+  - **Also:** a small EPSP there takes 5 contacts against 3, in a higher input impedance.
+  - **The calcium:** 50 µM distal against 27 proximal, with 3.7 s above θ_p against 0.7 s.
+  - **So:** the distal synapse sees more coincident calcium, not less.
+  - **Letzkus's explanation:** a bAP that wanes with distance. In this cell's trunk it doesn't.
+- **S1:** the order fails only because three of the four values sit at the rule's ceiling.
+
+**Scored against the predictions:**
+
+| prediction | outcome |
+|---|---|
+| the fit fits | right |
+| S1: LTP at every frequency, non-decreasing | half: all LTP; the order breaks at saturation |
+| S2 passes | wrong: LTP at 10 and 20 Hz |
+| S3 fails | wrong: it passes |
+| S4 passes | right |
+| L1 passes (the bAP shrinks with distance) | wrong: the bAP barely shrinks in this cell, and distal synapses potentiate |
+| L2: proximal LTP passes, distal LTD fails | right, both halves |
+| L3: distal LTP passes, proximal LTD fails | half: both pass, so L3 passes |
+| L4 fails at distal | right |
+| T5: the tuft pathway flips to LTP; the basal pathway changes by < 0.05 | wrong on both. The tuft pathway is LTP already, from its own local NMDA depolarization. The basal pathway gains +0.29 |
+| A1 passes | right |
+
+**What E1 established:**
+1. **One calcium rule, set on three of Sjöström's numbers, gets these right:** the cooperativity of large EPSPs (S4);
+   post-before-pre LTP at 50 Hz (S3); Letzkus's burst rule at −10 (L3); and, in the human cell, that a clustered
+   NMDA plateau potentiates while the same input dispersed depresses (A1).
+2. **It gets these wrong:**
+   - post-before-pre LTD at 10–20 Hz (S2);
+   - every distal-depression result (L1, L2, L4).
+
+   Both come from summed calcium in this cell:
+   - NMDA's 70 ms tail bridges successive pairings;
+   - Bahl's trunk carries a stronger bAP than its basal cylinder.
+3. **The rule saturates.** With γ_p/γ_d ≈ 40, any protocol that keeps c over θ_p for a few hundred ms reaches the
+   ceiling (about 1.52). So the rule is close to a switch.
+4. **The credit signal is there, and it acts where it would need to.**
+   - **What happens:** type B's tuft Ca²⁺ spike (the teacher: tuft input 2 ms after each post spike) turns a basal
+     pathway that changes by +10% (1.10, at the LTP line) into +39% (1.39), through the doublet's second bAP.
+   - **What that means:** apical feedback changes plasticity at the feedforward (basal) synapses, from local calcium
+     only. That is what credit assignment needs.
+   - **Its limit:** it raises LTP. It doesn't change the sign: without the teacher the pathway is at no change, not
+     LTD.
+
+### The comparison: option 1 (E0c) against option 2 (E1)
+
+| | option 1: fix the cells (E0c) | option 2: the calcium rule (E1) |
+|---|---|---|
+| type A | the channel's fit fails. One inactivating channel is large and all-or-none, or small and falling, never both. Explored anyway, it computes no XOR | E0b's cell. A1 passes: a clustered plateau potentiates, dispersed input depresses |
+| type B | the port's tuft is 2–3.6 times more excitable than Bahl's published thresholds; no bug found. The doublet is the port's real BAC output, and our synapses are cleared | the teacher's doublet lifts basal plasticity by +0.29 |
+| verdicts | fit: fail; port: fail | 4 of 8 slice tests pass (S3, S4, L3, A1), plus the fit set |
+| what E2 gets from it | nothing usable: diagnoses and a negative result | a local rule and a measured apical-to-basal credit signal |
+| compute | 338 s (the fit 251 s) | 183 s |
+| code | about 590 lines (`dcaap_fit.py`, `tests/test_e0c.py`, the channel) | about 510 lines (`plasticity.py` 145, `tests/test_e1.py` 367), and the Ca²⁺-current output shared with E0c |
+
+**By the rule decided before the runs:**
+- **Type A:** keeps E0b's phenomenological dCaAP, since E0c's fit failed. E2 doesn't count on XOR.
+- **Type B:** unchanged, since no port bug was identified.
+
+**The verdict of the comparison:** option 2 is the one that moves the project toward its aim.
+- **What option 1 did:** answered two questions. A single-channel dCaAP doesn't exist. Type B's doublet is real and
+  isn't caused by our synapses. But it gave the network nothing new.
+- **What option 2 did:** gave a plasticity rule that needs no derivatives, reads only local calcium, and already
+  carries an apical teacher signal to the feedforward synapses.
+
+**Open, for the user** (none of these is decided here):
+1. **E2's question:** does the T5 signal assign credit in the 2 × 2 and 2 × 3 networks? Measured how: the sign and
+   size of the Δw at basal synapses, against the true gradient. Its limits so far:
+   - it raises LTP rather than setting the sign;
+   - the rule saturates.
+2. **Whether to fix the rule's two failures** before E2:
+   - a timing-specific depression term, for S2;
+   - a bAP that wanes along the trunk. Bahl's trunk has Na⁺ channels; the human type A cell's dendrites are passive,
+     and there the bAP does wane.
+3. **The dCaAP:** the phenomenological one stays. A channel model would need a second mechanism, which is open
+   research.
