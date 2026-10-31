@@ -2224,3 +2224,36 @@ networks will use? And how much cheaper is it?
 | R5 | about 3× faster | high |
 
 **Compute:** about 8 CPU-minutes (25 reduced S9 runs of 20 s, and 10 full ones), about 2 minutes over 7 processes.
+
+### E0f run (2026-10-30, at commit 8767903; `runs/e0f.json`): R1–R3 pass; R4 fails at the soma; 2.3× faster; 84 s
+
+| check | result |
+|---|---|
+| R1, passive (reduced / full) | R_in soma 0.989, at the XOR site 1.012, at the coupled site 0.980; transfer 0.988 and 0.992; bAP 0.993 and 0.985: **pass** |
+| R2, thresholds | 0.21 and 0.50 nA, the full cell's: **pass** |
+| R3, w | 690 against 701 pA (−1.6%), 2250 against 2110 (+6.6%): **pass** |
+| R4, paired behaviour | **29 of 45 pairs within tolerance: fail** |
+| R5, cost | 0.24 against 0.57 s per simulated s: **2.3× faster** (predicted about 3×) |
+
+**R4 in detail:**
+- **The XOR site (F3): all 20 pairs pass.**
+  - The site's median within 0.5 mV.
+  - Large dCaAPs, reduced against full: X 0, 1, 7, 1, 4 against 0, 1, 9, 1, 5; Y identical; X+Y 1 on every seed in
+    both; X+Y+inhibition 11, 10, 8, 8, 7 against 11, 10, 10, 8, 8.
+  - **The reduced cell reproduces the dendrite's XOR,** synapse for synapse.
+- **The coupled site (S9): 9 of 25 pairs pass.**
+  - The site's median is still within 1 mV everywhere.
+  - **The reduced cell makes 10–20% fewer dCaAPs** under X, Y and proximal inhibition (e.g. 48 against 60).
+  - **It fires 1.5–3 times more somatic spikes:** X 0.29–0.69 Hz against 0.10–0.39; X+Y 0.10–1.03 against
+    0.05–0.78.
+  - **The likely cause:** the reduction lumps the oblique branches near the trunk into cylinders. That lightens the
+    load near the coupled site (274 µm), so a dCaAP pushes more current into the soma.
+  - The pattern across conditions (X+Y lowest of the excitatory ones, proximal inhibition 0) is the same in both.
+- **The prediction:** "fails somewhere" was right, but not where I said: the synapses mapped onto cylinders (F3) were
+  fine, and the soma's coupling was what differed.
+
+**What E0f established:**
+1. **For the uncoupled arrangement** (Gidon's Fig. 3: XOR in the tuft, the soma not driven), the 309-compartment cell
+   is an exact stand-in, 2.3 times cheaper.
+2. **For the coupled arrangement** (the dCaAP driving the soma), it over-couples by about 2×. A network that uses
+   type A's soma output through the dCaAP needs the full cell, or a reduction that keeps the trunk's obliques.
