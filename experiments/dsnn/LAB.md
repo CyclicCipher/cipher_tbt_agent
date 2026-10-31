@@ -2080,3 +2080,18 @@ peak current (w = 1278 pA).
 
 **Compute:** about 10 CPU-minutes (the cell has 1006 compartments; A1, A3 and A4 are the long runs), about 2 minutes
 over 7 processes.
+
+### E1b amendments (2026-10-30, during the build, before the run)
+**What ran before these were written:** the fast tests, and building the cell (1006 compartments, w = 700.8 pA, the
+zone apic[76].2, b1.m on dend[61].4). No protocol.
+
+1. **The machinery:** E1's `test_e1` with `cell_of("A")` now giving the corrected cell. E1 run 1's type A rows stay
+   recorded as they were, on the earlier cell.
+2. **The rule-set strengths** come from `protocols.calibrate`. It also computes n2_tuft and n6_pulse, which E1b
+   doesn't use.
+3. **If no count up to 400 gives a 1 mV somatic EPSP from the zone,** A3 isn't run and is reported as such.
+4. **A4:**
+   - **Spike trains:** X's trains are regenerated exactly as the simulator draws them (seed (seed, X's group, synapse),
+     from 100 ms to 20 s) to give each synapse's presynaptic times.
+   - **The cell:** the run uses w = 700.8 pA.
+   - **Positions:** E0e's.

@@ -38,7 +38,13 @@ def e0b_calibration():
 
 @lru_cache(maxsize=2)
 def cell_of(kind):
-    return l23(site="coupled") if kind == "A" else l5()       # type A as rebuilt in E0e; E1's A rows pending
+    """Type B: E0b's. Type A: as rebuilt in E0e, its dCaAP at the XOR site with w by the supplement's rule (E0e run 2;
+    LAB.md E1b). E1's own type A rows (run 1) were on the earlier, wrongly scaled cell."""
+    if kind == "A":
+        with open(os.path.join(HERE, "runs", "e0e_run2.json"), encoding="utf-8") as fh:
+            w = json.load(fh)["calibration"]["uncoupled"]["w_pA"]
+        return l23(site="uncoupled").with_dcaap(w=w)
+    return l5()
 
 
 # ---- the rule-set settings ---------------------------------------------------------------------------------------
