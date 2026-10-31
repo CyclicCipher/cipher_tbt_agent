@@ -1837,3 +1837,88 @@ bulk.
      Gidon's NMDA no longer give one at 20.
    - E0e's GABA check tests that GABA shrinks a depolarization. GABA reverses at −75 mV, so it can't hyperpolarize a
      cell resting at −74.
+
+### E0e run (2026-10-30, at commit 549bac9; `runs/e0e.json`): check T passes; F3 passes on 1 seed of 3; S9 fails; 90 s
+
+**Check M** (reported):
+- 1006 compartments;
+- the XOR site 536.4 µm from the soma (the paper: about 550);
+- the soma's R_in **39.5 MΩ** (the recorded cell's: 41; the unscaled cell had 61).
+
+**Check T passes:** the threshold is **0.21 nA** (the paper: 220 pA).
+
+| step | dCaAPs | first: K, peak | later: K, peak |
+|---|---|---|---|
+| 0.20 nA | 0 | — | — |
+| 0.21 | 5 | 1.0, 54.3 mV | 0.989, 53.4 mV |
+| 0.24 | 5 | 1.0, 58.8 | 0.621, 25.6 |
+| 0.27 | 5 | 0.999, 63.6 | 0.390, 10.2 |
+| 0.30 | 5 | 0.996, 68.4 | 0.245, 2.6 |
+
+- **The first dCaAP is full size at every step,** and grows slightly. The later ones, 200 ms apart, shrink with
+  current, as their screenshot shows.
+- **The soma never fires:** the site is uncoupled.
+
+**F3, XOR at the dendrite: large dCaAPs (site peak above 0 mV) in 4 s, by seed:**
+
+| condition | seed 0 | seed 1 | seed 2 | their model (digitized) | site median (mV) | mean K |
+|---|---|---|---|---|---|---|
+| X | **0** | **1** | 9 | 7 | −52.9, −50.0, −48.0 | 1.0 when they fire |
+| Y | 4 | **2** | 10 | (Fig. 3C, about 6) | −50.0, −50.2, −45.4 | 1.0 |
+| X+Y | **2** (of 20) | 1 (of 20) | 1 (of 20) | 0 (Fig. 3D) | −17.0, −18.9, −16.8 | 0.25–0.27 |
+| X+Y+inhibition | 11 | 11 | 14 | 9 | −43.1, −46.3, −36.1 | 0.83–0.97 |
+
+- **By the pre-registered criterion F3 fails:** seed 2 passes; seeds 0 and 1 don't. One pathway alone often doesn't
+  bring the site to threshold. Under X the site sits 3–5 mV below theirs: their trace runs between about −49 and −41,
+  ours has medians −53 to −48.
+- **What holds on every seed:**
+  - X+Y holds the site near −17 mV, so after each refractory period the dCaAP re-fires with K about 0.25, and at most
+    2 reach 0 mV;
+  - inhibition brings the site back down and the dCaAPs back to full size (11–14 large, K 0.83–0.97);
+  - whenever one pathway alone reaches θ, its dCaAPs are full size.
+- **So the suppression and the recovery are reproduced robustly.** The weak link is the single pathway's drive,
+  which varies with where its 25 synapses land. Our three draws give 0, 1 and 9 large dCaAPs for X; their one draw
+  gave 7.
+- **Can't tell** whether our cell is systematically about 4 mV weaker, or their draw was on the strong side, without
+  their exact positions (NEURON's own random generator).
+- **The soma never fires** in any condition, as in theirs.
+
+**S9, the soma's output (coupled site): fails on every seed.**
+
+| condition | soma rate by seed (Hz) | dCaAPs (mean K) |
+|---|---|---|
+| X | 2.94, 2.94, 1.91 | 60, 60, 39 (0.96–0.99) |
+| Y | 2.06, 2.79, 2.30 | 42, 57, 47 (0.99) |
+| X+Y | **3.73, 3.58, 3.04** | 102 each (0.43–0.47) |
+| X+Y+distal inhibition | 3.28, 3.28, 2.84 | 68, 68, 58 (0.95–0.97) |
+| X+proximal inhibition | 2.30, 2.06, 1.32 | 48, 42, 27 |
+
+- **Every coupled dCaAP fires one somatic spike** (the paper: "without exception, each coupled dCaAP triggered a
+  single somatic AP").
+- **But the soma doesn't compute XOR.** X+Y makes dCaAPs at the refractory limit (one per 200 ms), and even at K
+  about 0.45 most still fire the soma, so X+Y's rate is the highest.
+- **Distal inhibition lowers the rate,** where the criterion asked it to raise it. Proximal inhibition lowers X's.
+- **Unchecked:** Fig. S9 (in the supplement, which I haven't seen) may show something else.
+
+**Scored against the predictions:**
+
+| prediction | outcome |
+|---|---|
+| check M: about 536 µm; R_in from 61 toward 40 MΩ | right: 536.4 µm, 39.5 MΩ |
+| check T: 0.22 ± 0.01 nA | right: 0.21 |
+| F3, X and Y: ≥ 3 large dCaAPs each (medium–high) | wrong on 2 of 3 seeds |
+| F3, X+Y: ≤ 1 (medium–high) | right on 2 seeds, 2 on seed 0 |
+| F3, inhibition: ≥ 3 (medium) | right: 11–14 |
+| S9: the pattern holds (medium) | wrong |
+
+**What E0e established:**
+1. **Type A is now Gidon's model.**
+   - The audit's fixes (the scale, the dCaAP rule, their synapses, their soma, background activity, inhibition)
+     reproduce their test pulse to within 10 pA and the recorded cell's input resistance to within 4%.
+   - Every earlier type A result (E0b, E0c-A, E0d's step 3, E1's A1–A3) was on the wrong cell, as the audit said.
+2. **The dendrite computes Gidon's anti-coincidence robustly.** When the two pathways are on together, the steady
+   depolarization keeps every re-fired dCaAP small (K about 0.25); inhibition restores it. That is the XOR's "1, 1 → 0"
+   and its rescue. Its "1, 0 → 1" is fragile: one pathway of 25 synapses at 20 Hz reaches the dCaAP's threshold on
+   some placements only.
+3. **At the soma, in the coupled arrangement, the cell computes something like OR.** The dCaAP's smaller amplitude
+   doesn't stop it firing the soma.
