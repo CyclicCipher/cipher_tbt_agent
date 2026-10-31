@@ -260,3 +260,27 @@ def equivalent_cylinder(tree, u, Ra, Rm):
     X = 2.0 * acc / tot
     d = (tot / (math.pi * X * 100.0 * math.sqrt(Rm / (4.0 * Ra)))) ** (2.0 / 3.0)
     return tot, d, X * lam(d)
+
+
+def electrotonic(tree, u, s, x, Ra, Rm):
+    """The electrotonic distance (in λ) from the start of section u to point x of section s, s in u's subtree
+    (each 3-D piece's Δl / λ(d), λ = sqrt(d·Rm / (4·Ra)), as `equivalent_cylinder` measures it)."""
+    lam = lambda d: 100.0 * math.sqrt(d * Rm / (4.0 * Ra))
+    path, c = [], s
+    while c != u:
+        path.append(c)
+        c = tree.parent[c][0]
+    path = [u] + path[::-1]
+    X = 0.0
+    for sec in path:
+        P = tree.points[sec]
+        arc, d = _arc(P), P[:, 3]
+        end = x * arc[-1] if sec == s else arc[-1]
+        for j in range(len(arc) - 1):
+            if arc[j] >= end:
+                break
+            dl = min(arc[j + 1], end) - arc[j]
+            if dl > 0:
+                X += dl / lam((d[j] + d[j + 1]) / 2)
+    return X
+

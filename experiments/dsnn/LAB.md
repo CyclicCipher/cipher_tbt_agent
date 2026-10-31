@@ -2095,3 +2095,13 @@ zone apic[76].2, b1.m on dend[61].4). No protocol.
      from 100 ms to 20 s) to give each synapse's presynaptic times.
    - **The cell:** the run uses w = 700.8 pA.
    - **Positions:** E0e's.
+
+### E1b run 1 (2026-10-30, at commit 75f26b0): crashed before any result
+The post-pulse rule (the smallest 2 ms somatic pulse giving exactly one spike, on 50–5000 pA) found no value on the
+rebuilt type A. Its pulses at 1–5 nA reach −68 to −40 mV; one spike needs 6 nA. The cell is large (106,000 µm²,
+τ_m 17 ms; its 100 ms rheobase lies between 0.6 and 0.8 nA).
+
+### E1b amendment 5 (after run 1, before run 2)
+5. **The pulse searches run to 20 nA:** `protocols.strengths`' post-pulse grid and amendment 11's train-pulse grid
+   (formerly 5 and 8 nA). The rules are otherwise unchanged. Type B's value (1450 pA) lies inside the old range, so
+   it doesn't change. Nothing else in E1b changes.

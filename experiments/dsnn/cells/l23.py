@@ -21,8 +21,9 @@ compartment), "soma"; and E0's: "b1.d", "b2.d" (the compartments holding basal 1
 nearer the soma than b1.d's tip), "n4" (9 points along basal 1, distal first), "basal1", "basal2", "trunk", "tuft1",
 "tuft2", "basal", "tuft" (the main paths: `paths`).
 
-`reduced=True` gives the earlier reduction (LAB.md E0b: the five paths, every other subtree an equivalent cylinder),
-at the corrected scale. It isn't yet re-validated against the full cell.
+`reduced=True` gives the earlier reduction (LAB.md E0b: the five paths and the axon modelled, every other subtree an
+equivalent cylinder), at the corrected scale (validated against the full cell in E0f). A synapse placed on a lumped
+section goes to its cylinder at the same electrotonic distance from the subtree's start (`protocols.comp_at`).
 """
 from functools import lru_cache
 import os
@@ -30,7 +31,7 @@ import os
 import numpy as np
 
 from ..cell import GIDON, DCaAP, passive
-from ..morphology import compartments, main_path, read_hoc
+from ..morphology import compartments, equivalent_cylinder, main_path, read_hoc
 from ..traub import Traub
 
 HOC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "gidon2020_171122005.hoc")
@@ -79,7 +80,7 @@ def l23(site="uncoupled", reduced=False, max_len=30.0):
     t = tree()
     P = paths(t)
     if reduced:
-        modelled = {s for p in P.values() for s in p}
+        modelled = {s for p in P.values() for s in p} | {"axon"}
         geo = compartments(t, modelled, RA, RM, CM, max_len)
     else:
         geo = compartments(t, set(t.points) - {"soma"}, RA, RM, CM, nseg_of=lambda s: nseg(t, s))
@@ -105,6 +106,14 @@ def l23(site="uncoupled", reduced=False, max_len=30.0):
         cell.dcaap = DCaAP(zone=z, w=dens * cell.area[z] * 10.0)          # mA/cm² × µm² × 10 = pA
     cell.rest = {"V": np.full(cell.N, V_INIT)}
     cell.tree, cell.where = t, geo.where
+    if reduced:                     # each lumped subtree's cylinder: (length µm, electrotonic length), for placement
+        cyl = {}
+        for key in geo.where:
+            if key.endswith("~eq"):
+                u = key[:-3]
+                _, d, L = equivalent_cylinder(t, u, RA, RM)
+                cyl[u] = (L, L / (100.0 * (d * RM / (4.0 * RA)) ** 0.5))
+        cell.cylinders, cell.cable = cyl, (RA, RM)
     sections = [s for s in t.points if s != "axon"]
     sub = [s for s in t.subtree("apic[60]") if s != "apic[60]"]
     cell.seclists = dict(all_no_axon=sections, subdomain=sub, basal=[s for s in t.points if s.startswith("dend")],

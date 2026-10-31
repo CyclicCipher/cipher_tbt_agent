@@ -138,6 +138,8 @@ class Cell:
     tree: object = None        # morphology.Tree
     where: dict = None         # section -> [(compartment, arc start, arc end)]
     seclists: dict = None      # name -> [sections]
+    cylinders: dict = None     # reduced cells: lumped subtree root -> (cylinder length µm, its electrotonic length)
+    cable: tuple = None        # reduced cells: (Ra, Rm), for electrotonic distances
 
     @property
     def N(self):

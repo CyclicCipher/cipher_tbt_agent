@@ -13,6 +13,7 @@ import math
 import numpy as np
 
 from .cells import TYPES
+from .morphology import electrotonic
 from .sim import Stim, Wiring, simulate
 
 T0 = 10.0                  # ms: when the first input arrives
@@ -45,9 +46,17 @@ def place(cell, seclist, n, rng, min_dist=None):
 
 
 def comp_at(cell, s, x):
-    """The compartment that holds point x of section s."""
+    """The compartment that holds point x of section s. In a reduced cell, a point on a lumped section maps to its
+    subtree's equivalent cylinder at the same electrotonic distance from the subtree's start (capped at the end)."""
     if s == "soma":
         return 0
+    if s not in cell.where:
+        u = s
+        while cell.tree.parent[u][0] != "soma" and cell.tree.parent[u][0] not in cell.where:
+            u = cell.tree.parent[u][0]
+        L, Xc = cell.cylinders[u]
+        f = min(1.0, electrotonic(cell.tree, u, s, x, *cell.cable) / Xc)
+        s, x = u + "~eq", f
     L = cell.where[s][-1][2]
     for c, a, b in cell.where[s]:
         if x * L <= b + 1e-9:
@@ -174,7 +183,7 @@ def zone_record(cell):
 def strengths(cell, dt, kind):
     """Every rule-set input strength (N5's rates: `n5_rates`)."""
     out = {}
-    pulses = np.arange(50.0, 5050.0, 50.0)
+    pulses = np.arange(50.0, 20050.0, 50.0)        # to 20 nA (LAB.md E1b, amendment 5)
     r = simulate([n2(cell, pulse=a, use_tuft=0) for a in pulses], 120.0, cell, dt=dt)
     out["n2_pulse"] = first(pulses, [len(r.spikes[b][0]) == 1 for b in range(len(pulses))])
     if kind == "A":                    # n: the smallest even n whose tuft input alone gives a dCaAP, minus 2

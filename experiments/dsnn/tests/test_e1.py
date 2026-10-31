@@ -142,7 +142,7 @@ def train_pulse(job):
     pairing of the protocol's first burst (5 pairings, from rest, with the pathway) fires."""
     sp, base = job
     one = dict(sp, posts=sp["posts"][:5], pre=None)
-    amps = np.arange(base, 8000.0 + 1e-9, 50.0)
+    amps = np.arange(base, 20000.0 + 1e-9, 50.0)                 # to 20 nA (LAB.md E1b, amendment 5)
     built = [build(one, a) for a in amps]
     r = simulate([b[0] for b in built], built[0][2], cell_of(sp["kind"]), dt=DT)
     ok = [min(per_pairing(r.spikes[b][0], one["posts"])) >= 1 for b in range(len(amps))]
