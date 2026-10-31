@@ -1354,3 +1354,174 @@ calcium is read. No protocol and no fit.
 | the port passes at a tuft compartment (0.6) | wrong: the thresholds are 2–3.6 times lower than Bahl's |
 | the verdict is "the criterion" | half: by the pre-registered order it's "the port", but the criterion holds too (2 spikes, never ≥ 3, with Bahl's own input) |
 | the comparison: E2 keeps E0b's type A | right |
+
+## E0d: Gidon's Ca²⁺ + BK model, verified, in type A; the recorded dCaAP as the target (pre-registered 2026-10-30)
+
+**The user's question (2026-10-30):** XOR doesn't work, and E0c tried one Ca²⁺ channel. Are there Ca²⁺-dependent K⁺
+(BK) channels? The answer:
+- There are none in type A.
+- Type B's `kca` is gated by calcium alone (SK-like).
+- Gidon's own channel model of the dCaAP is Ca²⁺ + BK + a Ca²⁺ pump. My quick numpy port of it, made while reading
+  for E0b, was never checked against their figure.
+
+**The user's decision:** "Yes" to this plan:
+1. port Gidon's model properly and check it against their figure;
+2. put it at the zone and test XOR on synaptic input;
+3. if that fails, fit the same model to Gidon's recorded dCaAP.
+
+In every case XOR (N3) is the held-out test.
+
+**Sources:**
+- **ModelDB 260178** (Gidon et al. 2020, Fig. S12), `FigS12/main.hoc`, `parameters0.hoc`, `_mod/{Ca_HVA,BK,capump}.mod`:
+  - **The compartment:** one, L 100 µm, diameter 99 µm. cm 0.45 µF/cm², g_pas 3.5 × 10⁻⁵ S/cm², e_pas −86 mV.
+  - **The channels:**
+    - Ca_HVA (m²h; Reuveni 1993's rates) at 0.0005 S/cm²;
+    - BK (m³z²h; Akemann & Knöpfel 2006, from Khaliq 2003) at 300 pS/µm², with mtau_factor 0.2, htau_factor 0.02,
+      zhalf 0.01 mM and τ_z 1 ms;
+    - a Ca²⁺ shell (cad), depth 1 µm, τ_r 60 ms, [Ca]∞ 2.4 × 10⁻⁴ mM.
+  - **The settings:** NEURON's defaults, celsius 6.3 °C, [Ca]o 2 mM, E_K −77 mV, and E_Ca by Nernst from [Ca]i. v_init −86;
+    CVODE.
+  - **The protocol:** 1 s steps from 500 ms, 0.375 to 0.625 nA in steps of 0.025.
+- **Their own figure data** (Zenodo 3530043, the paper's Veusz files):
+  - **Our own cell, 171122005** (Fig. S8, 2F, 2E): steps of 140, 155, 170, 185 and 200 pA.
+    - Amplitudes 54.7, 47.8, 45.1, 35.7, 28.2 mV; normalized 1, 0.874, 0.824, 0.652, 0.515, at 1, 1.107, 1.214,
+      1.321 and 1.429 × I_th.
+    - Widths 4.3, 3.9, 4.3, 4.2, 4.6 ms.
+    - Its fitted decay constant is 0.86, in units of I_th.
+  - **The 12 cells' decay constants:** mean 0.39, range 0.10–0.86. The phenomenological model's is 0.3.
+  - **All 28 dCaAPs** (Fig. 1E, S5), recorded 189–471 µm from the soma: 42 ± 14 mV, width 4.4 ± 1.3 ms. Upstroke
+    20 ± 9 mV/ms, downstroke −19 ± 8 mV/ms. The first comes 207 ± 161 ms into the step.
+
+**A correction to E0c's amendments:** I wrote there that E0b's reference event (107 mV, 4.7 ms) was briefer than
+Gidon's recorded dCaAP. Wrong: the recorded dCaAPs are about as brief (4.4 ms), and the reference was about twice
+too tall.
+
+**What their figure shows** (the screenshot, digitized by colour before any port ran; pixel resolution about 4 ms
+and 0.8 mV; the event detector below):
+
+| step | events in 560–1490 ms | heights after the first (first) | trough |
+|---|---|---|---|
+| 0.400 nA | 0 | — | −46.7 mV |
+| 0.425 | 3 (607, 859, 1198 ms) | 49.4, 43.5 (64.4) mV | −44.1 |
+| 0.450 | 6 | 36.8, 35.1, 32.6, 31.8, 31.0 (55.2) | −44.0 |
+| 0.475 | 7 | 21.8 … 16.7 (23.4) | −43.1 |
+| 0.500 | 10 | 10.0 … 8.4 (10.9) | −40.5 |
+| 0.525 | 7 ripples | 3.3–6.7 | −37.9 |
+| 0.550, 0.575 | 1 each | 5.0, 4.2 | −37.8, −37.7 |
+
+- **Rest:** −84 mV, against −86 in the model. That is the digitizing's offset.
+- **So in their model the falling amplitude is in the repeated events** during a long step: they shrink and come
+  faster with current, then stop.
+- **The first event doesn't fall:** at 0.625 nA it is the largest of all.
+
+### Step 1, check P: the port reproduces their figure
+- **The port:** one compartment, their constants exactly, their protocol.
+  - **The voltage:** backward Euler, with every conductance taken at the start of the step, as `sim.py` does.
+  - **The gates and [Ca]i:** exponential Euler on the new voltage.
+  - **The step:** dt = 0.0025 ms; checked against 0.00125 ms (event counts equal, heights within 2%).
+- **The detector** (the same for figure and port):
+  - **Binning:** the port's trace is first cut into the screenshot's pixel columns (4.07 ms each), keeping each
+    column's maximum and minimum.
+  - **An event:** a local maximum of the column maxima, 560–1490 ms, at least 3 mV above the lowest column maximum in
+    the 60 ms before it.
+  - **Its height:** that difference.
+  - **The trough:** the median of the column minima.
+- **The port passes** if:
+  - rest is within 3 mV of −84.3;
+  - at 0.375 and 0.4 nA, no events;
+  - at 0.425, 0.45, 0.475 and 0.5 nA, the event count is within ±1 of 3, 6, 7 and 10;
+  - the median height after the first event is within 20% of 46.5, 33.5 and 18.4 mV at 0.425–0.475 nA, and within
+    3 mV of 8.4 at 0.5 nA;
+  - at 0.55 and 0.575 nA, at most 1 event;
+  - every trough is within 3 mV.
+- **If it fails:** E0d stops. An unverified port doesn't go into the cell.
+
+### Step 2: the model at the zone
+- **What goes in:** their Ca_HVA, BK and Ca²⁺ shell go into type A at the zone, apic[60](0.99), in place of the
+  phenomenological dCaAP. Every other constant is as in E0b.
+- **The transfer rule:**
+  - **The conductances:** the zone gets their compartment's *total* channel conductances: Ca_HVA 155.5 nS; BK
+    9.33 µS times its gates.
+  - **The calcium:** the pool is computed per *their* membrane area (31,102 µm²).
+  - **So:** at a given voltage, the zone's channel currents and [Ca]i are theirs.
+  - **Why total, not density:** their compartment is an isopotential stand-in for a dendritic site. Its input
+    resistance (91.9 MΩ) is close to our zone's (109 MΩ). Gidon's XOR model also puts the whole dCaAP at one
+    segment. Their passive leak doesn't come with it, since the cell has its own.
+- **Their kinetics as published:** 6.3 °C, and E_Ca by Nernst at 6.3 °C.
+- **Solving it:** the conductances go into `sim.py`'s implicit solve like any other.
+
+### Step 3: tests in type A with the transplanted model
+**D1, the recorded curve.** The model isn't fitted to it, so this is a test.
+- **The protocol:** 1 s steps into the zone, spiking off.
+- **I_th:** the smallest step on a 5 pA grid that gives an event.
+- **An event at the zone, at full resolution:**
+  - a local maximum of V that rises at least 10 mV above the minimum of the 20 ms before it;
+  - with a peak dV/dt of at least 5 mV/ms on the way up. Passive charging is slower than that, and recorded upstrokes
+    are 20 ± 9 mV/ms.
+- **Amplitude:** the rise above that minimum.
+- **Width:** the full width at half amplitude.
+- **Passes if,** for the first event:
+  - its amplitude at I_th is within 54.7 ± 13.9 mV (our cell's, ± the population's SD);
+  - its width is within 4.4 ± 1.3 ms;
+  - its normalized amplitude at 1.107, 1.214, 1.321 and 1.429 × I_th is each within ±0.15 of 0.874, 0.824, 0.652 and
+    0.515.
+- **Also reported:** the repeated events' amplitudes and I_th, against the recorded 140 pA. The electrode's site in
+  the slice isn't known, so I_th isn't scored.
+
+**N3 (XOR on synaptic input), required.**
+- **The count:** n = the smallest count for which A alone gives an event at the zone.
+- **Passes if** the soma fires 0 times for none, at least once for A and for B, and 0 times for A+B.
+
+**"Gives an event" when the soma can spike** (N3's count, the bAP check, E0b's rules):
+- **The voltage detector can't be used there:** a bAP alone raises the zone by about 38 mV within 1 ms.
+- **The criterion instead:** the zone's Ca_HVA current peaks at ≥ 50% of its peak in the first event of the I_th step,
+  as in E0c.
+
+**The other tests:**
+- **The bAP:** N2's pulse alone gives no event at the zone (required).
+- **N1, N4, N6:** required, as in E0b. **N2, N5:** reported. All use E0b's rules, with "gives an event" for "gives a
+  dCaAP".
+
+**The rest state:** the zone's channels move its rest, so the cell's rest state is its state after 2 s of silence
+from E_L, as type B's is after 20 s.
+
+### Step 4, only if step 3 fails D1 or N3: their model, fitted to the recorded dCaAP
+- **Ten free constants:** the knobs their own files expose, plus the two totals.
+
+  | constant | bounds |
+  |---|---|
+  | total g_Ca, total g_BK | 0.1–10 × the transplant's, log |
+  | Ca_HVA's ma, mb, ha, hb (rate multipliers) | 0.2–5, log |
+  | BK's mtau_factor, htau_factor | 0.2–5 × theirs, log |
+  | zhalf | 0.001–0.1 mM, log |
+  | τ_r | 20–140 ms, their panel's range |
+
+- **The targets:** D1's: 54.7 mV and 4.3 ms at I_th; 0.874, 0.824, 0.652 and 0.515 at 1.107–1.429 × I_th.
+- **The error:** the sum of squared errors, each divided by its D1 tolerance.
+- **The search:** as in E0c.
+  - **Stage 1:** 600 random candidates, seed 0.
+  - **Stage 2:** the best 10 by Nelder–Mead, at most 60 evaluations each.
+  - **To bound the cost:** steps of 300 ms, not 1 s, and I_th on a 20 pA grid from 20 to 1000 pA, then 5 pA within
+    the bracket.
+- **Passes if** D1 passes at the fitted constants, re-measured on 1 s steps. Then N3 and the other tests run on it,
+  held out.
+- **If the fit fails:** XOR stays unresolved, and type A keeps E0b's phenomenological dCaAP.
+
+### Predictions (2026-10-30, before the code)
+
+| | prediction | confidence |
+|---|---|---|
+| check P | passes | medium–high (0.7) |
+| D1, transplanted | fails: the first event grows with current, as at their figure's 0.625 nA onset | high that it fails (0.8) |
+| N3, transplanted | fails | high |
+| the bAP, transplanted | uncertain: Ca_HVA opens within a few ms at 6.3 °C, and a bAP brings the zone near −36 mV for about 1 ms | low |
+| step 4's fit passes D1 | low (0.4) |
+| N3 on the fitted model | passes | low (0.3) |
+
+**Compute:** check P about 10 s; step 3 about 1 minute; step 4 about 5 minutes over 7 processes.
+
+**What the outcomes mean:**
+- **Check P passes, D1 fails:** Gidon's own channel model gives the falling amplitude only for repeated events
+  during a sustained step, not for the first event, which is all a brief synaptic input makes. Their XOR model then
+  relies on the phenomenological rule for something their channel model doesn't do.
+- **N3 passes in step 3 or 4:** XOR on synaptic input from channels, for the first time in this project.
