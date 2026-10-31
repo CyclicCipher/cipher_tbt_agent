@@ -61,6 +61,18 @@ def part_a(dt):
     return out
 
 
+def explore_a(dt, best):
+    """Amendment 9, exploratory (no verdict): the bAP check and N3 on the fit's best channel, though the fit failed."""
+    t0 = time.time()
+    cell, cal = P.calibrate(F.with_channel(best["x"], best["i_ref"]), "A", dt)
+    bap = channel_peaks(cell, [P.n2(cell, pulse=cal["n2_pulse"], use_tuft=0)], 120.0, dt)[0]
+    n3 = E.n3(cell, cal, dt)
+    n = cal["n3_n"]
+    n3["channel_peaks"] = dict(zip(("none", "A", "B", "A+B"), channel_peaks(
+        cell, [P.n3(cell, n, a, b) for a, b in ((0, 0), (1, 0), (0, 1), (1, 1))], 120.0, dt)))
+    return dict(calibration=cal, bAP_peak_fraction=bap, N3=n3, seconds=round(time.time() - t0, 1))
+
+
 # ---- E0c-B ------------------------------------------------------------------------------------------------------
 BAHL = dict(soma_threshold=900.0, I_CA=3600.0, I_BAC=1800.0, C=0.5)
 SITES = ("apical.0", "apical.1", "apical.2", "apical.3", "apical.4", "tuft.0", "tuft.1")
@@ -78,18 +90,29 @@ def epsc(st, t0, comp, amp, neuron=0, dur=80.0, piece=0.1):
     return st
 
 
-def ca_spike(r, b, tuft, rest_tuft, local):
-    """Bahl's criteria, from the first somatic spike t_s: the tuft's ∫(V − V_rest) over [t_s, t_s + 50] > 500 mV·ms
-    and over [t_s + 100, t_s + 150] < 1000; with `local`, also over [t_s − 10, t_s] > 500."""
+def tuft_integrals(r, b, tuft, rest_tuft):
+    """From the first somatic spike t_s, the tuft's ∫(V − V_rest) in mV·ms: I1 over [t_s, t_s + 50], I2 over
+    [t_s + 100, t_s + 150], pre over [t_s − 10, t_s], and the largest over any 10 ms in [t_s, t_s + 50] (0.5 ms
+    steps). None without a somatic spike."""
     s = r.spikes[b][0]
     if not s:
-        return False
+        return None
     ts, t = s[0], r.t
     v = np.asarray(r.v(b, tuft), float) - rest_tuft
     h = t[1] - t[0]
     integ = lambda a, z: float(v[(t >= a) & (t < z)].sum() * h)
-    ok = integ(ts, ts + 50) > 500 and integ(ts + 100, ts + 150) < 1000
-    return ok and (integ(ts - 10, ts) > 500 if local else True)
+    return dict(I1=integ(ts, ts + 50), I2=integ(ts + 100, ts + 150), pre=integ(ts - 10, ts),
+                win10=max(integ(a, a + 10) for a in np.arange(ts, ts + 40 + 1e-9, 0.5)))
+
+
+def ca_spike(r, b, tuft, rest_tuft, local):
+    """A dendritic Ca²⁺ spike (amendment 8): Bahl's own number, ∫(V − V_rest) > 500 mV·ms within 10 ms of the tuft
+    (a mean 50 mV above rest). With `local` (the current alone), over the 10 ms before the first somatic spike, as
+    Bahl's local test; otherwise over some 10 ms of the 50 ms after it."""
+    x = tuft_integrals(r, b, tuft, rest_tuft)
+    if x is None:
+        return False
+    return x["pre"] > 500 if local else x["win10"] > 500
 
 
 def _site_thresholds(args):
@@ -103,13 +126,15 @@ def _site_thresholds(args):
     n = len(AMPS)
     i_ca = P.first(AMPS, [ca_spike(r, b, tuft, rest, True) for b in range(n)])
     i_bac = P.first(AMPS, [ca_spike(r, n + b, tuft, rest, False) for b in range(n)])
-    spikes_bac = len(r.spikes[n + list(AMPS).index(i_bac)][0]) if i_bac == i_bac else None
+    b_bac = n + list(AMPS).index(i_bac) if i_bac == i_bac else None
+    spikes_bac = len(r.spikes[b_bac][0]) if b_bac is not None else None
+    req = tuft_integrals(r, b_bac, tuft, rest) if b_bac is not None else None
     C = (i_ca - i_bac) / i_ca if i_ca == i_ca and i_bac == i_bac else float("nan")
     match = (abs(i_ca / BAHL["I_CA"] - 1) <= 0.2 and abs(i_bac / BAHL["I_BAC"] - 1) <= 0.2
              and abs(C - BAHL["C"]) <= 0.1 and spikes_bac is not None and 2 <= spikes_bac <= 4)
     err = abs(i_ca / BAHL["I_CA"] - 1) + abs(i_bac / BAHL["I_BAC"] - 1) + abs(C - BAHL["C"]) / BAHL["C"]
     return dict(site=site, dist=float(cell.dist[c]), I_CA=i_ca, I_BAC=i_bac, C=C, spikes_at_I_BAC=spikes_bac,
-                matches=bool(match), rel_err=err if err == err else None)
+                bahl_requirements_at_I_BAC=req, matches=bool(match), rel_err=err if err == err else None)
 
 
 def part_b(dt, workers=7):
@@ -213,9 +238,10 @@ def report(res, say=print):
         say("  B: soma threshold (5 ms) %.0f pA (Bahl 900) -> %s" % (b["soma_threshold"],
                                                                      "ok" if b["soma_threshold_ok"] else "off"))
         for s in b["sites"]:
-            say("    %-9s %4.0f um: I_CA %s, I_BAC %s, C %s, spikes at I_BAC %s%s" % (
+            q = s.get("bahl_requirements_at_I_BAC") or {}
+            say("    %-9s %4.0f um: I_CA %s, I_BAC %s, C %s, spikes at I_BAC %s; I1 %s I2 %s%s" % (
                 s["site"], s["dist"], s["I_CA"], s["I_BAC"], None if s["C"] != s["C"] else round(s["C"], 3),
-                s["spikes_at_I_BAC"], "  MATCHES" if s["matches"] else ""))
+                s["spikes_at_I_BAC"], q and round(q["I1"]), q and round(q["I2"]), "  MATCHES" if s["matches"] else ""))
         say("    port %s; best site %s" % ("PASS" if b["port_passed"] else "FAIL", b.get("best_site")))
         if "current_vs_contacts" in b:
             say("    current vs contacts: %s" % b["current_vs_contacts"])
@@ -227,14 +253,19 @@ def main(argv):
     dt = 0.05
     part = argv[argv.index("--part") + 1] if "--part" in argv else "AB"
     t0 = time.time()
-    res = dict(dt=dt)
+    res = dict(dt=dt, amendment=8)
     if "B" in part:
         res["B"] = part_b(dt)
     if "A" in part:
         res["A"] = part_a(dt)
+    if "explore" in part:                      # amendment 9: on run 1's best channel
+        with open(os.path.join(HERE, "runs", "e0c_run1_dt0.05.json"), encoding="utf-8") as fh:
+            best = json.load(fh)["A"]["fit"]["best"]
+        res["explore_A"] = explore_a(dt, best)
+        print("explore A:", json.dumps(res["explore_A"], default=float)[:1500])
     res["seconds"] = round(time.time() - t0, 1)
     os.makedirs(os.path.join(HERE, "runs"), exist_ok=True)
-    name = "e0c_dt%g%s.json" % (dt, "" if part == "AB" else "_" + part)
+    name = "e0c_dt%g%s.json" % (dt, "" if part == "AB" else "_" + part.replace("+", "_"))
     with open(os.path.join(HERE, "runs", name), "w", encoding="utf-8") as fh:
         json.dump(res, fh, indent=1, default=float)
     report(res)

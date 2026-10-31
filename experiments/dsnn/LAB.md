@@ -1021,3 +1021,48 @@ needs more, I stop and ask.
 6. **The contact searches** of E0c-B's diagnosis run n = 2, 4, …, 1000.
 7. **The window diagnosis** also runs with Bahl's 5 ms threshold pulse in place of N2's 2 ms pulse, as an extra
    reported row. Δt is the current's onset relative to the pulse's onset.
+
+### E0c run 1 (2026-10-30, at commit 5d5a98e; `runs/e0c_run1_dt0.05.json`): part A stands; part B is void
+
+**Part A, the fit: 251 s. It fails.**
+- **The best after stage 2:** E = 8.82.
+  - **The constants:** g 3.2 nS, V_m −24.1, k_m 1.47, τ_m 20.0 ms (the upper bound), V_h −18.2, k_h 6.8, τ_h 1.07 ms
+    (near the lower bound).
+  - **What it gives:** I_th 425 pA, a = 13.3 mV, width 22.8 ms, K(1.5) 0.319, K(2) 0.129, and a sharp threshold.
+  - **Checks:** only "sharp" passes. K(1.5), K(2), a, the width and I_th all fail.
+- **By the pre-registration:** type A keeps E0b's phenomenological dCaAP, and E0c-A's held-out tests aren't run.
+- **What stage 1's 600 candidates show** (read from the saved rows, no new runs):
+  - **Big events never fall:** 93 candidates have a sharp threshold and an event over 1 mV. The 36 of them with
+    events over 50 mV all have K(2) ≥ 0.79.
+  - **Falling events are small:** the best curve, judged alone, is K(1.5) 0.205 and K(2) 0.093, at a = 8.4 mV.
+  - **The mechanism the fit found:** h is near-instant (τ_h ≈ 1 ms) and m slow (τ_m at its bound). The current lives
+    only in a window of voltage below V_h, and a strong step pushes the zone out of it.
+  - **So:** in this family, an event either regenerates (large, all-or-none) or falls with input (small), never
+    both.
+
+**Part B is void: the Ca²⁺-spike detector doesn't detect.**
+- **The result:** I_BAC came out at 100–400 pA at every site, the bottom of the grid, with 1 spike. tuft.1 gave
+  I_CA = 1600 pA, and the other sites none. The verdict read "the port".
+- **The cause:** I took Bahl's requirements on a Ca²⁺ spike (I1 > 500 mV·ms over 0–50 ms; I2 < 1000) as the test
+  that finds one. They are what Bahl asked of a Ca²⁺ spike already found.
+- **The check** (the threshold pulse alone, 850 pA for 5 ms, no dendritic current):
+  - the tuft peaks 23.9 mV above its rest (−68.7 mV);
+  - I1 = 462 mV·ms;
+  - the largest 10 ms integral is 219 mV·ms.
+
+  A bAP alone nearly meets I1 > 500, so any dendritic current tips it over.
+
+### E0c amendments 8 and 9 (2026-10-30, after run 1, before run 2)
+
+8. **The Ca²⁺-spike detector is Bahl's own number,** 500 mV·ms within 10 ms: the tuft at a mean of 50 mV above
+   rest for 10 ms.
+   - **With the dendritic current alone:** over the 10 ms before the first somatic spike. That is Bahl's local
+     test, as pre-registered.
+   - **With the pulse:** over some 10 ms window within the 50 ms after the first somatic spike, in 0.5 ms steps.
+   - **The bAP alone gives 219,** so the detector sees a Ca²⁺ spike, not the bAP.
+   - Bahl's requirements (I1 > 500, I2 < 1000, 2–4 spikes) are reported at I_BAC. "2–4 spikes" stays in the port's
+     pass criteria, as pre-registered.
+   - **Part B runs again;** part A doesn't, since nothing in it changed.
+9. **Exploratory, not a verdict:** the bAP check and N3 on run 1's best channel.
+   - **Why:** the comparison the user asked for is otherwise empty on option 1's type A side.
+   - **Its numbers decide nothing.** By the pre-registration type A keeps E0b's dCaAP, whatever they show.
