@@ -1066,3 +1066,63 @@ needs more, I stop and ask.
 9. **Exploratory, not a verdict:** the bAP check and N3 on run 1's best channel.
    - **Why:** the comparison the user asked for is otherwise empty on option 1's type A side.
    - **Its numbers decide nothing.** By the pre-registration type A keeps E0b's dCaAP, whatever they show.
+
+### E0c run 2 (2026-10-30, at commit 19af960; `runs/e0c_dt0.05_B_explore.json`): part B and the exploration, 87 s
+
+**Part B, the port against Bahl's Fig. 8** (amendment 8's detector):
+
+| site | distance | I_CA (Bahl 3.6 nA) | I_BAC (Bahl 1.8 nA) | C (Bahl 0.5) | spikes at I_BAC | I1 / I2 (mV·ms) |
+|---|---|---|---|---|---|---|
+| apical.0 | 73 µm | none up to 8 nA | 2.8 nA | — | 4 | 2628 / −345 |
+| apical.1 | 173 µm | none | 1.8 nA | — | 3 | 2751 / −337 |
+| apical.2 | 273 µm | none | 1.1 nA | — | 3 | 2855 / −331 |
+| apical.3 | 373 µm | none | 1.0 nA | — | 2 | 2446 / −353 |
+| apical.4 | 473 µm | none | 0.8 nA | — | 2 | 3057 / −323 |
+| tuft.0 | 648 µm | none | 0.4 nA | — | 2 | 3130 / −316 |
+| tuft.1 | 897 µm | 1.6 nA | 0.5 nA | 0.69 | 2 | 3124 / −325 |
+
+- **The somatic threshold for a 5 ms pulse:** 850 pA, against Bahl's 900, so within 10%.
+- **The port fails** by the pre-registered numbers: no site reproduces I_CA, I_BAC and C together.
+  - Only tuft.1 makes a local Ca²⁺ spike from the dendritic current alone. There both thresholds are 2–3.6 times
+    lower than Bahl's, so the tuft is more excitable than published. Check 3 already showed it about 6 mV more
+    depolarized (−35.7 against the screenshot's −42 mV).
+  - **What the paper leaves open:** the injection site, and what Bahl counted as "a Ca²⁺ spike" at threshold
+    (perhaps a burst as well). So a definition may account for part of the gap, as well as a bug.
+  - Without NEURON I can't tell which.
+- **The diagnosis, at tuft.1:**
+  - **Current against contacts:** Bahl's current at I_BAC gives 2 spikes (105.2 and 131.9 ms). 8 contacts, at the
+    site or spread over the tuft, give the Ca²⁺ spike and the same 2 spikes. **Our synapses are not the problem.**
+  - **The window:** with Bahl's current at I_BAC, the spikes within 30 ms are:
+
+    | pulse | Δt −10, −5, 0, 2 | Δt 5 | Δt 10, 20 |
+    |---|---|---|---|
+    | N2's 2 ms pulse | 2 | 1 | 1 |
+    | Bahl's 5 ms pulse | 2 | 2 | 1 |
+
+  - **The tuft never makes ≥ 3 spikes in this port,** with any input. The second spike comes about 27 ms after the
+    first: a Ca²⁺ spike with a late second spike, not a burst.
+  - Trunk sites near the soma reach 3–4 spikes, but there the current drives the soma directly.
+- **The verdict, by the pre-registered order: "the port."**
+  - The diagnosis adds two things: the synapses are cleared, and with Bahl's own fitted protocol N2's "≥ 3 spikes"
+    is never reached at the tuft. So "the criterion" also holds.
+  - **No port bug is identified,** so by the comparison rule type B stays as it is for E1.
+
+**Amendment 9, exploratory (no verdict): run 1's best channel in type A.**
+- **The rule-set values:** n2_pulse 4100 pA, n2_tuft 86, n3_n 38, n6_c 18.
+- **The bAP fires no event:** the channel's peak is 0.000 of its I_th peak, as predicted. The window mechanism
+  ignores a 1 ms bAP.
+- **N3 gives no spikes at all:**
+  - A alone and B alone each make the event (0.996 of the I_th peak), and A+B makes it at 0.948. So there is no
+    XOR in the event.
+  - The event is 13 mV at the zone, too small to fire the soma.
+
+**What E0c (option 1) established:**
+1. **One inactivating Ca²⁺ channel can't be the dCaAP.** It is either all-or-none and large, or falling and small,
+   never both. A falling, spike-sized dCaAP needs a second mechanism: for example, a K⁺ current that activates with
+   the input's level, or Ca²⁺-dependent inactivation. That is open research, as E0b found reading Gidon's channel
+   model.
+2. **Type B's tuft is a coincidence detector, and the doublet is the port's real output for Bahl's own BAC
+   protocol.** It isn't an artifact of our synapses. But the port's tuft is 2–3.6 times more excitable than Bahl's
+   published thresholds, for reasons the paper can't settle.
+3. **Option 1's cost:** 338 s of compute over the two runs (the fit 251 s), and about 330 lines of code
+   (`dcaap_fit.py`, `tests/test_e0c.py`, the channel in `sim.py` and `cell.py`).
