@@ -992,3 +992,32 @@ needs more, I stop and ask.
   the basal side or the burst, and that is the next design question.
 - **The fit set fails:** a threshold rule on local calcium can't hold even Sjöström's 0.1 Hz data in this cell. The
   calcium model, or the cell, is then what's wrong.
+
+### E0c amendments (2026-10-30, during the build, before the run)
+
+**What ran before these were written:**
+- **The simulator change** (the channel and the Ca²⁺-current output): E0b's check 1 and check 3 reran and match the
+  saved E0b run to the last digit. Check 1: 1.03 × 10⁻¹¹ mV, the same as before. Check 3: the same 9 spike times,
+  +26.35 and −35.72 mV.
+- **The fit's machinery**, once:
+  - **The reference event** (E0b's phenomenological dCaAP at K = 1, 350 pA): a = 107.3 mV and a width of 4.7 ms.
+    E0b's w = 2.97 nA into the zone's 109 MΩ makes a tall, brief event, so the target is a brief spike, not the slow
+    dCaAP of Gidon's dendritic recordings. It is the pre-registered target and is kept. I note it because a channel
+    that matches it is matching Gidon's model on this cell, not the recordings.
+  - **One candidate at the middle of the bounds:** E = 14.5 (K(1.5) 0.96, K(2) 0.93). It took 0.6 s per stage 2
+    evaluation.
+- No protocol of N1–N6, no E1 protocol, and nothing of E0c-B ran.
+
+**Details the pre-registration left open:**
+1. **Parallel processes:** stage 1 in chunks of 25 candidates over 7 processes. Stage 2's 10 refinements each run in
+   their own process. The arithmetic is unchanged.
+2. **The passive response is computed once,** at 100 pA, and scaled to each amplitude. That is exact: the cell
+   without the channel, with spiking off, is linear.
+3. **Bahl's dendritic current** is applied as 0.1 ms constant pieces, each at its midpoint's value, for 80 ms.
+4. **Bahl's protocol starts from the rest state,** as every protocol but check 3 does (E0b, amendment 6), not from
+   v_init = −65 mV.
+5. **"The tuft" in Bahl's criteria** is tuft(0.5), the source's own recording site (check 3), with its rest voltage
+   as V_rest.
+6. **The contact searches** of E0c-B's diagnosis run n = 2, 4, …, 1000.
+7. **The window diagnosis** also runs with Bahl's 5 ms threshold pulse in place of N2's 2 ms pulse, as an extra
+   reported row. Δt is the current's onset relative to the pulse's onset.

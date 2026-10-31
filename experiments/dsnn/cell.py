@@ -10,7 +10,7 @@ One concept: the cell. Building a particular cell type is `cells/`; stepping cel
 - named groups of compartments (e.g. "basal1", "tuft"), the sites the protocols use;
 - synapses (the same AMPA + NMDA contact everywhere);
 - one way to spike: an AdEx soma (`adex`), or Hodgkin–Huxley channels (`hh`, `channels.py`);
-- optionally a dCaAP (`dcaap`).
+- optionally a dCaAP: Gidon's phenomenological one (`dcaap`), or a channel (`cach`).
 """
 from dataclasses import dataclass, field, replace
 import math
@@ -67,6 +67,27 @@ class DCaAP:
     ref: float = 200.0
 
 
+@dataclass(frozen=True)
+class CaChannel:
+    """The channel dCaAP (LAB.md E0c-A): g·m·h·(V − E_Ca) at the zone, E_Ca = 140 mV; m and h first order, with
+    m∞ = 1/(1 + exp(−(V − Vm)/km)), h∞ = 1/(1 + exp((V − Vh)/kh)), and time constants independent of voltage."""
+    zone: int
+    g: float                   # nS
+    Vm: float                  # mV
+    km: float
+    taum: float                # ms
+    Vh: float
+    kh: float
+    tauh: float
+    i_ref: float = 0.0         # pA: the peak of its current in the I_th step (an "event" reaches half of it)
+
+    def minf(self, v):
+        return 1.0 / (1.0 + math.exp(-(v - self.Vm) / self.km))
+
+    def hinf(self, v):
+        return 1.0 / (1.0 + math.exp((v - self.Vh) / self.kh))
+
+
 @dataclass
 class Cell:
     name: str
@@ -85,6 +106,7 @@ class Cell:
     dcaap: DCaAP = None
     hh: object = None          # channels.HH
     rest: dict = None          # the initial state: {"V": (N,), and for hh cells the gates}
+    cach: CaChannel = None     # the channel dCaAP (E0c-A), in place of `dcaap`
 
     @property
     def N(self):

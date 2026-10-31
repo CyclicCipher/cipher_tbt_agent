@@ -151,6 +151,19 @@ def fit_tauK(cell, dt, I_th):
     return float(scale * (vd * y).sum() / (vd * vd).sum()), vd.tolist()
 
 
+def zone_event(cell, r, b):
+    """Run b gave a dCaAP: the phenomenological one fired, or the channel's current reached half its peak in the
+    I_th step (LAB.md E0c-A). Channel cells need the zone recorded with its Ca²⁺ current (`zone_record`)."""
+    if cell.cach is not None:
+        return float(-r.i_ca(b, cell.cach.zone).min()) >= 0.5 * cell.cach.i_ref
+    return bool(r.dcaap[b][0])
+
+
+def zone_record(cell):
+    """simulate() keywords that let `zone_event` read a run."""
+    return dict(record=[0, cell.site("zone")], record_ca=True, rec_every=2) if cell.cach is not None else {}
+
+
 def strengths(cell, dt, kind):
     """Every rule-set input strength (N5's rates: `n5_rates`)."""
     out = {}
@@ -158,12 +171,13 @@ def strengths(cell, dt, kind):
     r = simulate([n2(cell, pulse=a, use_tuft=0) for a in pulses], 120.0, cell, dt=dt)
     out["n2_pulse"] = first(pulses, [len(r.spikes[b][0]) == 1 for b in range(len(pulses))])
     if kind == "A":                    # n: the smallest even n whose tuft input alone gives a dCaAP, minus 2
+        zr = zone_record(cell)
         ns = np.arange(2, 402, 2)
-        r = simulate([n2(cell, n=n, use_pulse=0) for n in ns], 120.0, cell, dt=dt)
-        out["n2_tuft"] = first(ns, [bool(r.dcaap[b][0]) for b in range(len(ns))]) - 2
+        r = simulate([n2(cell, n=n, use_pulse=0) for n in ns], 120.0, cell, dt=dt, **zr)
+        out["n2_tuft"] = first(ns, [zone_event(cell, r, b) for b in range(len(ns))]) - 2
         ns = np.arange(1, 121)
-        r = simulate([n3(cell, n=n, B=0) for n in ns], 120.0, cell, dt=dt)
-        out["n3_n"] = first(ns, [bool(r.dcaap[b][0]) for b in range(len(ns))])
+        r = simulate([n3(cell, n=n, B=0) for n in ns], 120.0, cell, dt=dt, **zr)
+        out["n3_n"] = first(ns, [zone_event(cell, r, b) for b in range(len(ns))])
         cs = np.arange(1, 61)
         d = cell.site("b1.d")
         r = simulate([n6(cell, c=c, test=0) for c in cs], 150.0, cell, dt=dt, record=[0, d])
@@ -219,9 +233,13 @@ def longest_above(v, level, t):
 @lru_cache(maxsize=8)
 def calibrated(kind, dt=0.05, max_len=None):
     """A cell type with its rule-set values, and the rule-set strengths: (Cell, {name: value})."""
-    cell = TYPES[kind](max_len) if max_len else TYPES[kind]()
+    return calibrate(TYPES[kind](max_len) if max_len else TYPES[kind](), kind, dt)
+
+
+def calibrate(cell, kind, dt=0.05):
+    """(Cell, {name: value}) for a given cell: τ_K if it has the phenomenological dCaAP, then the strengths."""
     cal = {}
-    if kind == "A":
+    if kind == "A" and cell.dcaap is not None:
         cal["zone_rheobase"] = zone_rheobase(cell, dt)
         cal["tauK"], cal["tauK_vdot"] = fit_tauK(cell, dt, cal["zone_rheobase"])
         cell = cell.with_dcaap(tauK=cal["tauK"])

@@ -20,7 +20,14 @@ every run is one node of a forest (each cell a tree, its soma the root), stepped
    period. K = exp(−(level + τ_K·V̇)/(D·(θ − V_rest))), capped at 1, with level = how far above θ the zone already
    was at the start of the step (0 for a crossing) and V̇ its dV/dt over the step (LAB.md E0b). Its current from the
    next step: w·K·(A − B), A and B logistic from 0.001, B from Δ after the onset.
-6. **Gates** advance by exponential Euler at the new voltage (`channels.advance`); synapses decay.
+   **Or the channel dCaAP** (`cell.CaChannel`, LAB.md E0c-A): g·m·h·(V − E_Ca) at the zone, a conductance like any
+   other.
+6. **Gates** advance by exponential Euler at the new voltage (`channels.advance`, and the channel dCaAP's m and h);
+   synapses decay.
+
+**Ca²⁺ current** (`record_ca`, for E1's calcium): each recorded compartment's Ca²⁺ current (pA, inward negative) over
+the step: the Hodgkin–Huxley sca current and the channel dCaAP's, at the step's new voltage, and the phenomenological
+dCaAP's current, which Gidon et al. identify as Ca²⁺.
 
 **"Spiking off"** (as with TTX): an AdEx soma loses its exponential and its spikes; a Hodgkin–Huxley cell loses its
 Na⁺ conductances.
@@ -89,15 +96,19 @@ class Result:
     final: list              # [run][cell] -> {"V", "X"} (with final=True)
     seconds: float           # wall-clock
     steps: int
+    ca: list = None          # [run][cell] -> (recorded compartments, times): Ca²⁺ current, pA (with record_ca)
 
     def v(self, b, comp, cell=0):
         return self.V[b][cell][list(self.rec[cell]).index(comp)]
 
+    def i_ca(self, b, comp, cell=0):
+        return self.ca[b][cell][list(self.rec[cell]).index(comp)]
+
 
 def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY, record=None, keep_syn=False,
-             final=False, rec_dtype=np.float32):
+             final=False, rec_dtype=np.float32, record_ca=False):
     """cells: one Cell for every neuron of the wiring, or a list (one per neuron). record: compartments to record,
-    for every cell (None: the soma; "all": every one)."""
+    for every cell (None: the soma; "all": every one). record_ca: also their Ca²⁺ currents."""
     t_start = time.perf_counter()
     wiring = wiring or Wiring()
     nn, B = wiring.n, len(stims)
@@ -132,6 +143,15 @@ def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY,
             gcad[a:z] = c.hh.dens["sca"] * c.hh.tadj(23)
             X[:, a:z] = c.rest["X"]
             P = c.hh.params()
+    cg = np.zeros(M)                       # the channel dCaAP: nS, and (V_m, k_m, τ_m, V_h, k_h, τ_h)
+    cpar = np.ones((6, M))
+    cam, cah = np.zeros(M), np.zeros(M)
+    for s, c in enumerate(insts):
+        if c.cach is not None:
+            q, i = c.cach, off[s] + c.cach.zone
+            cg[i] = q.g
+            cpar[:, i] = (q.Vm, q.km, q.taum, q.Vh, q.kh, q.tauh)
+            cam[i], cah[i] = q.minf(V[i]), q.hinf(V[i])
     ccell = np.repeat(np.arange(S), [c.N for c in insts]).astype(np.int64)
     fa, ia = _cell_arrays(insts, off, [stims[s // nn].spiking for s in range(S)])
 
@@ -182,6 +202,7 @@ def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY,
     rec_c = np.array([off[sid(b, j)] + i for b in range(B) for j in range(nn) for i in rec_local[j]], np.int64)
     R = K // rec_every
     rec = np.zeros((R, len(rec_c)), rec_dtype)
+    rca = np.zeros((R, len(rec_c)) if record_ca else (0, 0), rec_dtype)
     vmax = V.copy()
     cap_s = int(S * (T / 2.0 + 2) + 16)
     cap_d = int(S * (T / max(1.0, min((c.dcaap.ref for c in kinds if c.dcaap), default=200.0)) + 2) + 16)
@@ -198,7 +219,7 @@ def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY,
                   e_ptr, e_dst, e_n, e_d, D,
                   na, nm, math.exp(-dt / syn0.ampa_decay), math.exp(-dt / syn0.ampa_rise),
                   math.exp(-dt / syn0.nmda_decay), math.exp(-dt / syn0.nmda_rise), syn0.mg / 3.57, syn0.mg_gamma,
-                  rec_c, rec, vmax, spk_t, spk_s, dca, dlog)
+                  cg, cpar, cam, cah, rec_c, rec, rca, vmax, spk_t, spk_s, dca, dlog)
     n_spk, n_dca, n_log = counts
     if n_spk > cap_s or n_dca > cap_d or (keep_syn and n_log > cap_l):
         raise RuntimeError("an output buffer overflowed")
@@ -213,16 +234,18 @@ def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY,
     for k, c, n in dlog[:n_log]:
         s = int(np.searchsorted(off, int(c), side="right") - 1)
         syn_log[s // nn].append((k * dt, s % nn, int(c) - int(off[s]), float(n)))
-    Vr, i = [[None] * nn for _ in range(B)], 0
+    Vr, Car, i = [[None] * nn for _ in range(B)], [[None] * nn for _ in range(B)] if record_ca else None, 0
     for b in range(B):
         for j in range(nn):
             Vr[b][j] = rec[:, i:i + len(rec_local[j])].T
+            if record_ca:
+                Car[b][j] = rca[:, i:i + len(rec_local[j])].T
             i += len(rec_local[j])
     vm = [[vmax[off[sid(b, j)]:off[sid(b, j) + 1]] for j in range(nn)] for b in range(B)]
     fin = [[{"V": V[off[sid(b, j)]:off[sid(b, j) + 1]].copy(), "X": X[:, off[sid(b, j)]:off[sid(b, j) + 1]].copy()}
             for j in range(nn)] for b in range(B)] if final else None
     t_rec = (np.arange(R) * rec_every + rec_every - 1) * dt
-    return Result(t_rec, Vr, rec_local, vm, spikes, dcaap, syn_log, fin, time.perf_counter() - t_start, K)
+    return Result(t_rec, Vr, rec_local, vm, spikes, dcaap, syn_log, fin, time.perf_counter() - t_start, K, Car)
 
 
 # per-cell parameter columns
@@ -257,10 +280,13 @@ def _cell_arrays(insts, off, spiking):
 @njit(cache=True)
 def _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccell, fa, ia,
          ev_k, ev_c, ev_n, cur_k, cur_c, cur_a, cl_k, cl_s, cl_v, e_ptr, e_dst, e_n, e_d, D,
-         na, nm, dAd, dAr, dNd, dNr, mg357, gam, rec_c, rec, vmax, spk_t, spk_s, dca, dlog):
+         na, nm, dAd, dAr, dNd, dNr, mg357, gam, cg, cpar, cam, cah, rec_c, rec, rca, vmax, spk_t, spk_s, dca,
+         dlog):
     M, S = V.shape[0], fa.shape[0]
     aA, bA, aN, bN = np.zeros(M), np.zeros(M), np.zeros(M), np.zeros(M)
     inj, d, r, Vn = np.zeros(M), np.zeros(M), np.zeros(M), np.zeros(M)
+    gcs, iph = np.zeros(M), np.zeros(M)          # this step's Ca²⁺ conductance, and the phenomenological dCaAP's pA
+    do_ca = rca.shape[0] > 0
     ring = np.zeros((D, M))
     w, hold, ext = np.zeros(S), np.zeros(S), np.full(S, np.nan)
     don, dK, dref = np.full(S, -1.0), np.zeros(S), np.zeros(S)
@@ -300,10 +326,18 @@ def _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccel
             g = (aA[i] - bA[i]) + (aN[i] - bN[i]) / (1.0 + mg357 * math.exp(-gam * v))       # E_syn = 0
             d[i] = C[i] / dt + gL[i] + g
             r[i] = C[i] / dt * v + gL[i] * EL[i] + inj[i]
+            gcs[i] = 0.0
+            iph[i] = 0.0
             if hh[i]:
                 gna, gk, gh, gca = ch.conductances(X, i, G, 1.0 if ia[ccell[i], I_KIND] >= 0 else 0.0)
                 d[i] += gna + gk + gh + gca
                 r[i] += gna * ena + gk * ek + gh * ehd + gca * eca
+                gcs[i] = gca
+            if cg[i] > 0.0:
+                gc = cg[i] * cam[i] * cah[i]
+                d[i] += gc
+                r[i] += gc * eca
+                gcs[i] += gc
         for i in range(M):
             p = par[i]
             if p >= 0:
@@ -320,6 +354,7 @@ def _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccel
                 if don[s] >= fa[s, F_DELTA]:
                     Bv = 1.0 / (1.0 + 999.0 * math.exp(-(don[s] - fa[s, F_DELTA]) / fa[s, F_TAUB]))
                 r[z] += fa[s, F_W] * dK[s] * (A - Bv)
+                iph[z] = fa[s, F_W] * dK[s] * (A - Bv)
         # 3. Hines: eliminate children into parents, then solve outward
         for i in range(M - 1, -1, -1):
             p = par[i]
@@ -393,6 +428,12 @@ def _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccel
         for i in range(M):
             if hh[i]:
                 ch.advance(X, i, Vn[i], dt, vsh2[i], gcad[i], P)
+            if cg[i] > 0.0:
+                vv = Vn[i]
+                minf = 1.0 / (1.0 + math.exp(-(vv - cpar[0, i]) / cpar[1, i]))
+                hinf = 1.0 / (1.0 + math.exp((vv - cpar[3, i]) / cpar[4, i]))
+                cam[i] = minf + (cam[i] - minf) * math.exp(-dt / cpar[2, i])
+                cah[i] = hinf + (cah[i] - hinf) * math.exp(-dt / cpar[5, i])
             aA[i] *= dAd
             bA[i] *= dAr
             aN[i] *= dNd
@@ -404,4 +445,7 @@ def _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccel
             row = k // rec_every
             for j in range(rec_c.shape[0]):
                 rec[row, j] = V[rec_c[j]]
+                if do_ca:
+                    c = rec_c[j]
+                    rca[row, j] = gcs[c] * (V[c] - eca) - iph[c]
     return n_spk, n_dca, n_log
