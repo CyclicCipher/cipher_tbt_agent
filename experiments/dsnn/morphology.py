@@ -5,9 +5,11 @@ One concept: geometry.
   starts from.
 - **`read_hoc`** reads a reconstruction exported by NEURON's CellBuilder (`topol()` and `pt3dadd` blocks) as data.
 - **`main_path`** follows, from a section, the child whose subtree has the most membrane.
-- **`compartments`** cuts the chosen sections into pieces of at most `max_len` µm. Every other subtree becomes an
-  equivalent cylinder attached where it attaches (LAB.md E0b, amendment 2). Each piece gets its membrane area and the
-  axial resistance to its parent piece.
+- **`Tree.scaled`** multiplies every length and diameter, as a model's `geom()` may (Gidon et al.'s: × 1.25, for the
+  imaging's shrinkage; LAB.md E0e). **`Tree.with_cylinder`** adds a section that has no 3-D points (their axon).
+- **`compartments`** cuts the chosen sections into pieces: at most `max_len` µm each, or `nseg_of(section)` equal
+  segments as NEURON does. Every other subtree becomes an equivalent cylinder attached where it attaches (LAB.md E0b,
+  amendment 2). Each piece gets its membrane area and the axial resistance to its parent piece.
 
 Units: µm, µm², MΩ (axial resistance), Ω·cm (Ra).
 """
@@ -49,6 +51,18 @@ class Tree:
             return 0.0
         p, px = self.parent[s]
         return self.dist(p, px) + x * self.length(s)
+
+    def scaled(self, f):
+        """Every length and diameter × f (NEURON's `L = L*f` with `diam3d*f`)."""
+        return Tree({s: P * f for s, P in self.points.items()}, dict(self.parent))
+
+    def with_cylinder(self, name, parent, x, L, d):
+        """A section with no 3-D points, as a straight cylinder of length L and diameter d at point x of parent."""
+        pts = dict(self.points)
+        pts[name] = np.array([[0.0, 0.0, 0.0, d], [L, 0.0, 0.0, d]])
+        par = dict(self.parent)
+        par[name] = (parent, x)
+        return Tree(pts, par)
 
 
 def read_hoc(path):
@@ -142,11 +156,11 @@ class Geometry:
         return self.where[s][-1][0]
 
 
-def compartments(tree, modelled, Ra, Rm, Cm, max_len=30.0):
-    """Cut the `modelled` sections into pieces of at most max_len µm. Every other subtree (an unmodelled section whose
-    parent is modelled, and everything beyond it) becomes an equivalent cylinder (`equivalent_cylinder`) attached
-    where the subtree attaches, cut by NEURON's d_lambda rule at d_lambda = 0.1 · max_len / 30. The soma is one
-    isopotential compartment (its points give its area)."""
+def compartments(tree, modelled, Ra, Rm, Cm, max_len=30.0, nseg_of=None):
+    """Cut the `modelled` sections into pieces of at most max_len µm, or into nseg_of(section) equal segments. Every
+    other subtree (an unmodelled section whose parent is modelled, and everything beyond it) becomes an equivalent
+    cylinder (`equivalent_cylinder`) attached where the subtree attaches, cut by NEURON's d_lambda rule at
+    d_lambda = 0.1 · max_len / 30. The soma is one isopotential compartment (its points give its area)."""
     modelled = set(modelled)
     names, parent, R, area, dist, length = ["soma"], [-1], [0.0], [tree.area("soma")], [0.0], [0.0]
     where = {}
@@ -162,7 +176,7 @@ def compartments(tree, modelled, Ra, Rm, Cm, max_len=30.0):
     def add(s):
         P = tree.points[s]
         L = tree.length(s)
-        n = max(1, math.ceil(L / max_len - 1e-9))
+        n = nseg_of(s) if nseg_of else max(1, math.ceil(L / max_len - 1e-9))
         p, px = tree.parent[s]
         pc, r_up = attach(p, px)
         where[s] = []

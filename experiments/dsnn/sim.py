@@ -1,33 +1,35 @@
-"""Stepping cells through time (LAB.md E0b, "The simulator"): one simulator for every experiment and for the viz.
+"""Stepping cells through time (LAB.md E0b, "The simulator"; E0e): one simulator for every experiment and for the viz.
 
 **What runs:** a batch of runs (`Stim`s), each a copy of a `Wiring` of cells. Every compartment of every cell of
 every run is one node of a forest (each cell a tree, its soma the root), stepped together by one compiled loop.
 
-**The step** (dt, from t to t + dt):
-1. **Inputs** for this step: synaptic contacts (each opens one AMPA + one NMDA conductance), current steps, voltage
-   clamps of the soma, and contacts delivered by the wiring after its delays.
-2. **Backward Euler** for the leak, the coupling and every conductance (synaptic and channel), each conductance taken
-   at the start of the step (NEURON's linearization). From the start of the step: the NMDA Mg²⁺ block, the AdEx
-   exponential and adaptation, the dCaAP current, the channel gates.
-3. **The solve:** Hines elimination (children into parents, then back out), O(compartments). A held soma (a spike's
-   hold, or a clamp) is set, not solved.
-4. **Spikes:**
-   - an AdEx soma crosses V_detect: it is held at V_spike for t_spike (the spike's waveform, and so the bAP), then at
-     Vr for t_ref (LAB.md E0, amendment 3). The crossing step is solved again with the soma held, so the dendrites
-     never see the upstroke's overshoot (amendment 6).
-   - a Hodgkin–Huxley soma crosses 0 mV upward.
-5. **The dCaAP** (Gidon et al. 2020's `dCaAP.mod`, level-triggered): the zone is above θ outside the refractory
-   period. K = exp(−(level + τ_K·V̇)/(D·(θ − V_rest))), capped at 1, with level = how far above θ the zone already
-   was at the start of the step (0 for a crossing) and V̇ its dV/dt over the step (LAB.md E0b). Its current from the
-   next step: w·K·(A − B), A and B logistic from 0.001, B from Δ after the onset.
-   **Or the channel dCaAP** (`cell.ChannelDCaAP`, LAB.md E0d): Gidon et al.'s Ca_HVA and BK at the zone, conductances
-   like any other (`dcaap_channels.py`).
-6. **Gates** advance by exponential Euler at the new voltage (`channels.advance`, `dcaap_channels.advance`, which also
-   moves the dCaAP's [Ca]i); synapses decay.
+**Synapses** (E0e): four receptor types, `AMPA`, `NMDA` (with its Mg²⁺ block), `GABA_S` and `GABA_F` (two GABA_A
+kinetics), each a difference of two exponentials peaking at its conductance per contact. An event carries a mask of
+the types it opens: `CONTACT` = AMPA + NMDA (E0's contact; the default), `AMPA` alone, `GABA_S`, `GABA_F`. Each cell
+brings its own kinetics (`cell.syn`).
 
-**Ca²⁺ current** (`record_ca`, for E1's calcium): each recorded compartment's Ca²⁺ current (pA, inward negative) over
-the step: the Hodgkin–Huxley sca current and the channel dCaAP's, at the step's new voltage, and the phenomenological
-dCaAP's current, which Gidon et al. identify as Ca²⁺.
+**The step** (dt, from t to t + dt):
+1. **Inputs** for this step: synaptic events, current steps, voltage clamps of the soma, and contacts delivered by
+   the wiring after its delays.
+2. **The dCaAP** (Gidon et al. 2020's `dCaAP.mod`, exactly; LAB.md E0e): at the start of the step the site's V is
+   above θ, outside the refractory period. Then K = exp(−(V − θ)/((θ − V_rest)·D)), capped at 1: about 1 at a
+   crossing, smaller when the refractory period ends with the site held above θ. Its current from this step:
+   w·K·(A − B), A and B logistic from 0.001, B from Δ after the onset.
+   **Or the channel dCaAP** (`cell.ChannelDCaAP`, LAB.md E0d): Ca_HVA and BK at the zone, conductances like any other.
+3. **Backward Euler** for the leak, the coupling and every conductance (synaptic and channel), each conductance taken
+   at the start of the step (NEURON's linearization): the NMDA Mg²⁺ block, the AdEx exponential and adaptation, the
+   channel gates.
+4. **The solve:** Hines elimination (children into parents, then back out), O(compartments). A held soma (a spike's
+   hold, or a clamp) is set, not solved.
+5. **Spikes:**
+   - an AdEx soma crosses V_detect: it is held at V_spike for t_spike, then at Vr for t_ref (LAB.md E0, amendments 3
+     and 6);
+   - a Hodgkin–Huxley soma (Bahl's channels, or Traub's) crosses 0 mV upward.
+6. **Gates** advance by exponential Euler at the new voltage (`channels`, `traub`, `dcaap_channels`); synapses decay.
+
+**Ca²⁺ current** (`record_ca`): each recorded compartment's Ca²⁺ current (pA, inward negative): the HH sca current and
+the channel dCaAP's at the step's new voltage, and the phenomenological dCaAP's current, which Gidon et al. identify
+as Ca²⁺.
 
 **"Spiking off"** (as with TTX): an AdEx soma loses its exponential and its spikes; a Hodgkin–Huxley cell loses its
 Na⁺ conductances.
@@ -41,26 +43,31 @@ from numba import njit
 
 from . import channels as ch
 from . import dcaap_channels as dch
+from . import traub as tr
 from .channels import P_ECA, P_EHD, P_EK, P_ENA
 
 DT = 0.05            # ms
 REC_EVERY = 10       # record every 0.5 ms
-NA, NI = 21, 4       # per-cell parameters: floats, ints (see `_cell_arrays`)
+NA, NI = 20, 4       # per-cell parameters: floats, ints (see `_cell_arrays`)
+AMPA, NMDA, GABA_S, GABA_F = 1, 2, 4, 8          # event masks; receptor r is bit r
+CONTACT = AMPA | NMDA
+NR = 4
 
 
 @dataclass
 class Stim:
-    """One run's interventions. Times in ms; `neuron` indexes the wiring's cells; `comp` is a compartment index."""
+    """One run's interventions. Times in ms; `neuron` indexes the wiring's cells; `comp` is a compartment index;
+    `kind` is an event mask (`CONTACT`, `AMPA`, `GABA_S`, `GABA_F`)."""
     label: str = ""
     spiking: bool = True                                # False: the spike mechanism off (as with TTX)
-    syn: list = field(default_factory=list)            # (t, neuron, comp, contacts)
+    syn: list = field(default_factory=list)            # (t, neuron, comp, contacts, kind)
     steps: list = field(default_factory=list)          # (t0, t1, neuron, comp, pA)
-    poisson: list = field(default_factory=list)        # (t0, t1, neuron, comp, contacts, rate_hz, seed)
+    poisson: list = field(default_factory=list)        # (t0, t1, neuron, comp, contacts, rate_hz, seed, kind)
     clamps: list = field(default_factory=list)         # (t0, t1, neuron, mV): the soma held at mV
 
-    def contacts(self, t, comp, n, neuron=0):
+    def contacts(self, t, comp, n, neuron=0, kind=CONTACT):
         if n:
-            self.syn.append((float(t), int(neuron), int(comp), float(n)))
+            self.syn.append((float(t), int(neuron), int(comp), float(n), int(kind)))
         return self
 
     def current(self, t0, t1, comp, pA, neuron=0):
@@ -68,9 +75,11 @@ class Stim:
             self.steps.append((float(t0), float(t1), int(neuron), int(comp), float(pA)))
         return self
 
-    def train(self, t0, t1, comp, contacts, rate, seed, neuron=0):
+    def train(self, t0, t1, comp, contacts, rate, seed, neuron=0, kind=CONTACT):
+        """`contacts` independent Poisson trains at `rate` Hz (as one Poisson train of contacts × rate)."""
         if contacts and rate:
-            self.poisson.append((float(t0), float(t1), int(neuron), int(comp), float(contacts), float(rate), seed))
+            self.poisson.append((float(t0), float(t1), int(neuron), int(comp), float(contacts), float(rate), seed,
+                                 int(kind)))
         return self
 
     def clamp(self, t0, t1, mV, neuron=0):
@@ -80,7 +89,8 @@ class Stim:
 
 @dataclass
 class Wiring:
-    """How many cells, and the synapses between them: (src, dst, dst_comp, contacts, delay_ms)."""
+    """How many cells, and the synapses between them: (src, dst, dst_comp, contacts, delay_ms), each an AMPA + NMDA
+    contact."""
     n: int = 1
     edges: list = field(default_factory=list)
 
@@ -92,9 +102,9 @@ class Result:
     rec: list                # [cell] -> the compartments recorded
     vmax: list               # [run][cell] -> (N,): each compartment's peak over the run
     spikes: list             # [run][cell] -> spike times
-    dcaap: list              # [run][cell] -> [(onset time, K, V̇ in mV/ms, level in mV)]
+    dcaap: list              # [run][cell] -> [(onset time, K, V − θ at onset in mV)]
     syn: list                # [run] -> [(t, cell, comp, contacts)]: every activation (with keep_syn)
-    final: list              # [run][cell] -> {"V", "X", "Q"} (with final=True; Q: the channel dCaAP's state)
+    final: list              # [run][cell] -> {"V", "X", "Q", "T"} (with final=True)
     seconds: float           # wall-clock
     steps: int
     ca: list = None          # [run][cell] -> (recorded compartments, times): Ca²⁺ current, pA (with record_ca)
@@ -114,13 +124,14 @@ def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY,
     wiring = wiring or Wiring()
     nn, B = wiring.n, len(stims)
     kinds = list(cells) if isinstance(cells, (list, tuple)) else [cells] * nn
-    assert len(kinds) == nn and len({c.syn for c in kinds}) == 1, "one synapse type for every cell"
+    assert len(kinds) == nn
     S = B * nn
     K = int(round(T / dt))
     insts = [kinds[s % nn] for s in range(S)]
     off = np.concatenate([[0], np.cumsum([c.N for c in insts])]).astype(np.int64)
     M = int(off[-1])
     sid = lambda b, j: b * nn + j
+    seg = lambda s: slice(off[s], off[s + 1])
 
     # ---- the forest ----
     par = np.concatenate([np.where(c.parent >= 0, c.parent + off[s], -1) for s, c in enumerate(insts)]).astype(np.int64)
@@ -135,38 +146,57 @@ def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY,
     gcad = np.zeros(M)
     X = np.zeros((13, M))
     P = ch.HH(dens={}, vshift2_nat=None).params()
+    tg = np.zeros((2, M))                  # Traub's Na⁺, K⁺ totals (nS), and their gates
+    ts = np.zeros((3, M))
+    qg = np.zeros((2, M))                  # the channel dCaAP: total g_Ca, g_BK (nS); its constants; its state
+    qp = np.ones((9, M))
+    qs = np.zeros((6, M))
     for s, c in enumerate(insts):
+        a, z = off[s], off[s + 1]
         if c.hh is not None:
-            a, z = off[s], off[s + 1]
             hh[a:z] = np.any([c.hh.dens[n] > 0 for n in ch.NAMES], axis=0)
             G[:, a:z] = c.hh.gmax(c.area)
             vsh2[a:z] = c.hh.vshift2_nat
             gcad[a:z] = c.hh.dens["sca"] * c.hh.tadj(23)
             X[:, a:z] = c.rest["X"]
             P = c.hh.params()
-    qg = np.zeros((2, M))                  # the channel dCaAP: total g_Ca, g_BK (nS); its constants; its state
-    qp = np.ones((9, M))
-    qs = np.zeros((6, M))
-    for s, c in enumerate(insts):
+        if c.traub is not None:
+            tg[:, a:z] = c.traub.gmax(c.area)
+            if "T" in c.rest:
+                ts[:, a:z] = c.rest["T"]
+            else:
+                for i in range(a, z):
+                    tr.steady(ts, i, V[i])
         if c.cach is not None:
-            q, i = c.cach, off[s] + c.cach.zone
+            q, i = c.cach, a + c.cach.zone
             qg[:, i] = (q.g_ca, q.g_bk)
             qp[:, i] = q.q()
-            if c.rest is not None and "Q" in c.rest:
+            if "Q" in c.rest:
                 qs[:, i] = c.rest["Q"]
             else:
                 dch.steady(qs, i, V[i], qp)
     ccell = np.repeat(np.arange(S), [c.N for c in insts]).astype(np.int64)
     fa, ia = _cell_arrays(insts, off, [stims[s // nn].spiking for s in range(S)])
 
+    # ---- synapses: per compartment, each cell's kinetics (receptor r: peak per contact, decay factors, reversal) ----
+    gn, fd, fr, er = np.zeros((NR, M)), np.ones((NR, M)), np.ones((NR, M)), np.zeros((NR, M))
+    mg357, gam = np.zeros(M), np.zeros(M)
+    for s, c in enumerate(insts):
+        sy = c.syn
+        norms, rises, decays, revs = sy.table()
+        for r in range(NR):
+            gn[r, seg(s)], er[r, seg(s)] = norms[r], revs[r]
+            fd[r, seg(s)], fr[r, seg(s)] = math.exp(-dt / decays[r]), math.exp(-dt / rises[r])
+        mg357[seg(s)], gam[seg(s)] = sy.mg / 3.57, sy.mg_gamma
+
     # ---- inputs, as sorted event lists ----
     syn_log = [[] for _ in range(B)]
     ev, cur, cl = [], [], []
     for b, st in enumerate(stims):
-        for t, j, c, n in st.syn:
+        for t, j, c, n, kd in st.syn:
             k = int(round(t / dt))
             if 0 <= k < K:
-                ev.append((k, off[sid(b, j)] + c, n))
+                ev.append((k, off[sid(b, j)] + c, n, kd))
                 if keep_syn:
                     syn_log[b].append((t, j, c, n))
         for t0, t1, j, c, amp in st.steps:
@@ -174,13 +204,13 @@ def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY,
             if k0 < min(k1, K):
                 cur.append((k0, off[sid(b, j)] + c, amp))
                 cur.append((k1, off[sid(b, j)] + c, -amp))
-        for t0, t1, j, c, n, rate, seed in st.poisson:
+        for t0, t1, j, c, n, rate, seed, kd in st.poisson:
             rng = np.random.default_rng(seed)
             times = np.sort(rng.uniform(t0, t1, rng.poisson(n * rate * (t1 - t0) / 1000.0)))
             for t in times:
                 k = int(t / dt)
                 if k < K:
-                    ev.append((k, off[sid(b, j)] + c, 1.0))
+                    ev.append((k, off[sid(b, j)] + c, 1.0, kd))
                     if keep_syn:
                         syn_log[b].append((k * dt, j, c, 1.0))
         for t0, t1, j, v in st.clamps:
@@ -211,19 +241,15 @@ def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY,
     cap_s = int(S * (T / 2.0 + 2) + 16)
     cap_d = int(S * (T / max(1.0, min((c.dcaap.ref for c in kinds if c.dcaap), default=200.0)) + 2) + 16)
     spk_t, spk_s = np.zeros(cap_s), np.zeros(cap_s, np.int64)
-    dca = np.zeros((cap_d, 5))
+    dca = np.zeros((cap_d, 4))
     cap_l = 4 * cap_s * max(1, max((len(o) for o in out), default=0)) if keep_syn else 0
     dlog = np.zeros((cap_l, 3))
-    syn0 = kinds[0].syn
-    na, nm = syn0.norms()
     counts = _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccell, fa, ia,
-                  arr(ev, 0, np.int64), arr(ev, 1, np.int64), arr(ev, 2, float),
+                  arr(ev, 0, np.int64), arr(ev, 1, np.int64), arr(ev, 2, float), arr(ev, 3, np.int64),
                   arr(cur, 0, np.int64), arr(cur, 1, np.int64), arr(cur, 2, float),
                   arr(cl, 0, np.int64), arr(cl, 1, np.int64), arr(cl, 2, float),
-                  e_ptr, e_dst, e_n, e_d, D,
-                  na, nm, math.exp(-dt / syn0.ampa_decay), math.exp(-dt / syn0.ampa_rise),
-                  math.exp(-dt / syn0.nmda_decay), math.exp(-dt / syn0.nmda_rise), syn0.mg / 3.57, syn0.mg_gamma,
-                  qg, qp, qs, rec_c, rec, rca, vmax, spk_t, spk_s, dca, dlog)
+                  e_ptr, e_dst, e_n, e_d, D, gn, fd, fr, er, mg357, gam,
+                  tg, ts, qg, qp, qs, rec_c, rec, rca, vmax, spk_t, spk_s, dca, dlog)
     n_spk, n_dca, n_log = counts
     if n_spk > cap_s or n_dca > cap_d or (keep_syn and n_log > cap_l):
         raise RuntimeError("an output buffer overflowed")
@@ -233,8 +259,8 @@ def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY,
     for t, s in zip(spk_t[:n_spk], spk_s[:n_spk]):
         spikes[s // nn][s % nn].append(float(t))
     dcaap = [[[] for _ in range(nn)] for _ in range(B)]
-    for t, s, Kv, vd, lv in dca[:n_dca]:
-        dcaap[int(s) // nn][int(s) % nn].append((float(t), float(Kv), float(vd), float(lv)))
+    for t, s, Kv, lv in dca[:n_dca]:
+        dcaap[int(s) // nn][int(s) % nn].append((float(t), float(Kv), float(lv)))
     for k, c, n in dlog[:n_log]:
         s = int(np.searchsorted(off, int(c), side="right") - 1)
         syn_log[s // nn].append((k * dt, s % nn, int(c) - int(off[s]), float(n)))
@@ -245,9 +271,8 @@ def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY,
             if record_ca:
                 Car[b][j] = rca[:, i:i + len(rec_local[j])].T
             i += len(rec_local[j])
-    vm = [[vmax[off[sid(b, j)]:off[sid(b, j) + 1]] for j in range(nn)] for b in range(B)]
-    seg = lambda b, j: slice(off[sid(b, j)], off[sid(b, j) + 1])
-    fin = [[{"V": V[seg(b, j)].copy(), "X": X[:, seg(b, j)].copy(),
+    vm = [[vmax[seg(sid(b, j))] for j in range(nn)] for b in range(B)]
+    fin = [[{"V": V[seg(sid(b, j))].copy(), "X": X[:, seg(sid(b, j))].copy(), "T": ts[:, seg(sid(b, j))].copy(),
              "Q": qs[:, off[sid(b, j)] + kinds[j].cach.zone].copy() if kinds[j].cach is not None else None}
             for j in range(nn)] for b in range(B)] if final else None
     t_rec = (np.arange(R) * rec_every + rec_every - 1) * dt
@@ -256,7 +281,7 @@ def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY,
 
 # per-cell parameter columns
 (F_VT, F_DT, F_A, F_TAUW, F_B, F_VR, F_VDET, F_VSPK, F_TSPK, F_TREF, F_EL,
- F_W, F_TAUK, F_TH, F_D, F_VREST, F_TAUA, F_TAUB, F_DELTA, F_REF, F_HHDET) = range(NA)
+ F_W, F_TH, F_D, F_VREST, F_TAUA, F_TAUB, F_DELTA, F_REF, F_HHDET) = range(NA)
 I_ROOT, I_END, I_KIND, I_ZONE = range(NI)
 KIND_PASSIVE, KIND_ADEX, KIND_HH = 0, 1, 2
 
@@ -266,7 +291,8 @@ def _cell_arrays(insts, off, spiking):
     ia = np.full((len(insts), NI), -1, np.int64)
     for s, c in enumerate(insts):
         ia[s, I_ROOT], ia[s, I_END] = off[s], off[s + 1]
-        ia[s, I_KIND] = KIND_ADEX if c.adex else (KIND_HH if c.hh is not None else KIND_PASSIVE)
+        ia[s, I_KIND] = KIND_ADEX if c.adex else (KIND_HH if (c.hh is not None or c.traub is not None)
+                                                  else KIND_PASSIVE)
         if c.adex:
             a = c.adex
             fa[s, :F_EL + 1] = (a.VT, a.DT, a.a, a.tau_w, a.b, a.Vr, a.V_detect, a.V_spike, a.t_spike, a.t_ref,
@@ -274,7 +300,7 @@ def _cell_arrays(insts, off, spiking):
         if c.dcaap is not None and c.dcaap.w > 0:
             d = c.dcaap
             ia[s, I_ZONE] = off[s] + d.zone
-            fa[s, F_W:F_REF + 1] = (d.w, d.tauK, d.theta, d.D, d.V_rest, d.tauA, d.tauB, d.delta, d.ref)
+            fa[s, F_W:F_REF + 1] = (d.w, d.theta, d.D, d.V_rest, d.tauA, d.tauB, d.delta, d.ref)
         fa[s, F_HHDET] = 0.0
     # spiking: the AdEx exponential and spikes, or the HH Na+ conductances; kept in the kind column's sign
     for s, on in enumerate(spiking):
@@ -285,10 +311,10 @@ def _cell_arrays(insts, off, spiking):
 
 @njit(cache=True)
 def _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccell, fa, ia,
-         ev_k, ev_c, ev_n, cur_k, cur_c, cur_a, cl_k, cl_s, cl_v, e_ptr, e_dst, e_n, e_d, D,
-         na, nm, dAd, dAr, dNd, dNr, mg357, gam, qg, qp, qs, rec_c, rec, rca, vmax, spk_t, spk_s, dca, dlog):
+         ev_k, ev_c, ev_n, ev_m, cur_k, cur_c, cur_a, cl_k, cl_s, cl_v, e_ptr, e_dst, e_n, e_d, D,
+         gn, fd, fr, er, mg357, gam, tg, ts, qg, qp, qs, rec_c, rec, rca, vmax, spk_t, spk_s, dca, dlog):
     M, S = V.shape[0], fa.shape[0]
-    aA, bA, aN, bN = np.zeros(M), np.zeros(M), np.zeros(M), np.zeros(M)
+    sa, sb = np.zeros((NR, M)), np.zeros((NR, M))     # each receptor's two exponentials
     inj, d, r, Vn = np.zeros(M), np.zeros(M), np.zeros(M), np.zeros(M)
     gcs, iph = np.zeros(M), np.zeros(M)          # this step's Ca²⁺ conductance, and the phenomenological dCaAP's pA
     ecs = np.full(M, P[P_ECA])                   # the Ca²⁺ reversal that goes with gcs
@@ -307,38 +333,60 @@ def _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccel
             inj[cur_c[ic]] += cur_a[ic]
             ic += 1
         while ie < ev_k.shape[0] and ev_k[ie] == k:
-            c, n = ev_c[ie], ev_n[ie]
-            aA[c] += n * na
-            bA[c] += n * na
-            aN[c] += n * nm
-            bN[c] += n * nm
+            c, n, m = ev_c[ie], ev_n[ie], ev_m[ie]
+            for q in range(NR):
+                if m & (1 << q):
+                    sa[q, c] += n * gn[q, c]
+                    sb[q, c] += n * gn[q, c]
             ie += 1
         if has_ring:
             slot = k % D
             for c in range(M):
                 n = ring[slot, c]
                 if n != 0.0:
-                    aA[c] += n * na
-                    bA[c] += n * na
-                    aN[c] += n * nm
-                    bN[c] += n * nm
+                    for q in range(2):                       # a wiring contact: AMPA + NMDA
+                        sa[q, c] += n * gn[q, c]
+                        sb[q, c] += n * gn[q, c]
                     ring[slot, c] = 0.0
         while il < cl_k.shape[0] and cl_k[il] == k:
             ext[cl_s[il]] = cl_v[il]
             il += 1
-        # 2. the matrix: diagonal d, right-hand side r; the off-diagonal is -gax
+        # 2. the dCaAP's onset, from the step's starting voltage (dCaAP.mod's BEFORE BREAKPOINT)
+        for s in range(S):
+            z = ia[s, I_ZONE]
+            if z < 0:
+                continue
+            th = fa[s, F_TH]
+            if dref[s] <= 1e-9 and V[z] > th:
+                Kv = min(1.0, math.exp(-(V[z] - th) / ((th - fa[s, F_VREST]) * fa[s, F_D])))
+                don[s], dK[s], dref[s] = 0.0, Kv, fa[s, F_REF]
+                if n_dca < dca.shape[0]:
+                    dca[n_dca, 0], dca[n_dca, 1], dca[n_dca, 2], dca[n_dca, 3] = t, s, Kv, V[z] - th
+                n_dca += 1
+        # 3. the matrix: diagonal d, right-hand side r; the off-diagonal is -gax
         for i in range(M):
             v = V[i]
-            g = (aA[i] - bA[i]) + (aN[i] - bN[i]) / (1.0 + mg357 * math.exp(-gam * v))       # E_syn = 0
-            d[i] = C[i] / dt + gL[i] + g
+            d[i] = C[i] / dt + gL[i]
             r[i] = C[i] / dt * v + gL[i] * EL[i] + inj[i]
+            for q in range(NR):
+                g = sa[q, i] - sb[q, i]
+                if g != 0.0:
+                    if q == 1:
+                        g = g / (1.0 + mg357[i] * math.exp(-gam[i] * v))
+                    d[i] += g
+                    r[i] += g * er[q, i]
             gcs[i] = 0.0
             iph[i] = 0.0
+            on = 1.0 if ia[ccell[i], I_KIND] >= 0 else 0.0
             if hh[i]:
-                gna, gk, gh, gca = ch.conductances(X, i, G, 1.0 if ia[ccell[i], I_KIND] >= 0 else 0.0)
+                gna, gk, gh, gca = ch.conductances(X, i, G, on)
                 d[i] += gna + gk + gh + gca
                 r[i] += gna * ena + gk * ek + gh * ehd + gca * eca
                 gcs[i] = gca
+            if tg[0, i] > 0.0 or tg[1, i] > 0.0:
+                gna, gk = tr.conductances(ts, i, tg[0, i], tg[1, i], on)
+                d[i] += gna + gk
+                r[i] += gna * tr.E_NA + gk * tr.E_K
             if qg[0, i] > 0.0:
                 gc, ec, gb = dch.conductances(qs, i, qg[0, i], qg[1, i])
                 d[i] += gc + gb
@@ -362,7 +410,7 @@ def _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccel
                     Bv = 1.0 / (1.0 + 999.0 * math.exp(-(don[s] - fa[s, F_DELTA]) / fa[s, F_TAUB]))
                 r[z] += fa[s, F_W] * dK[s] * (A - Bv)
                 iph[z] = fa[s, F_W] * dK[s] * (A - Bv)
-        # 3. Hines: eliminate children into parents, then solve outward
+        # 4. Hines: eliminate children into parents, then solve outward
         for i in range(M - 1, -1, -1):
             p = par[i]
             if p >= 0:
@@ -382,7 +430,7 @@ def _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccel
             p = par[i]
             if p >= 0:
                 Vn[i] = (r[i] + gax[i] * Vn[p]) / d[i]
-        # 4. spikes
+        # 5. spikes
         for s in range(S):
             rt, kind = ia[s, I_ROOT], ia[s, I_KIND]
             new = False
@@ -412,35 +460,25 @@ def _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccel
                         if n_log < dlog.shape[0]:
                             dlog[n_log, 0], dlog[n_log, 1], dlog[n_log, 2] = k + e_d[e], e_dst[e], e_n[e]
                         n_log += 1
-        # 5. the dCaAP
+        # 6. the dCaAP's clocks; gates, synapses, the new state
         for s in range(S):
-            z = ia[s, I_ZONE]
-            if z < 0:
+            if ia[s, I_ZONE] < 0:
                 continue
             if don[s] >= 0.0:
                 don[s] += dt
                 if don[s] > 100.0:
                     don[s] = -1.0
             dref[s] -= dt
-            th = fa[s, F_TH]
-            if dref[s] <= 1e-9 and Vn[z] > th:
-                level = max(0.0, V[z] - th)
-                vdot = max(0.0, (Vn[z] - V[z]) / dt)
-                Kv = min(1.0, math.exp(-(level + fa[s, F_TAUK] * vdot) / (fa[s, F_D] * (th - fa[s, F_VREST]))))
-                don[s], dK[s], dref[s] = 0.0, Kv, fa[s, F_REF]
-                if n_dca < dca.shape[0]:
-                    dca[n_dca, 0], dca[n_dca, 1], dca[n_dca, 2], dca[n_dca, 3], dca[n_dca, 4] = t, s, Kv, vdot, level
-                n_dca += 1
-        # 6. gates, synapses, the new state
         for i in range(M):
             if hh[i]:
                 ch.advance(X, i, Vn[i], dt, vsh2[i], gcad[i], P)
+            if tg[0, i] > 0.0 or tg[1, i] > 0.0:
+                tr.advance(ts, i, Vn[i], dt)
             if qg[0, i] > 0.0:
                 dch.advance(qs, i, Vn[i], dt, gcs[i] * (Vn[i] - ecs[i]), qp)
-            aA[i] *= dAd
-            bA[i] *= dAr
-            aN[i] *= dNd
-            bN[i] *= dNr
+            for q in range(NR):
+                sa[q, i] *= fd[q, i]
+                sb[q, i] *= fr[q, i]
             V[i] = Vn[i]
             if Vn[i] > vmax[i]:
                 vmax[i] = Vn[i]

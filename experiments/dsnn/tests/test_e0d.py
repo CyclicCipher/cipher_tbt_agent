@@ -109,7 +109,7 @@ def transplant_base(**kw):
     """Type A with their channels at the zone (totals as in their compartment; the pool over their area), not yet
     settled. kw: overrides of `ChannelDCaAP`'s constants (step 4)."""
     gca_d, gbk_d, area, k = dch.published()
-    base = replace(l23(), dcaap=None)
+    base = replace(l23(site="coupled"), dcaap=None)
     k = dict(k, g_ca=gca_d * area * 10.0, g_bk=gbk_d * area * 1e-3, area=area)
     k.update(kw)
     return replace(base, cach=ChannelDCaAP(base.site("zone"), **k))

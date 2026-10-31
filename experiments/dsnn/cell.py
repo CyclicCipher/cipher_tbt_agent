@@ -8,9 +8,12 @@ One concept: the cell. Building a particular cell type is `cells/`; stepping cel
 - compartments 0..N-1, 0 the soma, each with its parent (-1 for the soma), axial conductance to the parent, membrane
   area, capacitance, leak and leak reversal;
 - named groups of compartments (e.g. "basal1", "tuft"), the sites the protocols use;
-- synapses (the same AMPA + NMDA contact everywhere);
-- one way to spike: an AdEx soma (`adex`), or Hodgkin–Huxley channels (`hh`, `channels.py`);
-- optionally a dCaAP: Gidon's phenomenological one (`dcaap`), or a channel (`cach`).
+- its synapses' kinetics (`syn`: AMPA, NMDA, two GABA_A; `sim.py` says which an event opens);
+- one way to spike: an AdEx soma (`adex`), or Hodgkin–Huxley channels: Bahl's (`hh`, `channels.py`) or Traub's
+  (`traub`, `traub.py`);
+- optionally a dCaAP: Gidon's phenomenological one (`dcaap`), or a channel (`cach`);
+- optionally its morphology (`tree`, the sections; `where`, section → compartments; `seclists`, named section lists),
+  for placing synapses by position (`protocols.place`).
 """
 from dataclasses import dataclass, field, replace
 import math
@@ -20,7 +23,9 @@ import numpy as np
 
 @dataclass(frozen=True)
 class Synapses:
-    """One contact = one AMPA + one NMDA conductance (Eyal et al. 2018's human L2/3 values; LAB.md E0)."""
+    """A cell's synaptic kinetics: AMPA, NMDA (Mg²⁺ block 1/(1 + mg/3.57·e^(−γV))), and two GABA_A (slow, "martinotti";
+    fast, "basket"). Each a difference of two exponentials peaking at its conductance per contact.
+    Defaults: E0's AMPA/NMDA (type B uses them); `GIDON` is type A's (LAB.md E0e)."""
     g_ampa: float = 0.88       # nS
     ampa_rise: float = 0.3     # ms
     ampa_decay: float = 1.8
@@ -29,11 +34,31 @@ class Synapses:
     nmda_decay: float = 70.0
     mg: float = 1.0            # mM (Jahr & Stevens 1990)
     mg_gamma: float = 0.062    # 1/mV
+    g_gaba_s: float = 0.5      # nS (Gidon et al.'s "martinotti")
+    gaba_s_rise: float = 2.0
+    gaba_s_decay: float = 23.0
+    g_gaba_f: float = 0.5      # nS ("basket")
+    gaba_f_rise: float = 0.5
+    gaba_f_decay: float = 5.0
+    e_gaba: float = -75.0      # mV
 
     def norms(self):
-        """Each conductance's peak per contact (nS), for a difference of two exponentials."""
-        return self.g_ampa * _peak_norm(self.ampa_rise, self.ampa_decay), self.g_nmda * _peak_norm(self.nmda_rise,
-                                                                                                   self.nmda_decay)
+        """Each conductance's peak-normalized amplitude per contact (nS): AMPA, NMDA, GABA_S, GABA_F."""
+        return tuple(g * _peak_norm(a, b) for g, a, b in zip(*self._kinetics()))
+
+    def table(self):
+        """(norms, rises, decays, reversals), each by receptor (AMPA, NMDA, GABA_S, GABA_F)."""
+        g, rise, decay = self._kinetics()
+        return self.norms(), rise, decay, (0.0, 0.0, self.e_gaba, self.e_gaba)
+
+    def _kinetics(self):
+        return ((self.g_ampa, self.g_nmda, self.g_gaba_s, self.g_gaba_f),
+                (self.ampa_rise, self.nmda_rise, self.gaba_s_rise, self.gaba_f_rise),
+                (self.ampa_decay, self.nmda_decay, self.gaba_s_decay, self.gaba_f_decay))
+
+
+GIDON = Synapses(g_ampa=0.7, ampa_rise=0.3, ampa_decay=1.8, g_nmda=1.3, nmda_rise=8.0, nmda_decay=35.0, mg=1.0,
+                 mg_gamma=0.077)   # their syns.hoc ("as in Eyal et al. 2018"), with Rhodes 2006's γ
 
 
 @dataclass(frozen=True)
@@ -54,10 +79,10 @@ class AdEx:
 
 @dataclass(frozen=True)
 class DCaAP:
-    """Gidon et al. 2020's dCaAP (`dCaAP.mod`, `xor.hoc`), with K in its step-free form (LAB.md E0b)."""
+    """Gidon et al. 2020's dCaAP, exactly as `dCaAP.mod` (LAB.md E0e): onset when the site starts a step above θ outside
+    the refractory period; K = exp(−(V − θ)/((θ − V_rest)·D)), capped at 1."""
     zone: int                  # the compartment
-    w: float = 2970.0          # pA
-    tauK: float = 0.0          # ms; fitted by `protocols.fit_tauK`
+    w: float = 2970.0          # pA: their density (mA/cm²) × the site's segment area
     theta: float = -36.0
     D: float = 0.3
     V_rest: float = -75.0
@@ -107,8 +132,12 @@ class Cell:
     adex: AdEx = None
     dcaap: DCaAP = None
     hh: object = None          # channels.HH
-    rest: dict = None          # the initial state: {"V": (N,), and for hh cells the gates}
+    rest: dict = None          # the initial state: {"V": (N,), and the gates: "X" (hh), "T" (traub), "Q" (cach)}
     cach: ChannelDCaAP = None  # the channel dCaAP (E0d), in place of `dcaap`
+    traub: object = None       # traub.Traub
+    tree: object = None        # morphology.Tree
+    where: dict = None         # section -> [(compartment, arc start, arc end)]
+    seclists: dict = None      # name -> [sections]
 
     @property
     def N(self):

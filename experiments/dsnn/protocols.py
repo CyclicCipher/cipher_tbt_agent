@@ -16,7 +16,6 @@ from .cells import TYPES
 from .sim import Stim, Wiring, simulate
 
 T0 = 10.0                  # ms: when the first input arrives
-GIDON_SCALE = 0.3          # Gidon's K: exp(-(I - I_th) / (0.3 I_th))
 
 
 def spread(cell, group, n):
@@ -24,6 +23,36 @@ def spread(cell, group, n):
     comps = cell.groups[group]
     L = np.array([cell.length[c] for c in comps])
     return [(c, n * l / L.sum()) for c, l in zip(comps, L)]
+
+
+def place(cell, seclist, n, rng, min_dist=None):
+    """n synapse positions drawn uniformly by length over a section list (Gidon et al.'s `TPointList.setrand`), or,
+    with min_dist, only from points farther than min_dist µm from the soma (their `setrand_distance`, by rejection).
+    Returns [(compartment, section, x)]."""
+    t = cell.tree
+    secs = cell.seclists[seclist]
+    L = np.array([t.length(s) for s in secs])
+    cum = np.concatenate([[0.0], np.cumsum(L)])
+    out = []
+    while len(out) < n:
+        u = rng.uniform(0.0, cum[-1])
+        i = min(int(np.searchsorted(cum, u, side="right")) - 1, len(secs) - 1)
+        s, x = secs[i], (u - cum[i]) / L[i]
+        if min_dist is not None and t.dist(s, x) <= min_dist:
+            continue
+        out.append((comp_at(cell, s, x), s, x))
+    return out
+
+
+def comp_at(cell, s, x):
+    """The compartment that holds point x of section s."""
+    if s == "soma":
+        return 0
+    L = cell.where[s][-1][2]
+    for c, a, b in cell.where[s]:
+        if x * L <= b + 1e-9:
+            return c
+    return cell.where[s][-1][0]
 
 
 # ---- the builders ----------------------------------------------------------------------------------------------
@@ -129,28 +158,6 @@ def first(values, ok):
     return float(hit[0]) if hit else float("nan")
 
 
-def zone_rheobase(cell, dt, step=5.0, top=2000.0):
-    """I_th: the smallest 100 ms step into the zone, in `step` pA, that takes the zone to θ (no dCaAP, spiking off)."""
-    off = cell.with_dcaap(w=0.0)
-    z, th = cell.site("zone"), cell.dcaap.theta
-    amps = np.arange(step, top + step, step)
-    r = simulate([Stim(spiking=False).current(T0, T0 + 100, z, a) for a in amps], 120.0, off, dt=dt)
-    return first(amps, [r.vmax[b][0][z] >= th for b in range(len(amps))])
-
-
-def fit_tauK(cell, dt, I_th):
-    """τ_K: least squares on ln K for steps of 1.5 and 2 x I_th, so K follows exp(-(f - 1) / 0.3) (LAB.md E0b).
-    Returns (τ_K, the V̇ at each crossing)."""
-    fs = (1.5, 2.0)
-    q = cell.with_dcaap(tauK=0.0)
-    z = cell.site("zone")
-    r = simulate([Stim(spiking=False).current(T0, T0 + 100, z, f * I_th) for f in fs], 120.0, q, dt=dt)
-    vd = np.array([r.dcaap[b][0][0][2] for b in range(len(fs))])
-    y = np.array([(f - 1.0) / GIDON_SCALE for f in fs])
-    scale = cell.dcaap.D * (cell.dcaap.theta - cell.dcaap.V_rest)
-    return float(scale * (vd * y).sum() / (vd * vd).sum()), vd.tolist()
-
-
 def zone_event(cell, r, b):
     """Run b gave a dCaAP: the phenomenological one fired, or the channel's current reached half its peak in the
     I_th step (LAB.md E0c-A). Channel cells need the zone recorded with its Ca²⁺ current (`zone_record`)."""
@@ -232,19 +239,16 @@ def longest_above(v, level, t):
 
 @lru_cache(maxsize=8)
 def calibrated(kind, dt=0.05, max_len=None):
-    """A cell type with its rule-set values, and the rule-set strengths: (Cell, {name: value})."""
+    """A cell type with its rule-set strengths: (Cell, {name: value}). Type A at its coupled site (E0's protocols
+    were written for a site that drives the soma)."""
+    if kind == "A":
+        return calibrate(TYPES[kind](site="coupled"), kind, dt)
     return calibrate(TYPES[kind](max_len) if max_len else TYPES[kind](), kind, dt)
 
 
 def calibrate(cell, kind, dt=0.05):
-    """(Cell, {name: value}) for a given cell: τ_K if it has the phenomenological dCaAP, then the strengths."""
-    cal = {}
-    if kind == "A" and cell.dcaap is not None:
-        cal["zone_rheobase"] = zone_rheobase(cell, dt)
-        cal["tauK"], cal["tauK_vdot"] = fit_tauK(cell, dt, cal["zone_rheobase"])
-        cell = cell.with_dcaap(tauK=cal["tauK"])
-    cal.update(strengths(cell, dt, kind))
-    return cell, cal
+    """(Cell, {name: value}): the rule-set strengths."""
+    return cell, strengths(cell, dt, kind)
 
 
 # ---- the scenarios, for the viz (updated after E0b's run) -------------------------------------------------------

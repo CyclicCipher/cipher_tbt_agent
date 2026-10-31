@@ -1797,3 +1797,43 @@ bulk.
 - re-run E1's type A protocols on this cell;
 - re-validate a reduced type A against it, for cost;
 - the graded first dCaAP, if it turns out to matter.
+
+### E0e amendments (2026-10-30, during the build, before the run)
+
+**What ran before these were written:**
+- **The fast tests** (5 files), and E0b's check 1 and check 3 after the simulator's rewrite: both unchanged to the
+  last digit (1.03 × 10⁻¹¹ mV; the same 9 spike times).
+- **Check M's geometry:**
+  - 1006 compartments;
+  - apic[76](0.214) at 536.4 µm, apic[60](0.99) at 273.6 µm;
+  - the soma's R_in **39.5 MΩ** (the recorded cell's: 41), the zone's 181.6 MΩ;
+  - w = 1278 pA (uncoupled, over 79.9 µm²) and 3847 pA (coupled, over 96.2 µm²);
+  - 106,489 µm² of membrane.
+- **A 300 ms timing run** of the X condition on seed 9, which is not a scored seed. Its dCaAPs weren't read.
+- No scored protocol.
+
+**Details the pre-registration left open, or got wrong:**
+1. **The compartment count:** NEURON's rule gives 1006 compartments, not "about 640". The axon alone is 33. So the
+   compute is about 12 CPU-minutes, about 2–3 minutes over 7 processes.
+2. **The simulator, rewritten for the receptor types** (`sim.py`):
+   - an event carries a mask of receptors;
+   - each cell's kinetics are per compartment;
+   - E0's single synapse type stays the default (type B keeps it); type A uses `cell.GIDON`.
+   - **The dCaAP's onset** now runs before the matrix, on the step's starting voltage, as `dCaAP.mod`'s BEFORE
+     BREAKPOINT does.
+   - **Removed:** τ_K, `fit_tauK`, `zone_rheobase`, E0b's check 4, and the AdEx soma of type A.
+   - **E0b's check 2** now compares the reduced cell with the full one at the new scale (not run in E0e).
+   - **E1's type A protocols** now point at the rebuilt cell (coupled site), to be re-run after E0e.
+3. **Check T** runs with the soma able to spike, from V = −75 mV, as their test pulse does.
+4. **A dCaAP's peak** is the site's highest voltage in the 40 ms from its onset.
+5. **Random numbers:**
+   - **Positions** use our generator, seeded (seed, their stream number): 3 for the background, 2 and 4 for X and Y,
+     5 for inhibition, 10 for proximal inhibition.
+   - **Spike trains** are seeded (seed, group, synapse). A synapse keeps the same train in every condition, so the
+     conditions differ only in which groups are on.
+6. **S9's rate** is spikes / (T − 100 ms), as their `conclude()` computes it.
+7. **Two fast tests changed:**
+   - E0b's NMDA-plateau check now looks for a plateau within N6's own range (10–60 contacts). The rebuilt cell and
+     Gidon's NMDA no longer give one at 20.
+   - E0e's GABA check tests that GABA shrinks a depolarization. GABA reverses at −75 mV, so it can't hyperpolarize a
+     cell resting at −74.

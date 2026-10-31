@@ -38,7 +38,7 @@ def e0b_calibration():
 
 @lru_cache(maxsize=2)
 def cell_of(kind):
-    return l23().with_dcaap(tauK=e0b_calibration()["A"]["tauK"]) if kind == "A" else l5()
+    return l23(site="coupled") if kind == "A" else l5()       # type A as rebuilt in E0e; E1's A rows pending
 
 
 # ---- the rule-set settings ---------------------------------------------------------------------------------------

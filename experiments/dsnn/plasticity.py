@@ -38,7 +38,7 @@ UM_PER_PA_MS = 1e-9 / (2.0 * FARADAY * V_SP * 1e-15 * (1.0 + KAPPA))            
 
 def nmda_g(pre, t, syn):
     """One contact's NMDA conductance (nS) at times t, from its presynaptic spike times."""
-    _, nm = syn.norms()
+    nm = syn.norms()[1]
     g = np.zeros(len(t))
     span = 10.0 * syn.nmda_decay
     for ts in pre:
