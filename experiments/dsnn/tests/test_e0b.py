@@ -2,6 +2,7 @@
     ../venv312/Scripts/python.exe -m dsnn.tests.test_e0b                 (the run: dt 0.05; writes dsnn/runs/e0b_*.json)
     ../venv312/Scripts/python.exe -m dsnn.tests.test_e0b --dt 0.025      (check 5, against the saved dt 0.05 run)
     ../venv312/Scripts/python.exe -m dsnn.tests.test_e0b --fine          (check 6: A at <= 15 um, B's sections at <= 30 um)
+    ... --types B                                                         (one type only; checks 5 and 6 compare its verdicts)
     ../venv312/Scripts/python.exe -m pytest dsnn/tests/test_e0b.py -q    (a fast check)
 
 **What it scores:**
@@ -241,27 +242,37 @@ def cost(A, B, dt):
     return out
 
 
-def run(dt, fine=False):
+def run(dt, fine=False, types="AB"):
     t0 = time.time()
-    res = dict(dt=dt, fine=fine)
-    A, calA = P.calibrated("A", dt, 15.0 if fine else None)
-    B, calB = P.calibrated("B", dt, 30.0 if fine else None)
-    res["calibration"] = dict(A=calA, B=calB)
+    res = dict(dt=dt, fine=fine, types=types, calibration={}, cells={})
+    if "A" in types:
+        A, calA = P.calibrated("A", dt, 15.0 if fine else None)
+        res["calibration"]["A"] = calA
+        res["cells"]["A"] = dict(N=A.N, R_in=A.input_resistance(), R_zone=A.input_resistance(A.site("zone")))
+    if "B" in types:
+        B, calB = P.calibrated("B", dt, 30.0 if fine else None)
+        res["calibration"]["B"] = calB
+        res["cells"]["B"] = dict(N=B.N, R_in=B.input_resistance(), rest_soma=float(B.rest["V"][0]))
     res["seconds_calibration"] = round(time.time() - t0, 1)
-    res["cells"] = dict(A=dict(N=A.N, R_in=A.input_resistance(), R_zone=A.input_resistance(A.site("zone"))),
-                        B=dict(N=B.N, R_in=B.input_resistance(), rest_soma=float(B.rest["V"][0])))
-    if not fine:
+    full = types == "AB" and not fine
+    if full:
         res["check1"] = check1()
         res["check2"] = check2(dt)
-    res["check3"] = check3(dt) if not fine else None
-    res["check4"] = check4(A, calA, dt)
-    for name, f in (("A_N1", lambda: n1(A, dt)), ("A_N2", lambda: n2(A, calA, dt)), ("A_N3", lambda: n3(A, calA, dt)),
-                    ("A_N4", lambda: n4(A, dt)), ("A_N5", lambda: n5(A, dt)), ("A_N6", lambda: n6(A, calA, dt)),
-                    ("B_N2", lambda: n2(B, calB, dt)), ("B_N5", lambda: n5(B, dt))):
+    if "B" in types and not fine:
+        res["check3"] = check3(dt)
+    if "A" in types:
+        res["check4"] = check4(A, calA, dt)
+    todo = []
+    if "A" in types:
+        todo += [("A_N1", lambda: n1(A, dt)), ("A_N2", lambda: n2(A, calA, dt)), ("A_N3", lambda: n3(A, calA, dt)),
+                 ("A_N4", lambda: n4(A, dt)), ("A_N5", lambda: n5(A, dt)), ("A_N6", lambda: n6(A, calA, dt))]
+    if "B" in types:
+        todo += [("B_N2", lambda: n2(B, calB, dt)), ("B_N5", lambda: n5(B, dt))]
+    for name, f in todo:
         t = time.time()
         res[name] = f()
         res[name]["seconds"] = round(time.time() - t, 1)
-    if not fine:
+    if full:
         res["cost"] = cost(A, B, dt)
     res["seconds"] = round(time.time() - t0, 1)
     return res
@@ -273,16 +284,22 @@ VERDICTS = ("check4", "A_N1", "A_N2", "A_N3", "A_N4", "A_N5", "A_N6", "B_N2", "B
 def numbers(res):
     """The scored numbers, flattened, for checks 5 and 6."""
     out = {}
-    for kind in ("A", "B"):
+    for kind in res["calibration"]:
         out.update({"%s_%s" % (kind, k): v for k, v in res["calibration"][kind].items() if not isinstance(v, list)})
-    out.update({"dcaK%d" % i: k for i, k in enumerate(res["check4"]["K"])})
-    out.update({"N1_same_k%d" % x["k"]: x["same_ratio"] for x in res["A_N1"]["rows"]})
-    out.update({"N1_other_k%d" % x["k"]: x["other_ratio"] for x in res["A_N1"]["rows"]})
-    for kind in ("A", "B"):
+    if "A_N1" in res:
+        out.update(numbers_A(res))
+    for kind in res["calibration"]:
         out.update({"%s_N2_dt%s" % (kind, d): v for d, v in res[kind + "_N2"].get("spikes_within_30ms", {}).items()})
         for k in ("r", "r_prime", "d_events_basal", "d_events_apical", "d_bf_basal", "d_bf_apical"):
             if k in res[kind + "_N5"]:
                 out["%s_N5_%s" % (kind, k)] = res[kind + "_N5"][k]
+    return out
+
+
+def numbers_A(res):
+    out = {"dcaK%d" % i: k for i, k in enumerate(res["check4"]["K"])}
+    out.update({"N1_same_k%d" % x["k"]: x["same_ratio"] for x in res["A_N1"]["rows"]})
+    out.update({"N1_other_k%d" % x["k"]: x["other_ratio"] for x in res["A_N1"]["rows"]})
     out.update({"N3_" + k: v for k, v in res["A_N3"]["spikes"].items()})
     out.update({"N4_s%d_i%g" % (x["s"], x["interval"]): x["ratio"] for x in res["A_N4"]["rows"]})
     out.update({"N6_%g_%s" % (x["delta"], k): x[k] for x in res["A_N6"]["rows"] for k in ("cond_alone", "test_alone",
@@ -296,7 +313,7 @@ def compare(a, b, label):
     tol = lambda k: 0.15 if "_N5_" in k else 0.05
     diffs = {k: (na[k], nb[k]) for k in na if k in nb and not (na[k] != na[k] and nb[k] != nb[k])
              and abs(na[k] - nb[k]) > tol(k) * max(abs(na[k]), 1e-9)}
-    verdicts = {k: (a[k]["passed"], b[k]["passed"]) for k in VERDICTS}
+    verdicts = {k: (a[k]["passed"], b[k]["passed"]) for k in VERDICTS if k in a and k in b}
     same = all(x == y for x, y in verdicts.values())
     print("%s: verdicts %s; %d of %d numbers outside tolerance: %s" % (
         label, "IDENTICAL" if same else "DIFFERENT %s" % {k: v for k, v in verdicts.items() if v[0] != v[1]},
@@ -306,11 +323,11 @@ def compare(a, b, label):
 
 def report(res, say=print):
     pf = lambda r: "PASS" if r and r.get("passed") else "FAIL"
-    say("E0b at dt = %g ms%s (%.1f s; calibration %.1f s)" % (res["dt"], ", fine cut" if res["fine"] else "",
-                                                             res["seconds"], res["seconds_calibration"]))
+    say("E0b at dt = %g ms%s, types %s (%.1f s; calibration %.1f s)" % (
+        res["dt"], ", fine cut" if res["fine"] else "", res["types"], res["seconds"], res["seconds_calibration"]))
     say("  cells: %s" % res["cells"])
-    say("  calibration A: %s" % {k: (round(v, 3) if isinstance(v, float) else v) for k, v in res["calibration"]["A"].items()})
-    say("  calibration B: %s" % res["calibration"]["B"])
+    for kind, cal in res["calibration"].items():
+        say("  calibration %s: %s" % (kind, {k: (round(v, 3) if isinstance(v, float) else v) for k, v in cal.items()}))
     if "check1" in res:
         c = res["check1"]
         say("  check 1 (solver): max |dV| %.2e mV; spikes old %s new %s -> %s" % (c["max_abs_mV"], c["spikes_old"],
@@ -325,13 +342,11 @@ def report(res, say=print):
         say("  check 3 (port): %d spikes, first interval %s ms, apical(0.5) peak %.1f, tuft(0.5) peak %.1f -> %s" % (
             c["spikes"], None if c["first_interval"] is None else round(c["first_interval"], 2), c["apical_peak"],
             c["tuft_peak"], pf(c)))
-    c = res["check4"]
-    say("  check 4 (dCaAP shape): K %s vs %s -> %s" % (np.round(c["K"], 3).tolist(),
-                                                       np.round(c["expected"], 3).tolist(), pf(c)))
-    r = res["A_N1"]
-    say("  A N1: max same-branch ratio %.2f; other-branch range [%.2f, %.2f] -> %s" % (
-        r["max_same_ratio"], r["other_range"][0], r["other_range"][1], pf(r)))
+    if "A_N1" in res:
+        report_A(res, say)
     for kind in ("A", "B"):
+        if kind + "_N2" not in res:
+            continue
         r = res[kind + "_N2"]
         if "note" in r:
             say("  %s N2: %s -> FAIL" % (kind, r["note"]))
@@ -344,12 +359,9 @@ def report(res, say=print):
         if "dcaap_K" in r:
             say("      dCaAP K by dt %s; pulse alone %s; tuft alone %s" % (r["dcaap_K"], r["dcaap_K_pulse_alone"],
                                                                          r["dcaap_K_tuft_alone"]))
-    r = res["A_N3"]
-    say("  A N3 (n = %s): spikes %s; dCaAP K %s -> %s" % (r["n"], r["spikes"], r["dcaap_K"], pf(r)))
-    r = res["A_N4"]
-    say("  A N4: inward/outward %s -> %s" % (
-        " ".join("s%d/%gms %.2f" % (x["s"], x["interval"], x["ratio"]) for x in r["rows"]), pf(r)))
     for kind in ("A", "B"):
+        if kind + "_N5" not in res:
+            continue
         r = res[kind + "_N5"]
         tag = " (reported)" if kind == "A" else ""
         if "table" in r:
@@ -358,10 +370,11 @@ def report(res, say=print):
                                                      r["d_events_apical"], r["d_bf_basal"], r["d_bf_apical"], pf(r)))
         else:
             say("  %s N5%s: r %s, r' %s: %s -> FAIL" % (kind, tag, r["r"], r["r_prime"], r["note"]))
-    r = res["A_N6"]
-    say("  A N6 (c %s, pulse %s): %s -> %s" % (r["c"], r["pulse"], "; ".join(
-        "D %g: cond %d, test %d, both %d" % (x["delta"], x["cond_alone"], x["test_alone"], x["both"])
-        for x in r["rows"]), pf(r)))
+    if "A_N6" in res:
+        r = res["A_N6"]
+        say("  A N6 (c %s, pulse %s): %s -> %s" % (r["c"], r["pulse"], "; ".join(
+            "D %g: cond %d, test %d, both %d" % (x["delta"], x["cond_alone"], x["test_alone"], x["both"])
+            for x in r["rows"]), pf(r)))
     if "cost" in res:
         c = res["cost"]
         say("  cost (s per simulated s): %s; compartment updates/s %s" % (
@@ -369,12 +382,28 @@ def report(res, say=print):
             {k: "%.2g" % v for k, v in c["compartment_updates_per_s"].items()}))
 
 
+def report_A(res, say):
+    pf = lambda r: "PASS" if r and r.get("passed") else "FAIL"
+    c = res["check4"]
+    say("  check 4 (dCaAP shape): K %s vs %s -> %s" % (np.round(c["K"], 3).tolist(),
+                                                       np.round(c["expected"], 3).tolist(), pf(c)))
+    r = res["A_N1"]
+    say("  A N1: max same-branch ratio %.2f; other-branch range [%.2f, %.2f] -> %s" % (
+        r["max_same_ratio"], r["other_range"][0], r["other_range"][1], pf(r)))
+    r = res["A_N3"]
+    say("  A N3 (n = %s): spikes %s; dCaAP K %s -> %s" % (r["n"], r["spikes"], r["dcaap_K"], pf(r)))
+    r = res["A_N4"]
+    say("  A N4: inward/outward %s -> %s" % (
+        " ".join("s%d/%gms %.2f" % (x["s"], x["interval"], x["ratio"]) for x in r["rows"]), pf(r)))
+
+
 def main(argv):
     dt = float(argv[argv.index("--dt") + 1]) if "--dt" in argv else 0.05
     fine = "--fine" in argv
+    types = argv[argv.index("--types") + 1] if "--types" in argv else "AB"
     os.makedirs(os.path.join(HERE, "runs"), exist_ok=True)
-    res = run(dt, fine)
-    name = "e0b_dt%g%s.json" % (dt, "_fine" if fine else "")
+    res = run(dt, fine, types)
+    name = "e0b_dt%g%s%s.json" % (dt, "_fine" if fine else "", "" if types == "AB" else "_" + types)
     report(res)
     if dt != 0.05 or fine:
         base = json.load(open(os.path.join(HERE, "runs", "e0b_dt0.05.json")))

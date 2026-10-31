@@ -200,7 +200,7 @@ def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY,
                   math.exp(-dt / syn0.nmda_decay), math.exp(-dt / syn0.nmda_rise), syn0.mg / 3.57, syn0.mg_gamma,
                   rec_c, rec, vmax, spk_t, spk_s, dca, dlog)
     n_spk, n_dca, n_log = counts
-    if n_spk > cap_s or n_dca > cap_d or n_log > cap_l:
+    if n_spk > cap_s or n_dca > cap_d or (keep_syn and n_log > cap_l):
         raise RuntimeError("an output buffer overflowed")
 
     # ---- results ----

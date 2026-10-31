@@ -592,3 +592,100 @@ no rule that sets an input strength.
      for 2 ms.
    - **The cost's 2 × 3 network:** L2/3, L2/3 | L2/3, L5 | L5, L5. It uses the viz's stand-in wiring, with contacts
      spread over the basal side and the tuft. It is not E2's wiring.
+
+### The run (2026-10-30, at commit 8fcc595 plus one bug fix; `runs/e0b_*.json`)
+
+**How it ran:**
+- **The main run, dt 0.05 ms:** 103 s. The first attempt crashed in its last step (the cost's network) on an
+  overflow check that counted logged synapses with logging off. That was fixed, and the run repeated. Nothing had
+  been reported or saved.
+- **Checks 5 and 6:** run for type B only, since check 4 voids type A's verdicts. They took 110 s and 162 s, the
+  second over the 2-minute guideline.
+- **Total compute:** about 8.5 minutes.
+
+**The rule-set values:**
+- **Type A:** I_th = 350 pA and τ_K = 11.6 ms (V̇ = 1.42 and 3.48 mV/ms at 1.5 and 2 × I_th). N2's pulse 4100 pA
+  and n = 46. N3's n = 27. N6's c = 18 and pulse 4050 pA.
+- **Type B:** N2's pulse 1450 pA, n = 34.
+- **The cells:** type A has 241 compartments, with R_in 61.4 MΩ at the soma and 109 MΩ at the zone. Type B has 20,
+  R_in 94.4 MΩ, rest −70.06 mV.
+
+**The checks on the apparatus:**
+
+| check | verdict | numbers |
+|---|---|---|
+| 1, the solver | pass | voltages within 1.0 × 10⁻¹¹ mV of E0's dense solve; the same spike (62.0 ms) |
+| 2, the reduction | pass (after amendment 2) | reduced / full: soma R_in 0.990, site R_in 0.994, basal tip R_in 0.997, transfer 0.988, bAP 0.954 |
+| 3, the port | pass | 9 spikes, the first two 5.0 ms apart; bAP +26.4 mV at apical(0.5); −35.7 mV at tuft(0.5) |
+| **4, the dCaAP's shape** | **fail** | K = 0.988, **0.246**, 0.032 against 1.0, 0.189, 0.036 (errors 1%, **30%**, 10.2%) |
+| 5, step size (type B) | verdicts identical; **3 numbers outside 15%** | all N5's apical numbers, which are near zero: r′ 1.0 against 0.5 Hz (the grid's floor); events with apical doubling +0.57 against +0.28; burst fraction −0.031 against −0.010 |
+| 6, compartment size (type B) | verdicts identical; **N2 can't be run** | at ≤ 30 µm, no 2 ms pulse gives exactly 1 spike: the smallest that fires gives 2. N5's apical numbers are again near zero |
+
+**So, by the pre-registration:**
+- **Type A:** none of its verdicts count, because check 4 failed.
+- **Type B:** its verdicts also don't count by the letter, since checks 5 and 6 fail. It fails N2 and N5 at every
+  step size and cut.
+
+**What the runs show** (type A's rows are a diagnosis, not verdicts):
+
+| | outcome | numbers |
+|---|---|---|
+| A: N1 | fail | the same-branch ratio peaks at 1.44 (k = 10; E0: 1.17). The other-branch ratio reaches 1.28 (k = 14), so two branches also sum supralinearly |
+| A: N2 (reported) | no burst | the bAP alone reaches **−35.8 mV at the zone, 0.2 mV above θ.** It fires a dCaAP with K = 0, and that starts the 200 ms refractory period. 1 spike at every Δt |
+| A: N3 | fail | spikes: none 0, A 0, B 0, A+B 0. K = 0.094 for A alone (27 contacts, the threshold volley) |
+| A: N4 | fail | inward/outward at most 1.11 |
+| A: N5 (reported) | passes as written | events: +17.6 basal, +3.5 apical. Burst fraction: +0.002 basal, +0.014 apical. Both are tiny, under 0.1 throughout |
+| A: N6 | pass | conditioning alone or test alone: no spike. Both: 1 spike at Δ = 50 and 100, none at 300 |
+| **B: N2** | **fail** | pulse alone 1 spike, tuft alone 0. Together: **2 spikes at every Δt from −10 to 10**, and 2 within 50 ms at Δt = 20. The tuft fires a Ca²⁺ spike only on coincidence: +12 to +13 mV at tuft(0.5), against −45 (pulse alone) and −43 (tuft alone). But it adds one spike (a doublet), not a burst of ≥ 3, and it still fires 20 ms after the spike |
+| **B: N5** | **fail** | doubling basal input adds 12.7 events/s, apical 0.6. The burst fraction is +0.31 with basal and **−0.03 with apical.** This cell bursts on basal drive alone (fraction 0.50–0.90), so the r′ rule is met at the bottom of its grid |
+| cost | the prediction holds | s per simulated s: type A 0.089 (12 as a batch 1.11); type B 0.137 (1.71); the 2 × 3 network 0.65. Compartment updates per s: 5.4 × 10⁷ for type A, 2.9 × 10⁶ for type B, so a Hodgkin–Huxley compartment costs about 18 times a passive one |
+
+**The predictions, scored:**
+
+| prediction | outcome |
+|---|---|
+| check 2: passes for input resistance and transfer; the bAP may come out low | as predicted, it came out at 0.70 with point lumping. It passed after amendment 2 |
+| the bAP at the zone stays below θ | wrong, by 0.2 mV (−35.8 mV) |
+| check 4 passes | wrong |
+| A: N3 passes | wrong. A threshold-level volley crosses θ fast (K = 0.094) |
+| A: N4 passes | wrong |
+| A: N6 passes | right |
+| A: N2, N5: no bursts driven by apical input | right |
+| check 3 passes | right |
+| B: N2 passes | wrong |
+| B: N5 uncertain | fails |
+| cost: under 1 s for one cell, under 3 s for 12 as a batch | right: 0.09 to 0.14 s, and 1.1 to 1.7 s |
+
+**What E0b established:**
+1. **The apparatus is verified,** as E0's never was:
+   - the solver, against an independent dense solve;
+   - type A's reduction, against the full 615-compartment reconstruction (within 5% once the lumped subtrees are
+     equivalent cylinders);
+   - type B's port, against its authors' published output.
+
+   One type A cell of 241 compartments runs 16 times faster than E0's 15-compartment cell did (0.089 against 1.43 s
+   per simulated second).
+2. **K as a rule of the input has now failed four times.** The phenomenological dCaAP's amplitude rule doesn't
+   transfer from current steps to synapses, under any of the definitions tried:
+   - C·dV/dt (E0 run 1);
+   - the injected current (E0 runs 2 and 3);
+   - V̇ at θ (E0b).
+
+   Why V̇ fails:
+   - **On steps (check 4):** in a branched cell, V̇ at θ grows faster than a step's excess current (×2.45 from 1.5 to
+     2 × I_th, against ×2), because the zone crosses θ while fast charging is still under way.
+   - **On synapses (N3):** a volley that just reaches θ is fast by nature, so its K is small.
+
+   A comparison with Gidon's code:
+   - Their code's K uses the overshoot in one solver step. At NEURON's default step of 0.025 ms, that is roughly
+     V̇ × 0.0125 ms.
+   - The τ_K that fits their measured step curve is 11.6 ms.
+   - That is about a thousandfold apart, so the code's K and the measured curve are not the same function.
+3. **Type B has the coincidence detector in its dendrite, not in its output.** Its tuft fires a Ca²⁺ spike only when
+   a bAP and tuft input coincide. But:
+   - the soma turns that into one extra spike;
+   - the window reaches at least 20 ms after the spike;
+   - this rat model bursts on basal drive alone, so somatic bursts don't carry the apical input (N5).
+
+   The tuft's Ca²⁺ spike is a clean local signal of coincidence. The burst code is not.
+4. **One thing works in both E0 and E0b:** an NMDA plateau is a memory of about 100 ms (N6).
