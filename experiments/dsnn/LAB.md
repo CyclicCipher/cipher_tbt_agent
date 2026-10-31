@@ -1967,3 +1967,60 @@ peak current (w = 1278 pA).
 11. **S9's reference numbers** are now known (1.7, 0.54, 1.5, 0.25 Hz). Its pass criterion stays as pre-registered:
     the pattern on each seed. The rates are reported against theirs.
 12. **Run 2 reruns** check T, check T2, F3 and S9, on the same seeds and the same criteria.
+
+### E0e run 2 (2026-10-30, at commit 955011a; `runs/e0e_run2.json`): checks T and T2 pass; F3 1 of 3 seeds, S9 2 of 3; 58 s
+
+**The calibration (amendment 8):**
+
+| site | threshold | w for the target | density × area | ratio | first dCaAP |
+|---|---|---|---|---|---|
+| uncoupled | 0.21 nA | 701 pA | 1278 | 0.55 | 49.6 mV |
+| coupled | 0.50 nA | 2110 pA | 3847 | 0.55 | 59.2 mV |
+
+- **The same factor, 0.55, at both sites:** a constant in the dCaAP current's delivery, not the geometry.
+- **Ruled out:** the integration scheme. Exact logistic, Euler and NMODL's cnexp linearization give the same pulse
+  (peak A − B 0.60, the same charge). Also the morphology file, the cut, the units and dt.
+- **Still unexplained,** and it can't be settled without running their files in NEURON.
+
+**Check T passes (0.21 nA), and T2 passes:** the coupled threshold is **0.50 nA**, the supplement's 500 pA exactly.
+- **The test-pulse waveform now matches their screenshot:** first dCaAPs peak at +13.5 mV (0.21 nA) to +27.9 mV
+  (0.30 nA); theirs run about +14 to +35.
+- **The later dCaAPs** run from +13 to −7 mV; theirs reach about +15 at most.
+
+**F3 (XOR at the dendrite):** large dCaAPs are X 0, 1, 9; Y 4, 2, 10; X+Y 1, 1, 1; X+Y+inhibition 11, 10, 10.
+- **Fails, as in run 1:** seed 2 passes, seeds 0 and 1 don't.
+- **Why the result barely moved:** w changes nothing about whether one pathway reaches θ. X+Y is now 1 on every seed
+  (smaller dCaAPs peak lower).
+
+**S9 (the soma's output), rates in Hz by seed:**
+
+| condition | seed 0 | seed 1 | seed 2 | mean | theirs |
+|---|---|---|---|---|---|
+| X | 0.39 | 0.10 | 0.20 | 0.23 | 1.7 |
+| Y | 0.29 | 0.39 | 0.34 | 0.34 | — |
+| X+Y | 0.25 | 0.20 | 0.05 | 0.16 | 0.54 |
+| X+Y+distal inhibition | 0.34 | 0.25 | 0.15 | 0.25 | 1.5 |
+| X+proximal inhibition | 0 | 0 | 0 | 0 | 0.25 |
+
+- **The pattern holds on seeds 0 and 2,** and fails on seed 1 (X 0.10 against X+Y 0.20). So S9 fails by the letter.
+- **The ordering is roughly theirs** (X+Y the lowest of the excitatory conditions, proximal inhibition the lowest of
+  all), but every rate is 4–10 times below theirs.
+- **The dCaAPs fire as before** (X: 39–60 at K about 0.98; X+Y: 102 at K about 0.44). Now that they're 60 mV tall,
+  few reach the soma's threshold: 2–8 spikes for 39–60 dCaAPs.
+- **Their numbers sit between our runs:** run 1's 1.8-times-taller dCaAPs gave rates above theirs, and X+Y the
+  highest; run 2's give rates far below. So the dCaAP's coupling to the soma differs from theirs as well, not only
+  its height.
+
+**What E0e's two runs established:**
+1. **The rebuilt type A matches every passive and threshold number Gidon et al. publish:** R_in 39.5 against 39 MΩ;
+   the dCaAP thresholds 0.21 against 0.22 nA and 0.50 against 0.50 nA; the site distances.
+2. **Their phenomenological dCaAP's XOR mechanism is reproduced:**
+   - X+Y holds the dendrite depolarized and every re-fired dCaAP small (K about 0.25);
+   - inhibition rescues full-size dCaAPs;
+   - on every seed.
+3. **Three quantitative gaps from their NEURON model remain, which I can't explain from their files:**
+   - the dCaAP's current delivers 1.8 times the height (corrected in run 2 by their stated 50/60 mV rule);
+   - one pathway drives the XOR site about 4 mV less on our placements, so it reaches θ on 1 placement in 3;
+   - the coupled dCaAP's drive to the soma differs: rates 4–10 times below theirs once heights are matched.
+4. **What would settle all three:** running their own files in NEURON. NEURON has no pip wheel for this Python on
+   Windows (E0b); an official installer, or a Linux environment, would be needed. That's the user's call.
