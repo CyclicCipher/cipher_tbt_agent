@@ -306,3 +306,213 @@ second implementation.
 - **Keys:** space plays and pauses; ← and → step 0.5 ms; hovering a trace scrubs the time.
 - **To add a variant:** select a run, change one setting, and press "Add run". The new row is labelled with its source
   run and the change.
+
+## E0b: two cell types, and the apical side rebuilt (pre-registered 2026-10-30)
+
+**The question:** E0's cell failed N1–N5. Rebuilt from two published models, does each cell type pass the experiments
+that define it? And what does it cost to run?
+- **Type A, human layer 2/3:** reduced by a stated rule from Gidon et al. 2020's human reconstruction, with their
+  constants and their dCaAP.
+- **Type B, layer 5-like:** Bahl et al. 2012's reduced layer 5 model, with its Ca²⁺ zone and channels.
+
+**The user's decisions (2026-10-30):**
+- The order: E0b, then E1 (the calcium rule against slice experiments), then E2 (credit assignment against the true
+  gradient).
+- The network has both cell types.
+- The aim: "a scalable, biologically inspired credit assignment."
+
+**Sources read before writing this** (the models' own code, from ModelDB's GitHub mirror):
+- Gidon et al. 2020's XOR model (ModelDB 254217): the reconstruction `171122005.hoc`, `biophys.hoc`, `dCaAP.mod`,
+  `xor.hoc`.
+- Gidon et al. 2020's channel model of the dCaAP (ModelDB 260178, their Fig S12): HVA Ca²⁺, BK and a Ca²⁺ pump in one
+  compartment.
+  - **Ported to numpy as a check** (not part of E0b): the first event's peak **rises** with input, both for steps
+    (18.9 → 34.5 mV over 0.425–0.65 nA) and for synaptic-shaped currents. Above threshold, the BK current then
+    clamps the compartment near −39 mV.
+  - **So:** the falling amplitude is not in this channel set as published. Gidon's XOR model doesn't use it; it uses
+    the phenomenological dCaAP.
+- Bahl et al. 2012's reduced layer 5 models (ModelDB 146026), and its authors' screenshot of example 1.
+- Galloni, Laffere & Rancz 2020: in Bahl's model, BAC firing needs an apical trunk longer than about 350 µm and Na⁺
+  channels along the trunk.
+
+**No NEURON reference:** `pip index versions neuron` finds no wheel for this Python on Windows. So the ports are checked
+against their authors' published outputs (check 3), and against our own passive model of the full reconstruction
+(check 2).
+
+### What E0 left, and what changes
+
+| E0's finding | its cause | E0b's change | source |
+|---|---|---|---|
+| every bAP fires a full dCaAP | the apical dendrite: 250 µm, 2–2.5 µm thick, in compartments of 100–150 µm | type A's trunk is the reconstruction's own path to Gidon's dCaAP site: 220 µm, tapering from 6.1 to 1.4 µm, loaded by its side branches' membrane, in compartments ≤ 30 µm | ModelDB 254217 |
+| no definition of K works for both steps and synapses | Gidon's K is defined for current steps | K from how fast the zone crosses θ: the step-free form of Gidon's own code (below) | `dCaAP.mod` |
+| the dCaAP's time course | E0 followed Hashemi et al. 2025's reimplementation: current from the onset, at half amplitude | Gidon's code: both logistic terms start at 0.001, so the current is a pulse about 14–24 ms after the crossing | `dCaAP.mod` |
+| a full dCaAP adds at most 1 spike | w = 320 pA, set by E0's rule | w = 2.97 nA, Gidon's value at their coupled site | `xor.hoc` |
+| apical input doesn't control bursts | a human layer 2/3 cell has no BAC mechanism, as E0 predicted | bursts are type B's job: Na⁺ channels along the trunk (an active bAP) and a Ca²⁺ zone in the tuft | Bahl et al. 2012 |
+| N1, N4 weak at the soma | 3 compartments of 60 µm per basal branch | type A's basal branches are real paths, 265 and 219 µm, in compartments ≤ 30 µm | ModelDB 254217 |
+
+### Type A: human layer 2/3 (`cells/l23.py`)
+
+**Geometry, by rule, from the reconstruction** (cell 171122005: a 20 µm soma, 9 basal trees, 101 basal and 81 apical
+sections, 66,142 µm² of soma and dendrite):
+- **The modelled paths.** A *main path* starts at a section and, at each branch point, follows the child whose subtree
+  has the most membrane.
+  - **Trunk:** the soma to apic[60](0.99), Gidon's coupled dCaAP site. 220 µm, 6 sections, 6.1 µm thick at the soma
+    and 1.4 µm at the site.
+  - **Two tuft branches:** the main paths of apic[60]'s two child subtrees: 489 and 504 µm long (ending 709 and 724 µm
+    from the soma), mean diameters 1.26 and 1.23 µm.
+  - **Two basal branches:** the main paths of the two largest basal trees: 265 and 219 µm, from 3.1 and 4.2 µm at the
+    soma to 1.5 µm at the tips.
+- **Every other section's membrane** (57,394 µm², 87% of the total) is added, as leak and capacitance, to the modelled
+  compartment nearest the point where it attaches:
+  - 19,615 µm² to the soma (the other 7 basal trees);
+  - 9,484 and 7,178 µm² to the trunk at 83 and 27 µm (the obliques);
+  - the rest spread along the paths.
+
+  Total membrane is conserved.
+- **Compartments:** each section is cut into ceil(L / 30 µm) pieces, as Gidon's model cuts its apical sections at
+  ≤ 30 µm. Each piece's area and axial resistance come from its 3-D points: R = Σ 4·Ra·Δl / (π·d_i·d_(i+1)).
+  - **The count:** 71 dendritic compartments plus the soma.
+  - **Why it's fine enough:** 30 µm is below 0.1 λ at 100 Hz for every diameter in the cell (NEURON's d_lambda rule).
+
+**Passive constants: Gidon's model's** (`biophys.hoc`), replacing E0's typical values:
+
+| parameter | E0 | E0b, type A |
+|---|---|---|
+| Cm | 0.5 µF/cm² | 0.45 µF/cm² |
+| Rm | 20,000 Ω·cm² | 37,000 Ω·cm² |
+| Ra | 150 Ω·cm | 100 Ω·cm |
+| E_L | −70 mV | −74 mV |
+
+**The soma and synapses:** E0's AdEx and E0's AMPA/NMDA contacts, unchanged except E_L. Amendments 3 (refractory hold)
+and 6 (the spike's first step) stay.
+
+**The dCaAP,** at the compartment that holds apic[60](0.99), as in Gidon's code (`dCaAP.mod`, `xor.hoc`):
+- **Onset:** the compartment crosses θ = −36 mV upward, outside a 200 ms refractory period.
+- **The current:** I(t) = w·K·(A(t) − B(t)), where A and B are logistic:
+  - A′ = A(1 − A)/τ_A, from A = 0.001 at the onset;
+  - B′ = B(1 − B)/τ_B, from B = 0.001 at Δ after the onset;
+  - τ_A = 3 ms, τ_B = 0.4 ms, Δ = 21 ms.
+- **w = 2.97 nA:** Gidon's 4 mA/cm² over their site's segment (16.4 µm of apic[60], 1.44 µm thick: 74 µm²).
+- **K:** Gidon's code sets K = exp(−(V⁺ − θ) / (D·(θ − V_rest))), with D = 0.3, V_rest = −75 mV, and V⁺ the voltage at
+  the solver's first step past θ. V⁺ − θ depends on the solver's step, and goes to 0 as the step shrinks.
+  - **Its step-free form:** V⁺ − θ = τ_K·V̇, with V̇ the compartment's dV/dt at the crossing.
+  - **τ_K is fitted:** it is the one value with which current steps of 1.5 and 2 times the threshold current give
+    Gidon's curve exp(−(I − I_th)/(0.3·I_th)), by least squares on ln K. I_th is as in amendment 1: the smallest
+    100 ms step, in 5 pA steps, that takes the compartment to θ, with no dCaAP and spiking off.
+  - **One mechanism for every kind of input:** a slow approach to θ gives K near 1, and a fast one gives a small K.
+    For a single exponential charging curve, V̇ at θ is (I − I_th)/C, which is Gidon's form exactly.
+  - **A bAP** that crosses θ gets K ≈ 0, but still starts the refractory period, as in Gidon's code.
+
+### Type B: layer 5-like (`cells/l5.py`)
+- **Bahl et al. 2012's reduced model 2,** ported as published. The source files (ModelDB 146026) are
+  `reduced_geometry_20com.hoc`, `reduced_model.hoc` and `init_models_with_ca/init_model2.hoc`; model 2 is the one the
+  authors' examples load.
+  - **Geometry:** soma; one basal cylinder (257 µm); apical trunk (500 µm, 5 compartments); tuft (499 µm, 2); axon
+    hillock (5), initial segment (5) and axon (1). 20 compartments, the source's own.
+  - **Its fitted passive values and its mechanisms:**
+    - at the soma: nat, kfast, kslow, nap and km;
+    - along the trunk and tuft: nat (a linear gradient), and kfast and kslow (decaying with distance);
+    - ih;
+    - in the tuft: sca (HVA Ca²⁺), kca and cad.
+
+    All at 37 °C.
+- **Synapses:** E0's contacts, on its compartments.
+- **It is a rat model, not a human one.**
+  - I found no reduced human layer 5 model with BAC firing.
+  - Human layer 5 dendrites are reported to be more isolated (Beaulieu-Laroche et al. 2018).
+
+  Hence "layer 5-like."
+- **Its basal side is one cylinder, 8.7 µm thick,** with no thin-branch subunits, so N1, N4 and N6 don't apply to it.
+
+**E0's cell (v0) is replaced, not kept beside v1.** E0's runs stay reproducible from commit a325c72.
+
+### The simulator (`sim.py`, rebuilt)
+- **Any tree of compartments,** built from a morphology spec.
+- **The step:**
+  - backward Euler for the passive and synaptic parts, as in E0;
+  - channel gates by exponential Euler on the previous step's voltage (NEURON's `cnexp`);
+  - the AdEx soma and the dCaAP as above.
+- **The solve:** Hines elimination for a tree, O(compartments) per step, compiled with numba (a new dependency in
+  venv312). E0's dense solve is O(N³), too slow at 72 compartments.
+
+### Protocols and pass criteria
+E0's protocols and criteria (with amendments 2–5), with the sites restated for the new cells:
+
+| E0's site | type A | type B |
+|---|---|---|
+| b1.d | basal 1's last compartment | — |
+| b1.m | basal 1's compartment 60 µm nearer the soma | — |
+| b2.d | basal 2's last compartment | — |
+| b1's 3 segments (N4) | basal 1's 9 compartments, s ∈ {1, 2, 3} contacts each | — |
+| the zone (N3) | the dCaAP compartment | — |
+| the tuft segments (N2, N5) | the two tuft branches' compartments | the tuft's 2 compartments |
+| the basal segments (N5) | both basal branches' compartments | the basal compartment |
+| the somatic pulse (N2, N6) | the soma | the soma |
+
+**What each type must pass:**
+
+| | N1 | N2 | N3 | N4 | N5 | N6 |
+|---|---|---|---|---|---|---|
+| type A | required | reported | required | required | reported | required |
+| type B | — | required | — | — | required | — |
+
+Type A's N2 and N5 are reported to show what the network's layer 2/3 cells do with apical input. Gidon's cell has no
+burst mechanism.
+
+**Checks on the apparatus** (each must pass, or the verdicts of the type it concerns don't count):
+1. **The solver:** on E0's cell with the dCaAP off, the new solver matches E0's dense solve over E0's N6 protocol:
+   voltages within 10⁻⁶ mV, identical spike times.
+2. **The reduction (type A):** compared against the full reconstruction, run passive with all 183 sections in
+   ≤ 30 µm compartments, the same constants and the same solver. Each of these within 20%:
+   - the soma's input resistance;
+   - the input resistance at the dCaAP site and at basal 1's tip;
+   - the steady-state transfer from the site to the soma;
+   - the bAP's peak at the site, for E0's spike waveform at the soma (+30 mV for 1 ms, then V_r for 2 ms).
+3. **The port (type B):** Bahl's own example 1 (0.4 nA for 500 ms at the soma, `regular_spiking.ses`), against the
+   authors' screenshot:
+   - 9 ± 1 spikes, the first two a doublet;
+   - bAP peaks at apical(0.5) of +25 ± 10 mV;
+   - peaks at tuft(0.5) of −42 ± 8 mV.
+4. **The dCaAP's shape (type A):** K for steps of 1, 1.5 and 2 times I_th within 10% of Gidon's curve. There is one
+   fitted constant for two points, so this checks the form.
+5. **The step size:** dt = 0.025 against 0.05 ms.
+   - Verdicts identical.
+   - Numbers within 5%, except N5's, within 15%. N5 runs 10 s of Poisson input, which drifts with spike timing, as in
+     E0's run 3.
+6. **The compartment size:** type A at ≤ 15 µm, and type B's sections at ≤ 30 µm. Verdicts identical.
+
+**The cost** (reported, not scored): wall-clock time per simulated second, and compartment updates per second, for:
+- one cell of each type;
+- 12 of each type as a batch;
+- a 2 × 3 network of 3 cells of each type.
+
+### Predictions (2026-10-30, before the code)
+
+| | prediction | confidence |
+|---|---|---|
+| check 2 (reduction) | passes for the input resistances and the steady transfer. The bAP at the site may come out lower than in the full cell, since the obliques' membrane sits directly on the trunk | medium |
+| the bAP at the dCaAP site | stays below θ, so no bAP fires a dCaAP | medium |
+| check 4 (dCaAP shape) | passes | medium |
+| A: N1 | uncertain. The tips are thicker than E0's (1.5 µm against 0.8), so they saturate less but need more input to unblock NMDA | low |
+| A: N3 | passes. A threshold-level volley crosses θ slowly (K near 1), and w ≈ 3 nA fires the soma. A + B crosses fast (K small), and its direct EPSP reaches the soma weaker than in E0 through the loaded trunk | medium |
+| A: N4 | passes, with 9 sites instead of 3 | low |
+| A: N6 | passes | medium |
+| A: N2, N5 | no bursts driven by apical input | high |
+| check 3 (port) | passes | medium: a port can carry bugs that no other check catches |
+| B: N2 | passes: the model was fitted to BAC firing | medium–high |
+| B: N5 | uncertain | low |
+| cost | under 1 s per simulated second for one cell; under 3 s for 12 as a batch | medium |
+
+**What the outcomes mean:**
+- **Type A passes N3:** the dCaAP's XOR survives a definition that holds for any input, and the network has a cell
+  that computes it.
+- **Type B passes N2 and N5:** the model has a cell whose burst fraction carries its apical input. That is the signal
+  the burst-dependent rule (DESIGN.md §5) reads, and what E1's calcium rule is checked on.
+- **Type B fails N2:** suspect the port first (check 3), then our synapses on a rat cell.
+- **Check 2 fails:** the lumping rule is revised as an amendment (for example, each lumped subtree as an equivalent
+  cylinder), before any of type A's verdicts are read.
+
+**Not part of E0b:**
+- how the two types are wired into the 2 × 2 and 2 × 3 networks (E2);
+- plasticity (E1);
+- the viz, which is updated after the run.
