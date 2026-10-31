@@ -1,5 +1,6 @@
 """E1: one calcium rule, against slice experiments (LAB.md E1). Run from experiments/:
     ../venv312/Scripts/python.exe -m dsnn.tests.test_e1                  (the run, dt 0.05; writes dsnn/runs/e1_dt0.05.json)
+    ../venv312/Scripts/python.exe -m dsnn.tests.test_e1 --trains         (run 2, amendment 11: the train protocols)
     ../venv312/Scripts/python.exe -m pytest dsnn/tests/test_e1.py -q     (a fast check)
 
 **The order:** the rule-set settings (EPSP sizes, the DC step, L4's current); every protocol simulated and each
@@ -121,6 +122,27 @@ def build(sp, pulse):
     return st, pre, T
 
 
+def per_pairing(spikes, posts):
+    """Spikes from each post pulse's onset to the next pairing's, at most 30 ms (amendment 11)."""
+    out = []
+    for k, t in enumerate(posts):
+        end = min(t + 30.0, posts[k + 1]) if k + 1 < len(posts) else t + 30.0
+        out.append(sum(1 for x in spikes if t <= x < end))
+    return out
+
+
+def train_pulse(job):
+    """Amendment 11: the smallest post pulse (50 pA grid, from the rule-set amplitude to 8000 pA) at which every
+    pairing of the protocol's first burst (5 pairings, from rest, with the pathway) fires."""
+    sp, base = job
+    one = dict(sp, posts=sp["posts"][:5], pre=None)
+    amps = np.arange(base, 8000.0 + 1e-9, 50.0)
+    built = [build(one, a) for a in amps]
+    r = simulate([b[0] for b in built], built[0][2], cell_of(sp["kind"]), dt=DT)
+    ok = [min(per_pairing(r.spikes[b][0], one["posts"])) >= 1 for b in range(len(amps))]
+    return sp["name"], P.first(amps, ok)
+
+
 def run_protocol(job):
     """Simulate one protocol; each pathway's calcium per compartment, for one contact there."""
     sp, pulse = job
@@ -129,7 +151,7 @@ def run_protocol(job):
     comps = sorted({c for _, contacts in sp["paths"] for c, _ in contacts})
     r = simulate([st], T, cell, dt=DT, rec_every=REC, record=[0] + comps, record_ca=True)
     s = r.spikes[0][0]
-    per = [sum(1 for x in s if t <= x < t + 30.0) for t in sp["posts"]]
+    per = per_pairing(s, sp["posts"])
     out = dict(name=sp["name"], spikes=len(s), T=T, h=float(r.t[1] - r.t[0]),
                post_spikes_per_pairing=dict(mean=float(np.mean(per)) if per else None,
                                             min=int(min(per)) if per else None, max=int(max(per)) if per else None),
@@ -257,7 +279,51 @@ def run(workers=7):
     return out
 
 
+TRAINS = ("S1_10", "S1_20", "S1_40", "S1_50", "S2_10", "S2_20", "S3_50", "A2_+10_20", "A2_-10_20")
+
+
+def rerun_trains(workers=7):
+    """Run 2 (amendment 11): the train protocols with a post spike at every pairing; run 1's rule and every other
+    protocol's change as they were."""
+    t0 = time.time()
+    with open(os.path.join(HERE, "runs", "e1_run1_dt0.05.json"), encoding="utf-8") as fh:
+        run1 = json.load(fh)
+    rule = R.Rule(**run1["rule"])
+    cal = e0b_calibration()
+    calA, calB = cal["A"], cal["B"]
+    specs = {sp["name"]: sp for sp in protocols(run1["settings"], calA, calB) if sp["name"] in TRAINS}
+    base = {"A": calA["n2_pulse"], "B": calB["n2_pulse"]}
+    with Pool(workers) as pool:
+        pulses = dict(pool.map(train_pulse, [(sp, base[sp["kind"]]) for sp in specs.values()], chunksize=1))
+        t1 = time.time()
+        sims = pool.map(run_protocol, [(sp, pulses[n]) for n, sp in specs.items()], chunksize=1)
+    res = {r["name"]: r for r in sims}
+    ch = dict(run1["changes"])
+    ch.update(changes(rule, res))
+    out = dict(dt=DT, amendment=11, rule=run1["rule"], train_pulses=pulses,
+               protocols={n: dict(spikes=r["spikes"], post_spikes_per_pairing=r["post_spikes_per_pairing"],
+                                  c_peak={lab: [round(float(np.max(x["c"])), 2) for x in rows]
+                                          for lab, rows in r["paths"].items()},
+                                  above={lab: [dict(d_ms=round(float((x["c"] > rule.th_d).sum()) * r["h"], 1),
+                                                    p_ms=round(float((x["c"] > rule.th_p).sum()) * r["h"], 1))
+                                               for x in rows] for lab, rows in r["paths"].items()})
+                          for n, r in res.items()},
+               changes=ch, verdicts=verdicts(ch), T5=run1["T5"], A3=run1["A3"],
+               seconds=dict(pulses=round(t1 - t0, 1), total=round(time.time() - t0, 1)),
+               simulated_s=round(sum(r["T"] for r in res.values()) / 1000.0, 1))
+    return out
+
+
 def report(o, say=print):
+    if o.get("amendment") == 11:
+        say("E1 run 2 (amendment 11): %s s, %s s simulated" % (o["seconds"], o["simulated_s"]))
+        say("  train pulses: %s" % o["train_pulses"])
+        for n, p in o["protocols"].items():
+            say("    %-12s spikes %4d per pairing %s; c peak %s; above d/p %s; change %s" % (
+                n, p["spikes"], p["post_spikes_per_pairing"], p["c_peak"], p["above"],
+                {k: round(v, 3) for k, v in o["changes"][n].items()}))
+        say("  verdicts: %s" % {k: ("PASS" if v else "FAIL") for k, v in o["verdicts"].items()})
+        return
     say("E1 at dt = %g ms (%s s; %s s simulated)" % (o["dt"], o["seconds"], o["simulated_s"]))
     say("  settings: %s" % o["settings"])
     say("  rule: %s" % {k: round(v, 4) for k, v in o["rule"].items()})
@@ -275,9 +341,10 @@ def report(o, say=print):
 
 
 def main(argv):
-    o = run()
+    o = rerun_trains() if "--trains" in argv else run()
     os.makedirs(os.path.join(HERE, "runs"), exist_ok=True)
-    with open(os.path.join(HERE, "runs", "e1_dt0.05.json"), "w", encoding="utf-8") as fh:
+    name = "e1_run2_dt0.05.json" if "--trains" in argv else "e1_dt0.05.json"
+    with open(os.path.join(HERE, "runs", name), "w", encoding="utf-8") as fh:
         json.dump(o, fh, indent=1, default=float)
     report(o)
 

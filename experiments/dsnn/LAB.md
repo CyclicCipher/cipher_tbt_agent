@@ -1164,3 +1164,63 @@ calcium is read. No protocol and no fit.
    - γ_p/γ_d: 16 log-spaced values over 0.1–100;
    - k_d: 21 log-spaced values over 0.01–100 per s.
 10. **Parallel processes** run the settings and the protocols. The arithmetic is unchanged.
+
+### E1 run 1 (2026-10-30, at commit 75549ad; `runs/e1_run1_dt0.05.json`): the fit stands; the train protocols are void
+
+**The run:** 109 s of wall-clock (settings 42 s, protocols 58 s over 7 processes, fit 10 s); 1856 s simulated.
+
+**The settings:**
+- **Type B:** a small EPSP takes 3 contacts on the basal side, 5 at apical.4 and 7 at tuft(0.5). A large one
+  takes 8 on the basal side.
+- **Type A:** a small EPSP takes 3 contacts at b1.m, and 3 at the zone.
+- **The DC step:** 200 pA.
+- **L4's current:** 150 pA, which alone gives no spike.
+
+**The fit passes:**
+- **The rule:** θ_d = 1.12 µM, θ_p = 27.2 µM, γ_p/γ_d = 39.8, k_d = 0.063/s.
+- **F1, F2, F3:** 1.037, 1.374 and 0.653, against 1.0, 1.36 and 0.645. The squared error over tolerance is 0.17.
+- **θ_d sits at the bottom of its grid,** the smallest fit-set peak divided by 20. Each presynaptic spike keeps c above
+  it for about 230 ms. So depression accrues with presynaptic activity alone, and potentiation needs c above 27 µM.
+- **The rule saturates:** ρ can't exceed γ_p/(γ_p + γ_d) = 0.975, so no change can exceed 1.57.
+
+**The train protocols are void: the post spikes didn't happen.**
+- **The cause:** E0b's rule-set pulse is the smallest that fires one spike from rest. In a train, the
+  after-hyperpolarization leaves later pulses below threshold.
+- **The spikes, against 75 pairings in each:**
+
+  | protocol | spikes | change (void) |
+  |---|---|---|
+  | S1 at 10 Hz | 45 | 1.367 |
+  | S1 at 20 Hz | 45 | 1.524 |
+  | S1 at 40 Hz | 60 | 1.521 |
+  | S1 at 50 Hz | 58 | 1.517 |
+  | S2 at 10 Hz | 15 | 0.724 |
+  | S2 at 20 Hz | 30 | 1.506 |
+  | S3 | 57 | 1.516 |
+  | A2, +10 at 20 Hz | 30 | 1.533 |
+  | A2, −10 at 20 Hz | 30 | 1.526 |
+
+- **What Sjöström did:** evoked a spike at each pairing. So these rows don't test what the slices did.
+- **A second problem:** the count of spikes per pairing (a 30 ms window) double-counted at 40–50 Hz, where pairings
+  are 20–25 ms apart.
+- **What ran as intended:** every 0.1 Hz and 1 Hz protocol (F1–F3, S2 at 0.1 Hz, S4, L1–L4, T5, A2 at 0.1 Hz) had
+  exactly one spike per pairing (three per burst; two in T5 with its tuft input, the doublet). A1 and A3 have no post
+  spikes by design.
+- **Their verdicts are read in run 2,** with the train rows rerun.
+
+### E1 amendment 11 (2026-10-30, after run 1, before run 2)
+
+11. **A post spike at every pairing in trains.**
+    - **The pulse:** in each train protocol (S1 at 10, 20, 40 and 50 Hz; S2 at 10 and 20 Hz; S3; A2 at 20 Hz), the
+      post pulse is the smallest amplitude, on a 50 pA grid from the rule-set amplitude up to 8000 pA, at which every
+      pairing of one burst fires.
+      - "One burst": 5 pairings with the pathway, from rest.
+      - "Fires": at least one spike between the pulse's onset and the next pairing's, at most 30 ms.
+    - **How the search runs:** it reads only spike counts, never plasticity.
+    - **The count window** for spikes per pairing becomes the same everywhere: to the next pairing's onset, at most
+      30 ms.
+    - **Not rerun:** the 0.1 Hz and 1 Hz protocols. Nothing in them changes, since the rule-set pulse already fired
+      exactly once at every pairing.
+    - **The rule:** fitted on F1–F3 in run 1, it is applied unchanged to the rerun protocols.
+    - **Why this isn't tuning to outcomes:** it restores the protocol the experiment ran. The pulse is set by spike
+      counts alone, with the plasticity outcomes unseen by the search.
