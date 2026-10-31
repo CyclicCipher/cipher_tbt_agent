@@ -1547,3 +1547,23 @@ from E_L, as type B's is after 20 s.
    - **The settled rest:** type A with the transplant keeps the zone's channel state ("Q") with its voltages. The
      AdEx soma's adaptation starts at 0, as in E0b.
    - **Step 4's fit** is built only if step 3 fails.
+
+### E0d run 1 (2026-10-30, at commit c04b6ba; `runs/e0d_run1_dt0.05.json`): check P fails on a port bug; nothing else ran
+
+- **What happened:** the port made no events at any step. The compartment sat at −52.6 to −47.7 mV; their troughs
+  are −47 to −38.
+- **The cause:** BK's total conductance was converted from 300 pS/µm² × 31,102 µm² to nS without the factor 10⁻³.
+  So it was 9.33 mS, not the pre-registered 9.33 µS: 1000 times too strong.
+- **As pre-registered,** E0d stopped at check P: nothing went into the cell.
+
+### E0d amendment 4 (after run 1, before run 2)
+
+4. **BK's total is 300 pS/µm² × area × 10⁻³ nS/pS = 9330 nS,** in the port and the transplant, as the
+   pre-registration states and the source computes (`ik = 1e-4·gk·(v − ek)`). I rechecked every other conversion
+   against the source files:
+   - Ca_HVA's total, 155.5 nS;
+   - the shell's 10⁴·i_Ca/(2F·depth), with 1 pA/µm² = 0.1 mA/cm²;
+   - E_Ca by Nernst at 6.3 °C;
+   - BK's +5 mV shift inside its rate procedure only.
+
+   Check P runs again, unchanged otherwise.

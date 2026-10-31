@@ -47,7 +47,7 @@ def port_cell():
     cell = passive(geo, 0.45, 1.0 / 3.5e-5, -86.0, "Gidon Fig. S12")
     cell.rest = {"V": np.array([-86.0])}
     cell.groups = {"soma": [0], "zone": [0]}
-    return replace(cell, cach=ChannelDCaAP(0, g_ca=gca_d * area * 10.0, g_bk=gbk_d * area, area=area, **k))
+    return replace(cell, cach=ChannelDCaAP(0, g_ca=gca_d * area * 10.0, g_bk=gbk_d * area * 1e-3, area=area, **k))
 
 
 def columns(t, v):
@@ -110,7 +110,7 @@ def transplant(**kw):
     for 2 s from E_L. kw: overrides of `ChannelDCaAP`'s constants (step 4)."""
     gca_d, gbk_d, area, k = dch.published()
     base = replace(l23(), dcaap=None)
-    k = dict(k, g_ca=gca_d * area * 10.0, g_bk=gbk_d * area, area=area)
+    k = dict(k, g_ca=gca_d * area * 10.0, g_bk=gbk_d * area * 1e-3, area=area)
     k.update(kw)
     cell = replace(base, cach=ChannelDCaAP(base.site("zone"), **k))
     r = simulate([Stim(spiking=False)], 2000.0, cell, final=True)
