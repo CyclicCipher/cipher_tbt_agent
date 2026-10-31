@@ -116,6 +116,36 @@ def run(workers=7):
     return out
 
 
+def rerun_a23(workers=7):
+    """Run 3 (amendment 6): A2 and A3 with the small-EPSP pathways measured against a no-input run; A1, A4 and the
+    rest of the calibration kept from run 2."""
+    t0 = time.time()
+    with open(os.path.join(HERE, "runs", "e1b_run2.json"), encoding="utf-8") as fh:
+        run2 = json.load(fh)
+    rule = R.Rule(**run2["rule"])
+    cal = run2["calibration"]
+    with Pool(workers) as pool:
+        s = dict(pool.map(settings_A, ["A_b1m_1mV", "A_zone_1mV"]))
+        specs = [sp for sp in protocols_A(s, cal) if sp["name"].startswith(("A2", "A3"))]
+        base = cal["n2_pulse"]
+        trains = [sp for sp in specs if sp["name"].endswith("_20")]
+        pulses = dict(pool.map(E.train_pulse, [(sp, base) for sp in trains], chunksize=1))
+        sims = pool.map(E.run_protocol, [(sp, pulses.get(sp["name"], base)) for sp in specs], chunksize=1)
+    res = {r["name"]: r for r in sims}
+    ch = dict(run2["changes"])
+    for n in list(ch):
+        if n.startswith(("A2", "A3")):
+            del ch[n]
+    ch.update(E.changes(rule, res))
+    prot = {n: p for n, p in run2["protocols"].items() if not n.startswith(("A2", "A3"))}
+    prot.update({n: dict(spikes=r["spikes"], post_spikes_per_pairing=r["post_spikes_per_pairing"],
+                         c_peak={lab: [round(float(np.max(x["c"])), 2) for x in rows] for lab, rows in r["paths"].items()},
+                         v_peak={lab: [round(x["v_peak"], 1) for x in rows] for lab, rows in r["paths"].items()})
+                 for n, r in res.items()})
+    return dict(run2, amendment=6, settings=s, train_pulses=pulses, changes=ch, protocols=prot,
+                seconds=round(time.time() - t0, 1))
+
+
 def report(o, say=print):
     say("E1b (%s s)" % o["seconds"])
     say("  calibration %s; settings %s; train pulses %s" % (o["calibration"], o["settings"], o["train_pulses"]))
@@ -134,8 +164,9 @@ def report(o, say=print):
 
 
 def main(argv):
-    o = run()
-    with open(os.path.join(HERE, "runs", "e1b.json"), "w", encoding="utf-8") as fh:
+    o = rerun_a23() if "--a23" in argv else run()
+    name = "e1b_run3.json" if "--a23" in argv else "e1b.json"
+    with open(os.path.join(HERE, "runs", name), "w", encoding="utf-8") as fh:
         json.dump(o, fh, indent=1, default=float)
     report(o)
 

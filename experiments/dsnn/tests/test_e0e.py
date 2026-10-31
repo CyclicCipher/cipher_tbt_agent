@@ -36,12 +36,13 @@ S9_THEIRS = dict(X=1.7, XY=0.54, XY_distal_inh=1.5, X_proximal_inh=0.25)     # H
 _CELLS = {}
 
 
-def cell(site, w=None):
-    """Type A with its dCaAP at `site`; w (pA) replaces density × segment area when given (amendment 8)."""
-    if (site, w) not in _CELLS:
-        c = l23(site=site)
-        _CELLS[(site, w)] = c.with_dcaap(w=w) if w else c
-    return _CELLS[(site, w)]
+def cell(site, w=None, reduced=False):
+    """Type A with its dCaAP at `site`; w (pA) replaces density × segment area when given (amendment 8); reduced: the
+    reduced cell (E0f)."""
+    if (site, w, reduced) not in _CELLS:
+        c = l23(site=site, reduced=reduced)
+        _CELLS[(site, w, reduced)] = c.with_dcaap(w=w) if w else c
+    return _CELLS[(site, w, reduced)]
 
 
 # ---- check M and check T -------------------------------------------------------------------------------------------
@@ -70,10 +71,10 @@ def first_amplitude(A, nA):
     return float(v[(t >= on) & (t <= on + 40.0)].max() - v[(t >= on - 1.0) & (t < on)].mean())
 
 
-def calibrate_w(site):
+def calibrate_w(site, reduced=False):
     """Amendment 8: the threshold step on their grid, then w by bisection so that the first dCaAP there is TARGET mV
     tall (± 1 mV)."""
-    A = cell(site)
+    A = cell(site, reduced=reduced)
     z = A.site("zone")
     r = simulate([Stim().current(200.0, 1200.0, z, 1000.0 * a) for a in GRID[site]], 1400.0, A, dt=DT)
     th = next((a for b, a in enumerate(GRID[site]) if r.dcaap[b][0]), None)
@@ -92,8 +93,8 @@ def calibrate_w(site):
     return dict(threshold_nA=th, w_pA=w, w_density_pA=A.dcaap.w, amplitude=amp, steps=steps)
 
 
-def check_t(site="uncoupled", w=None):
-    A = cell(site, w)
+def check_t(site="uncoupled", w=None, reduced=False):
+    A = cell(site, w, reduced)
     z = A.site("zone")
     amps = GRID[site]
     r = simulate([Stim().current(200.0, 1200.0, z, 1000.0 * a) for a in amps], 1400.0, A, dt=DT, rec_every=4,
@@ -111,9 +112,10 @@ def check_t(site="uncoupled", w=None):
 
 
 # ---- F3 and S9 -------------------------------------------------------------------------------------------------------
-def placements(site, seed):
-    """Every synapse's compartment for one seed (their point lists, drawn by our generator)."""
-    A = cell(site)
+def placements(site, seed, reduced=False):
+    """Every synapse's compartment for one seed (their point lists, drawn by our generator). The reduced cell draws the
+    same points on the same full tree and maps them to its own compartments (`protocols.comp_at`)."""
+    A = cell(site, reduced=reduced)
     rng = lambda k: np.random.default_rng((seed, k))
     n_path = 25 if site == "uncoupled" else 35
     n_inh = 20 if site == "uncoupled" else 35
@@ -135,9 +137,9 @@ CONDS = dict(uncoupled=dict(X=("bg", "X"), Y=("bg", "Y"), XY=("bg", "X", "Y"), X
 T_RUN = dict(uncoupled=4000.0, coupled=20500.0)
 
 
-def stim(site, seed, groups):
+def stim(site, seed, groups, reduced=False):
     """Each synapse its own Poisson train at 20 Hz from 100 ms; the same train for a synapse in every condition."""
-    pl = placements(site, seed)
+    pl = placements(site, seed, reduced)
     st = Stim(label="+".join(groups))
     for g in groups:
         for i, (c, _, _) in enumerate(pl[g]):
@@ -146,15 +148,16 @@ def stim(site, seed, groups):
 
 
 def run_condition(job):
-    site, seed, cond, w = job
-    A = cell(site, w)
+    site, seed, cond, w = job[:4]
+    reduced = job[4] if len(job) > 4 else False
+    A = cell(site, w, reduced)
     z = A.site("zone")
-    r = simulate([stim(site, seed, CONDS[site][cond])], T_RUN[site], A, dt=DT, rec_every=4, record=[0, z])
+    r = simulate([stim(site, seed, CONDS[site][cond], reduced)], T_RUN[site], A, dt=DT, rec_every=4, record=[0, z])
     ev = dcaap_peaks(r, 0, z, r.dcaap[0][0])
     v = np.asarray(r.v(0, z), float)
     so = np.asarray(r.v(0, 0), float)
     spk = r.spikes[0][0]
-    return dict(site=site, seed=seed, cond=cond, dcaaps=len(ev), large=sum(1 for _, _, p in ev if p > 0.0),
+    return dict(site=site, seed=seed, cond=cond, reduced=reduced, dcaaps=len(ev), large=sum(1 for _, _, p in ev if p > 0.0),
                 K_mean=float(np.mean([k for _, k, _ in ev])) if ev else None,
                 peaks=[round(p, 1) for _, _, p in ev][:40], K=[round(k, 3) for _, k, _ in ev][:40],
                 site_median=float(np.median(v[r.t > 200])), site_p90=float(np.percentile(v[r.t > 200], 90)),

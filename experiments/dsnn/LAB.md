@@ -2105,3 +2105,37 @@ rebuilt type A. Its pulses at 1–5 nA reach −68 to −40 mV; one spike needs 
 5. **The pulse searches run to 20 nA:** `protocols.strengths`' post-pulse grid and amendment 11's train-pulse grid
    (formerly 5 and 8 nA). The rules are otherwise unchanged. Type B's value (1450 pA) lies inside the old range, so
    it doesn't change. Nothing else in E1b changes.
+
+### E1b run 2 (2026-10-30, at commit 5ad17f0; `runs/e1b_run2.json`): A1 and A4 stand; A2 and A3 are void; 660 s
+**The rule-set values:** post pulse 5150 pA; n3_n 22; n6_c 34. The small EPSP came out as **1 contact** at b1.m and at
+the zone.
+
+**That is an apparatus error:**
+- **The rule:** "the soma ≥ 1 mV above rest", with rest taken as the cell's starting voltage.
+- **The cell:** the rebuilt type A starts at their v_init, −75 mV, and drifts to its resting −74 mV (E_L).
+- **So:** the drift alone meets the rule. A2 and A3 used that pathway, so **they are void.**
+- **A1 and A4 don't use the rule,** so they stand.
+
+**A1 passes:** the clustered plateau input potentiates (**1.535**; c peaks at 106 µM, b1.d at −17 mV). The same input
+dispersed depresses (**0.423**).
+
+**A4, the XOR pathway's synapses, 20 s at 20 Hz:**
+
+| condition | X's 25 synapses, mean change by seed | dCaAPs (mean K) | site median |
+|---|---|---|---|
+| X | 1.539, 1.540, 1.554 | 3, 17, 30 (about 0.99) | −53.6, −50.9, −48.4 |
+| X+Y | 1.567, 1.568, 1.568 | 100 each (0.22–0.24) | about −17 |
+| X+Y+inhibition | 1.556, 1.554, 1.564 | 71, 52, 86 (0.76–0.95) | −43.5, −46.9, −35.2 |
+
+- **Every synapse potentiates, to near the rule's ceiling (1.57), in every condition.** X+Y gives the most, as
+  predicted.
+- **So under this rule the dendrite's anti-coincidence isn't a teaching signal.** Sustained 20 Hz NMDA drive saturates
+  the calcium whatever the dCaAP does.
+- Inhibition lowers X's LTP slightly, as predicted, but only by about 0.01.
+
+### E1b amendment 6 (after run 2, before run 3)
+6. **A "small EPSP" is measured against a no-input run** of the same length: the soma's peak with the input minus its
+   peak without. This is `test_e1.epsp_n`.
+   - **Type B:** unchanged, since its rest is settled.
+   - **Run 3 reruns only A2 and A3,** with the corrected pathways and their own train pulses. A1 and A4 are kept from
+     run 2, as is the rest of the calibration (post pulse, n3_n, n6_c).

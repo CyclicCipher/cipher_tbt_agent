@@ -49,12 +49,13 @@ def cell_of(kind):
 
 # ---- the rule-set settings ---------------------------------------------------------------------------------------
 def epsp_n(kind, comp, mV, top=400):
-    """The smallest n (1..top) whose single activation at comp raises the soma by >= mV."""
+    """The smallest n (1..top) whose single activation at comp raises the soma's peak by >= mV over the same run with
+    no input (LAB.md E1b, amendment 6: a cell that starts off its rest drifts)."""
     cell = cell_of(kind)
     ns = np.arange(1, top + 1)
-    r = simulate([Stim().contacts(20.0, comp, int(n)) for n in ns], 150.0, cell, dt=DT)
-    rest = float(cell.rest["V"][0])
-    return P.first(ns, [r.vmax[b][0][0] - rest >= mV for b in range(len(ns))])
+    r = simulate([Stim()] + [Stim().contacts(20.0, comp, int(n)) for n in ns], 150.0, cell, dt=DT)
+    base = float(r.vmax[0][0][0])
+    return P.first(ns, [r.vmax[b + 1][0][0] - base >= mV for b in range(len(ns))])
 
 
 def dc_below(kind):
