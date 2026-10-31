@@ -689,3 +689,306 @@ no rule that sets an input strength.
 
    The tuft's Ca²⁺ spike is a clean local signal of coincidence. The burst code is not.
 4. **One thing works in both E0 and E0b:** an NMDA plateau is a memory of about 100 ms (N6).
+
+## E0c and E1: both of the next steps, then compared (pre-registered 2026-10-30)
+
+**The user's decision (2026-10-30), after E0b:** "Try both options 1 and 2, then compare."
+- **Option 1, E0c:** fix the cells.
+  - Type A: replace the K rule with a channel whose event shrinks on its own for stronger input.
+  - Type B: diagnose N2 with Bahl's own BAC protocol.
+- **Option 2, E1:** the calcium plasticity rule, on the signals E0b found working:
+  - type B's tuft Ca²⁺ spike, which fires only on coincidence;
+  - the NMDA plateau.
+
+  Each synapse reads its own calcium, not the soma's bursts.
+- **The comparison:** E1's type A protocols run on both versions of type A.
+  - Type B is one cell in both options, since E0c only diagnoses it.
+  - The rule that decides is stated before any run (below).
+
+**Sources read for this pre-registration** (PDFs in `research papers/` where open):
+- **Bahl et al. 2012, J Neurosci Methods 210:22, Fig. 8 and §3.4:** the BAC protocol the model was fitted to.
+- **Sjöström, Turrigiano & Nelson 2001, Neuron 32:1149:** STDP in L5→L5 pairs: rate, timing and cooperativity.
+- **Letzkus, Kampa & Stuart 2006, J Neurosci 26:10420:** L2/3→L5 STDP by dendritic location; read through PMC.
+- **Not used:**
+  - Testa-Silva 2010 is human hippocampus, not cortex.
+  - Verhoog 2013 (human neocortex: "reversed" rules, L-type Ca²⁺ channels) wasn't open to me, so its numbers aren't
+    used.
+  - The papers the user sent (Xu 2023, spiral waves; Verzhbinsky 2026, co-ripples) bear on the later brain-medium
+    idea, not on these steps.
+
+### E0c-A: a channel dCaAP for type A
+
+**The question:** does a Ca²⁺ conductance with an inactivation gate, at Gidon's site, reproduce the dCaAP's falling
+amplitude for current steps? If fitted to steps, does it compute XOR for synaptic input (N3), which K never did?
+
+**Why a channel:** K as a rule of the input failed four ways (E0b). A channel reads only its own voltage, so steps,
+synapses and bAPs need no separate definitions.
+
+**The hypothesis:** inactivation (h) that outruns activation (m) at strongly depolarized voltages.
+- A step near threshold lingers near θ. There m builds up while h stays open, so the event regenerates and then ends
+  itself as h closes.
+- A strong step jumps past the inactivation midpoint. There h closes while m is still rising, so the event shrinks.
+- A bAP lasts about 1 ms, too short for m to open, so no bAP fires an event. Gidon's 200 ms refractory rule goes,
+  and so does E0b's K = 0 bAP problem.
+
+**The channel:**
+- **Where:** one compartment, the zone (apic[60](0.99)), as the phenomenological dCaAP was. The phenomenological dCaAP
+  is removed (w = 0).
+- **The current:** I = g·m·h·(V − E_Ca), with E_Ca = 140 mV (Bahl's value).
+- **The gates:**
+  - m′ = (m∞(V) − m)/τ_m, with m∞ = 1/(1 + exp(−(V − V_m)/k_m));
+  - h′ = (h∞(V) − h)/τ_h, with h∞ = 1/(1 + exp((V − V_h)/k_h));
+  - τ_m and τ_h don't depend on voltage;
+  - both advance by exponential Euler on the new voltage, as Bahl's gates do;
+  - both start at their steady state at E_L.
+- **Seven free constants, with their bounds:**
+
+  | constant | bounds |
+  |---|---|
+  | g | 2–200 nS, log |
+  | V_m | −50 to −15 mV |
+  | k_m | 1–10 mV |
+  | τ_m | 0.5–20 ms, log |
+  | V_h | −50 to −5 mV |
+  | k_h | 1–10 mV |
+  | τ_h | 1–60 ms, log |
+
+**The targets** (Gidon et al. 2020, through their own model; E0b's phenomenological dCaAP on this cell is the
+reference for the event's size and width):
+- **The event's amplitude:** a(I) is, for a 100 ms step of I into the zone with spiking off, the largest value over
+  the step of V_zone(with the channel) − V_zone(passive).
+- **The threshold:** I_th is the step, on a 25 pA grid from 100 to 1500 pA, with the largest a. Gidon's amplitude is
+  largest at threshold.
+- **The falling curve:** K(f) = a(f·I_th)/a(I_th) at f = 1.5 and 2 must follow exp(−(f − 1)/0.3): 0.189 and 0.036.
+  This is check 4's curve.
+- **The size and width:**
+  - a(I_th) is compared with a_ref: the phenomenological dCaAP's event at K = 1, at E0b's I_th = 350 pA, on the same
+    cell.
+  - The width is the time with V_with − V_passive ≥ a/2, compared with that event's width.
+- **The threshold's place:** I_th within 20% of 350 pA.
+- **A sharp threshold:** a(0.8·I_th) ≤ 0.2·a(I_th).
+
+**The fit:**
+- **The error:** E = Σ over f of (ln K(f) − ln K_G(f))² + (ln a(I_th)/a_ref)² + (ln width/width_ref)²
+  + (ln I_th/350)², plus 10 if the sharp-threshold condition fails.
+- **The search:**
+  1. 600 random candidates, seed 0, uniform within the bounds (log-uniform where marked), each scored on a 50 pA
+     grid. K is read by linear interpolation on that grid.
+  2. The 10 best are refined by Nelder–Mead (in the log of g, τ_m, τ_h), each for at most 60 evaluations. Each
+     evaluation runs the exact steps 0.8, 1, 1.5 and 2 × I_th, after locating I_th on the 25 pA grid.
+- **The fit passes** (this is check 4 for the channel) if:
+  - K(1.5) and K(2) are each within 10% of 0.189 and 0.036;
+  - a(I_th) and the width are within 20% of the reference;
+  - I_th is within 20% of 350 pA;
+  - the threshold is sharp.
+
+  **If it fails:** type A keeps E0b's phenomenological dCaAP, and E0c-A's held-out tests aren't run.
+
+**Held-out tests** (the fitted channel, every other constant as in E0b; N1–N6 as in E0b):
+- **"Gives an event"** replaces "gives a dCaAP" in E0b's rules: the channel's current peaks at ≥ 50% of its peak in
+  the I_th step.
+- **Required:** N1, N3, N4, N6.
+- **Reported:** N2, N5.
+- **The bAP:** the pulse of N2 alone gives no event (required). E0b's bAP fired a K = 0 event every time.
+
+### E0c-B: type B's N2, diagnosed with Bahl's own protocol
+
+**The question:** is N2's failure the port, our synapses, or N2's criterion?
+- The port: by check 3 it reproduces example 1, but not yet the protocol it was fitted to.
+- Our synapses: tuft contacts against a dendritic current injection.
+- N2's criterion: ≥ 3 spikes. Bahl fitted the model to bursts of 2–4.
+
+**Bahl's protocol and model 2's published numbers** (Fig. 8 legend and §3.4):
+- **The somatic pulse:** 5 ms long, onset at 100 ms. Its threshold for a spike is 0.9 nA.
+- **The dendritic current:** I(t) = I_amp·(1 − e^(−t/2 ms))·e^(−t/8 ms), from 106 ms.
+- **The thresholds:**
+  - I_CA: the dendritic current alone that fires a dendritic Ca²⁺ spike, 3.6 nA;
+  - I_BAC: the dendritic current with the threshold pulse, 1.8 nA;
+  - so the coupling C = (I_CA − I_BAC)/I_CA = 0.5.
+- **What counts as a Ca²⁺ spike** (Bahl's criteria):
+  - the tuft's voltage integral (V − V_rest) over 0–50 ms after the first somatic spike exceeds 500 mV·ms;
+  - over 100–150 ms it stays under 1000 mV·ms;
+  - with the dendritic current alone, the integral over the 10 ms before the first somatic spike also exceeds
+    500 mV·ms (the spike starts in the dendrite).
+- **A BAC response:** a somatic burst of 2–4 spikes.
+
+**The run:**
+- The paper doesn't say where the dendritic current goes. So the protocol runs at each of the 7 apical-tree
+  compartments (apical.0–4, tuft.0–1).
+- **The searches:** the somatic threshold on a 50 pA grid. I_CA and I_BAC on a 100 pA grid up to 8 nA.
+
+**The port passes** if:
+- the somatic threshold for a 5 ms pulse is 0.9 nA ± 10%;
+- and at one or more sites:
+  - I_CA = 3.6 nA ± 20%;
+  - I_BAC = 1.8 nA ± 20%;
+  - C = 0.5 ± 0.1;
+  - at I_BAC, 2–4 somatic spikes.
+
+**The diagnosis, at the best-matching site** (the smallest summed relative error on I_CA, I_BAC, C):
+1. **Current versus synapses:** the BAC protocol with the dendritic current replaced by contacts.
+   - **Placement:** two ways. Contacts at that site, or spread over the tuft as in N2.
+   - **The count:** the smallest even n whose contacts, with the threshold pulse, give the Ca²⁺ spike.
+   - **Reported:** the spikes in each case.
+2. **The window:** N2's Δt grid with Bahl's current (at I_BAC), as against N2's contacts (E0b). Reported.
+3. **The verdict:**
+   - **"the criterion"** if Bahl's own input gives 2–4 spikes but never ≥ 3;
+   - **"the synapses"** if the current gives ≥ 3 spikes and the contacts don't;
+   - **"the port"** if the port fails.
+
+**Not part of E0c-B:** a fix. A fix, if one follows, is its own pre-registration.
+
+### E1: one calcium rule, against slice experiments
+
+**The question:** one plasticity rule, set once, the same at every synapse of both cell types. Does it reproduce what
+synapses in slices do? Does it make the local dendritic events (type B's tuft Ca²⁺ spike, type A's NMDA plateau and
+dCaAP) into teaching signals?
+
+**The rule, fixed before any E1 run:**
+- **A synapse's calcium** c(t), in its spine head, in µM: c′ = −c/τ_Ca + J(t)/(2F·V_sp·(1 + κ)).
+  - **τ_Ca = 20 ms:** Graupner & Brunel 2012's fits.
+  - **V_sp = 0.1 µm³:** a spherical head, so 1.04 µm² of membrane, A_sp.
+  - **κ = 20:** the spine's buffer capacity (Sabatini, Oertner & Svoboda 2002).
+- **The influx, J (pA, inward positive), from two sources:**
+  - **NMDA:** the synapse's own NMDA receptors, J_N = (1/30)·g_N(t)·B(V)·(E_Ca − V), with E_Ca = 140 mV.
+    - The factor 1/30 makes Ca²⁺ 10% of the NMDA current at −70 mV (Schneggenburger et al. 1993; Burnashev et
+      al. 1995).
+    - g_N(t) is one contact's NMDA conductance, from its own presynaptic spikes, with the simulator's kinetics.
+    - B(V) is the simulator's Mg²⁺ block. V is the voltage of the synapse's compartment.
+  - **Voltage-gated:** the compartment's Ca²⁺ current per µm² × A_sp. Spines are taken to carry the shaft's channels.
+    - Type B: Bahl's sca current, in the tuft.
+    - Type A: the dCaAP's current at the zone, the phenomenological one (E0b) or the channel (E0c). Gidon et al.
+      identify the dCaAP as a Ca²⁺ event.
+    - Type A's other dendrites have no voltage-gated Ca²⁺ channels in this model.
+- **The weight** (Graupner & Brunel 2012, without their bistable term and noise):
+  - τ_ρ·ρ′ = γ_p·(1 − ρ)·[c > θ_p] − γ_d·ρ·[c > θ_d], from ρ = 0.5;
+  - the synapse's strength is w ∝ 1 + (b − 1)·ρ, with b = 4;
+  - the reported change is w_after/w_before.
+- **Free constants:** θ_d, θ_p (with θ_p > θ_d), γ_p/γ_d and γ_d/τ_ρ. They are set on the fit set alone (below).
+- **How it's computed:** offline, from the recorded voltage and Ca²⁺ current of the synapse's compartment (recorded
+  every 0.1 ms) and the synapse's presynaptic times.
+  - The weight is held fixed during an induction protocol: slices express the change after induction.
+  - The simulator gains one output for this: each recorded compartment's Ca²⁺ current.
+  - The synapse's own spine voltage isn't modelled. It sees its compartment's voltage.
+
+**What's common to every protocol:**
+- **"A pathway":** n contacts at one compartment, all activated by each presynaptic spike.
+  - **Small EPSP:** n = the smallest count whose single activation raises the soma by ≥ 1 mV. Sjöström's pairs
+    average about 1 mV.
+  - **Large EPSP:** the same rule at ≥ 3 mV. Sjöström's cooperativity: extracellular EPSPs > 2.3 mV.
+- **"A postsynaptic spike":** type B, a 2 ms somatic pulse at E0b's rule-set amplitude (1450 pA, exactly 1 spike).
+  - **A burst:** 3 such pulses at 200 Hz (Letzkus).
+  - **Timing:** taken from the pulse's onset. +10 = pre 10 ms before post.
+- **Sjöström's induction:**
+  - 15 bursts of 5 pairings at frequency f, each burst followed by 1 s at rest. In the slice it was 10 s; nothing in
+    the cell or the rule outlasts 1 s.
+  - 0.1 Hz: 50 pairings, each followed by 1 s at rest.
+- **Letzkus's induction:** 100 pairings at 1 Hz.
+
+**The fit set** (type B, a basal pathway with a small EPSP; Sjöström 2001's 0.1 Hz experiments, which report
+numbers):
+
+| | protocol | target (after/before) |
+|---|---|---|
+| F1 | +10 at 0.1 Hz, at rest | no LTP: 1.0 ± 0.1 (Fig. 1C; Fig. 2C, small EPSPs) |
+| F2 | +10 at 0.1 Hz, depolarized just below threshold | 1.36 ± 0.095 (Fig. 4B) |
+| F3 | −10 at 0.1 Hz, depolarized just below threshold | 0.645 ± 0.065 (Fig. 4B) |
+
+- **"Depolarized just below threshold":** a DC step into the soma during the whole protocol. It is the largest, on a
+  10 pA grid, that gives no spike in 1 s. Sjöström's cells sat at −45.1 ± 1.7 mV.
+- **The search:** a grid over the four constants, keeping the one with the least squared error (each error divided
+  by its tolerance).
+- **The fit passes** if all three land within their tolerances. **If it fails:** E1 stops there; the rule can't
+  hold even the data it was set on.
+
+**The test set, type B** (each a sign or an order; LTP means > 1.1, LTD means < 0.9):
+
+| | protocol | passes if | source |
+|---|---|---|---|
+| S1 | +10 at 10, 20, 40, 50 Hz, basal, small EPSP | all LTP, non-decreasing with frequency | Sjöström Fig. 1D, E |
+| S2 | −10 at 0.1, 10, 20 Hz | all LTD | Sjöström Fig. 1E |
+| S3 | −10 at 50 Hz | LTP | Sjöström Fig. 7: reciprocal pairs at 40–50 Hz potentiated in both directions |
+| S4 | +10 at 0.1 Hz, large EPSP | LTP | Sjöström Fig. 2A, C |
+| L1 | single post spike, +10, proximal and distal pathways | distal LTD, and distal < proximal | Letzkus: −28% overall, more LTD the more distal |
+| L2 | bursts, +10 | proximal LTP, distal LTD | Letzkus: 1.30 and 0.79 |
+| L3 | bursts, −10 | proximal LTD, distal LTP | Letzkus: 0.89 and 1.42 |
+| L4 | single post spike, +10, with a dendritic current suprathreshold for BAC firing | proximal LTP, distal LTD | Letzkus: BAC firing gave LTP proximally and LTD distally |
+
+**Sites and settings for the test set:**
+- **Proximal:** the basal compartment (128 µm).
+- **Distal:** apical.4 (centred 450 µm from soma(0)). Letzkus's dendritic electrode sat at 429 µm.
+- **L4's dendritic current:**
+  - a 100 ms step into apical.4, from 50 ms before the post spike to 50 ms after;
+  - its amplitude is the smallest, on a 50 pA grid, at which step and spike together give ≥ 2 spikes;
+  - the paper's timing isn't stated in what I read, so this placement is my choice, made now.
+
+**Reported, not scored** (no slice target; the numbers that bear on credit assignment):
+- **T5, the tuft's Ca²⁺ spike as a teacher (type B):**
+  - **The setup:** a pathway at tuft(0.5) and one on the basal side, each with a small EPSP, single post spikes at +10,
+    1 Hz, 100 pairings.
+  - **The comparison:** without, and with, N2's tuft input (E0b's n = 34 contacts spread over the tuft) 2 ms after
+    each pulse. That input makes the Ca²⁺ spike and the doublet.
+  - **The number:** the change with the tuft input minus the change without, at each pathway.
+- **Type A (human L2/3)**, for which I have no human slice numbers:
+  - **A1, plateau LTP** (Gambino et al. 2014; Golding, Staff & Spruston 2002), spiking on:
+    - **The input:** N6's conditioning input (n6_c contacts) at 8 Hz for 60 s, as the rhythmic whisker
+      stimulation was.
+    - **Two arms:** clustered (all on b1.d), and dispersed (the same count spread over both basal branches by
+      length).
+    - **Passes if:** clustered gives LTP and dispersed does not (≤ 1.1).
+  - **A2:** Sjöström's +10 and −10 at 0.1 and 20 Hz on a b1.m pathway with a small EPSP. Reported; Verhoog 2013
+    calls the human rules "reversed".
+  - **A3, the dCaAP as a teacher:** a zone pathway with a small EPSP, at 1 Hz × 100. Paired with zone input at N3's
+    n, which gives the event, against n − 4, which doesn't. Report the change at the pathway.
+
+### The comparison (option 1 against option 2)
+- **The runs:**
+  - E1's type B protocols run once; they serve both options.
+  - Type A's (A1–A3) run on E0b's type A (option 2), and on E0c's type A (option 1) if its fit passes.
+- **Compared:**
+  - the verdicts each type A passes: N1–N6, and A1;
+  - the teacher signal, A3's difference;
+  - the cost, s per simulated s;
+  - the work: lines of code added, and compute used.
+- **The rule for E2, decided now:**
+  - Type A uses E0c's channel if its fit passes, it passes N3, and it loses no verdict that E0b's type A passed.
+    Otherwise type A keeps E0b's phenomenological dCaAP, and E2 doesn't count on XOR.
+  - Type B is unchanged unless E0c-B finds a port bug. A fix would be an amendment to E0b's port, and E1's type B
+    protocols would then run again.
+- **Not decided here:** what E2's network is. That's the user's call, after this comparison.
+
+### Predictions (2026-10-30, before the code)
+
+| | prediction | confidence |
+|---|---|---|
+| E0c-A fit | fails on the steepness. The amplitude falls, but not to 0.036 at 2 × I_th | low that it passes (0.35) |
+| E0c-A: no bAP event | passes: 1 ms is too short for m | high |
+| E0c-A: N3 (if the fit passes) | passes. A+B drives the zone higher, so h closes sooner | low (0.35) |
+| E0c-B: the port | passes at a tuft compartment | medium (0.6) |
+| E0c-B: the verdict | "the criterion": the model makes 2–3 spikes with Bahl's own input, never reliably ≥ 3 | medium |
+| E1 fit set | fits | medium–high |
+| S1 | LTP at every frequency; non-decreasing | medium |
+| S2 | passes | medium–high |
+| S3 | fails: the rule gives LTD at −10 at every frequency, unless the 50 Hz train's summed NMDA calcium crosses θ_p | low that it passes |
+| S4 | passes: a larger EPSP unblocks more NMDA | medium |
+| L1 | passes: the bAP shrinks with distance, so distal calcium stays between θ_d and θ_p | medium |
+| L2 | proximal LTP passes; distal LTD fails, since a burst's dendritic depolarization gives LTP at both sites | low |
+| L3 | distal LTP passes; proximal LTD fails | low |
+| L4 | fails at distal: the dendritic current depolarizes the distal synapse most, so LTP | low that it passes |
+| T5 | the tuft pathway goes from LTD (or none) to LTP with the teacher; the basal pathway changes by < 0.05 | medium |
+| A1 | passes | medium–high |
+| the comparison | E2 keeps E0b's type A (the E0c fit fails) | medium |
+
+**Compute:** E0c about 5 minutes, E1 about 4 minutes per version of type A, so about 15 minutes in all. If the plan
+needs more, I stop and ask.
+
+**What each outcome means:**
+- **E0c-A passes N3:** for the first time the network has a cell that computes XOR on synaptic input, from
+  biophysics.
+- **E1 passes S1–S4 and L1:** one local rule reproduces L5's timing and rate data at the dendritic sites where those
+  data were recorded.
+- **T5 flips sign while the basal pathway doesn't move:** the tuft's teacher acts only at the tuft. Credit can't then
+  reach feedforward (basal) synapses through the burst. E2 would then need a pathway for it, such as feedback onto
+  the basal side or the burst, and that is the next design question.
+- **The fit set fails:** a threshold rule on local calcium can't hold even Sjöström's 0.1 Hz data in this cell. The
+  calcium model, or the cell, is then what's wrong.
