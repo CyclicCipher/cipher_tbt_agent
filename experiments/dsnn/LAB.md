@@ -2139,3 +2139,43 @@ dispersed depresses (**0.423**).
    - **Type B:** unchanged, since its rest is settled.
    - **Run 3 reruns only A2 and A3,** with the corrected pathways and their own train pulses. A1 and A4 are kept from
      run 2, as is the rest of the calibration (post pulse, n3_n, n6_c).
+
+### E1b run 3 (2026-10-30; `runs/e1b_run3.json`): A2 and A3 with amendment 6's pathways; 699 s
+**The small EPSPs:** **6 contacts** at b1.m and **12** at the zone. The train pulses stay 5150 pA.
+
+**A2, STDP at a human basal synapse (b1.m), reported:**
+
+| | 0.1 Hz | 20 Hz |
+|---|---|---|
+| +10 (pre before post) | 0.827 | **1.366** |
+| −10 (post before pre) | 0.833 | **0.845** |
+
+- **The pattern at 20 Hz is Sjöström's:** LTP for pre → post, LTD for post → pre. Type B failed exactly this (E1's S2:
+  LTP at −10, 10–20 Hz), because its 70 ms NMDA tail bridged pairings.
+- **With Gidon's NMDA (35 ms)** the bridge is gone. That confirms E1's diagnosis and points at type B's synapse
+  kinetics.
+- **At 0.1 Hz both timings depress,** where Sjöström saw no change at +10. The rule's θ_d sits at the bottom of its
+  grid (E1).
+
+**A3 is uninformative.**
+- **What it was meant to compare:** the zone pathway (12 contacts) with the zone driven by n3_n = 22 contacts, against
+  n3_n − 4 = 18.
+- **What happened:** the pathway sits on the same compartment, so pathway plus drive is 30 or 34 contacts. Both exceed
+  n3_n, so **both conditions made dCaAPs** (zone peaks −0.8 and −0.9 mV), and both potentiate (1.536 and 1.532).
+- **The design flaw:** E1's A3 design assumed the pathway was much smaller than the gap of 4 contacts. On this cell
+  it isn't.
+
+**E1b's compute was about 26 minutes** (run 1 about 3, run 2 11, run 3 12), over the ~10-minute budget, and not asked
+for.
+- **Most of it:** the train-pulse search, which simulated every amplitude from 5.15 to 20 nA in one batch although the
+  first worked.
+- **The fix:** it now searches 10 amplitudes at a time and stops at the first block that holds one. The answer is the
+  same.
+
+**What E1b established:**
+1. **Plateau-gated LTP in the human cell survives the rebuild** (A1: clustered 1.535, dispersed 0.423).
+2. **With Gidon's NMDA kinetics, the calcium rule gives Sjöström's 20 Hz timing rule** at human basal synapses (A2).
+   Type B's failure (S2) came from its synapses' 70 ms NMDA decay.
+3. **The dendrite's XOR is no teaching signal for this rule** (A4). Under Gidon's 20 Hz drive every pathway synapse
+   saturates at LTP, whatever the dCaAP does: X 1.54, X+Y 1.57, X+Y+inhibition 1.56. A rule that read the dCaAP's
+   size, rather than total calcium, would be needed for that. That is not designed yet.

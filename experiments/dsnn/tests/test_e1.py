@@ -139,15 +139,20 @@ def per_pairing(spikes, posts):
 
 
 def train_pulse(job):
-    """Amendment 11: the smallest post pulse (50 pA grid, from the rule-set amplitude to 8000 pA) at which every
-    pairing of the protocol's first burst (5 pairings, from rest, with the pathway) fires."""
+    """Amendment 11: the smallest post pulse (50 pA grid, from the rule-set amplitude to 20 nA) at which every pairing
+    of the protocol's first burst (5 pairings, from rest, with the pathway) fires. The grid is searched 10 amplitudes
+    at a time, stopping at the first block that holds one (the same answer, far less work)."""
     sp, base = job
     one = dict(sp, posts=sp["posts"][:5], pre=None)
     amps = np.arange(base, 20000.0 + 1e-9, 50.0)                 # to 20 nA (LAB.md E1b, amendment 5)
-    built = [build(one, a) for a in amps]
-    r = simulate([b[0] for b in built], built[0][2], cell_of(sp["kind"]), dt=DT)
-    ok = [min(per_pairing(r.spikes[b][0], one["posts"])) >= 1 for b in range(len(amps))]
-    return sp["name"], P.first(amps, ok)
+    for i in range(0, len(amps), 10):
+        block = amps[i:i + 10]
+        built = [build(one, a) for a in block]
+        r = simulate([b[0] for b in built], built[0][2], cell_of(sp["kind"]), dt=DT)
+        ok = [min(per_pairing(r.spikes[b][0], one["posts"])) >= 1 for b in range(len(block))]
+        if any(ok):
+            return sp["name"], P.first(block, ok)
+    return sp["name"], float("nan")
 
 
 def run_protocol(job):
