@@ -1567,3 +1567,56 @@ from E_L, as type B's is after 20 s.
    - BK's +5 mV shift inside its rate procedure only.
 
    Check P runs again, unchanged otherwise.
+
+### E0d run 2 (2026-10-30, at commit 45bd705; `runs/e0d_run2_dt0.05.json`): check P passes; step 3 fails D1 and N3; 80 s
+
+**Check P passes,** and closely. Their figure against the port at dt 0.0025:
+
+| step | event times (port) | heights after the first (port / figure medians) | trough (port / figure) |
+|---|---|---|---|
+| 0.425 nA | 607, 859, 1198 ms, the figure's exactly | 45.9 / 46.5 mV | −46.2 / −44.1 |
+| 0.450 | 566, 721, 880, 1043, 1210, 1377 | 33.4 / 32.6 | −45.8 / −44.0 |
+| 0.475 | 684 … 1430 (7) | 18.4 / 18.0 | −44.5 / −43.1 |
+| 0.500 | 668 … 1413 (10) | 8.7 / 8.4 | −42.2 / −40.5 |
+| 0.375, 0.4 | none | — | −51.5, −48.9 |
+
+- **At 0.55 nA and above:** one small event at the onset.
+- **Halving the step to 0.00125 ms:** the same events, with heights within 0.1 mV.
+- **So the port is Gidon's Fig. S12 model.** My numpy port in E0b's reading, which found a first event that grows
+  with input, agrees with it on that point.
+
+**Step 3, their model at type A's zone:**
+- **Rest:** −74.0 mV at the zone and the soma, so the channels are closed at rest.
+- **D1 fails:**
+
+  | | I_th (240 pA) | 1.107 × | 1.214 × | 1.321 × | 1.429 × |
+  |---|---|---|---|---|---|
+  | first event (mV) | 100.7 | 108.6 | 112.3 | 116.4 | 122.5 |
+  | normalized | 1 | **1.078** | **1.115** | **1.156** | **1.217** |
+  | recorded, our cell | 1 | 0.874 | 0.824 | 0.652 | 0.515 |
+
+  - **The first event:** 3.0–3.4 ms wide, against 4.3 recorded. It comes earlier with more current: 141 ms into the
+    step at I_th, 33 ms at 1.43 ×.
+  - **The repeated events do shrink:** at 1.107 ×, 66 → 61 mV over 5 events; at 1.214 ×, 43 → 37. Above that the
+    zone stops after one event.
+  - Its Ca²⁺ current peaks at 9.1 nA at I_th.
+- **The bAP passes:** its Ca²⁺ peak is 0.001 of i_ref.
+- **N3 fails** (n = 24): A, B and A+B each make the zone event (1.12 of i_ref), and the soma fires in none of them. The
+  3 ms event, 220 µm out, doesn't reach the soma's threshold.
+- **The others:** N1 fails (1.44; another branch up to 1.28), N4 fails, N6 passes, as in E0b. N2 and N5 are
+  reported; neither shows bursts.
+- **So step 3 fails D1 and N3, and step 4 runs.**
+
+### E0d amendment 5 (after run 2, before step 4)
+
+5. **What ran before step 4:**
+   - Step 4's measure, as a smoke test, on two candidates. Their published constants reproduce step 3's first event
+     exactly (I_th 240, 100.7 mV, 3.0 ms, the same curve), so the 300 ms steps find the same event as the 1 s steps.
+     The middle of the bounds gives E = 51.9.
+   - About 2.3 s per candidate.
+   - No fit ran.
+
+   **The implementation:**
+   - the candidate's constants replace the transplant's;
+   - its rest is settled for 2 s;
+   - stage 1 runs in 30 chunks of 20 over 7 processes, and stage 2's refinements one per process.

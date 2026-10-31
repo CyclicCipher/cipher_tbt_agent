@@ -105,14 +105,19 @@ def score_p(rows):
 
 
 # ---- step 2: their model at type A's zone --------------------------------------------------------------------------
-def transplant(**kw):
-    """Type A with their channels at the zone (totals as in their compartment; the pool over their area), settled
-    for 2 s from E_L. kw: overrides of `ChannelDCaAP`'s constants (step 4)."""
+def transplant_base(**kw):
+    """Type A with their channels at the zone (totals as in their compartment; the pool over their area), not yet
+    settled. kw: overrides of `ChannelDCaAP`'s constants (step 4)."""
     gca_d, gbk_d, area, k = dch.published()
     base = replace(l23(), dcaap=None)
     k = dict(k, g_ca=gca_d * area * 10.0, g_bk=gbk_d * area * 1e-3, area=area)
     k.update(kw)
-    cell = replace(base, cach=ChannelDCaAP(base.site("zone"), **k))
+    return replace(base, cach=ChannelDCaAP(base.site("zone"), **k))
+
+
+def transplant(**kw):
+    """`transplant_base`, settled for 2 s from E_L (its rest state)."""
+    cell = transplant_base(**kw)
     r = simulate([Stim(spiking=False)], 2000.0, cell, final=True)
     return replace(cell, rest={"V": r.final[0][0]["V"], "Q": r.final[0][0]["Q"]})
 
@@ -246,7 +251,38 @@ def report(o, say=print):
             say("  %s" % s["note"])
 
 
+def step4(dt=0.05):
+    """Step 4: the fit; then D1 on 1 s steps at the fitted constants; if it passes, step 3's tests, held out."""
+    from dsnn import dcaap_fit as Fit
+    t0 = time.time()
+    f = Fit.fit(dt)
+    best = f["best"]
+    kw = dict(zip(Fit.NAMES, best["x"]))
+    out = dict(best=best, top=f["top"], stage2=f["stage2"], seconds_fit=round(time.time() - t0, 1))
+    out["tests"] = step3(transplant(**kw), dt)
+    out["passed_D1"] = out["tests"]["D1"].get("passed", False)
+    out["seconds"] = round(time.time() - t0, 1)
+    return out, f["stage1"]
+
+
+def report4(o, say=print):
+    b = o["best"]
+    say("E0d step 4 (fit %s s, total %s s)" % (o["seconds_fit"], o["seconds"]))
+    say("  best E %.3f: I_th %s, amp %s, width %s, norm %s" % (b["E"], b.get("I_th"), b.get("amp"), b.get("width"),
+                                                              b.get("norm")))
+    say("  constants %s" % {k: round(v, 4) for k, v in zip(("g_ca", "g_bk", "ma", "mb", "ha", "hb", "mtf", "htf",
+                                                              "zhalf", "taur"), b["x"])})
+    say("  stage 2 E: %s" % sorted(round(r["E"], 2) for r in o["stage2"]))
+    report(dict(seconds=o["seconds"], P={}, P_checks={}, P_passed=True, step3=o["tests"]), say)
+
+
 def main(argv):
+    if "--fit" in argv:
+        o, stage1 = step4()
+        with open(os.path.join(HERE, "runs", "e0d_step4_dt0.05.json"), "w", encoding="utf-8") as fh:
+            json.dump(dict(o, stage1=stage1), fh, indent=1, default=float)
+        report4(o)
+        return
     t0 = time.time()
     o = dict(P={})
     for dt in (0.0025, 0.00125):
