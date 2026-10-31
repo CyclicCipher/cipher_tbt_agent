@@ -1124,5 +1124,6 @@ needs more, I stop and ask.
 2. **Type B's tuft is a coincidence detector, and the doublet is the port's real output for Bahl's own BAC
    protocol.** It isn't an artifact of our synapses. But the port's tuft is 2–3.6 times more excitable than Bahl's
    published thresholds, for reasons the paper can't settle.
-3. **Option 1's cost:** 338 s of compute over the two runs (the fit 251 s), and about 330 lines of code
-   (`dcaap_fit.py`, `tests/test_e0c.py`, the channel in `sim.py` and `cell.py`).
+3. **Option 1's cost:** 338 s of compute over the two runs (the fit 251 s), and about 590 lines of code: `dcaap_fit.py` 201,
+   `tests/test_e0c.py` 286, and about 100 in `sim.py`, `cell.py` and `protocols.py`. Of those 100, the Ca²⁺-current
+   output is shared with E1.
