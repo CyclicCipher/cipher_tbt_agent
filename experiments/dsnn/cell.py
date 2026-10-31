@@ -1,49 +1,26 @@
-"""The reduced human layer 2/3 pyramidal neuron, v0 (LAB.md E0): its compartments, constants and mechanisms.
+"""What a cell IS (LAB.md E0b): a tree of compartments, its passive constants, and its mechanisms.
 
-One concept: what the cell IS. Stepping it through time is `sim.py`'s job.
+One concept: the cell. Building a particular cell type is `cells/`; stepping cells through time is `sim.py`.
 
-**Units:** mV, ms, pF, nS, pA (so pA / pF = mV / ms, and nS · mV = pA).
+**Units:** mV, ms, pF, nS, pA (pA / pF = mV / ms, and nS · mV = pA); lengths in µm.
+
+**A cell has:**
+- compartments 0..N-1, 0 the soma, each with its parent (-1 for the soma), axial conductance to the parent, membrane
+  area, capacitance, leak and leak reversal;
+- named groups of compartments (e.g. "basal1", "tuft"), the sites the protocols use;
+- synapses (the same AMPA + NMDA contact everywhere);
+- one way to spike: an AdEx soma (`adex`), or Hodgkin–Huxley channels (`hh`, `channels.py`);
+- optionally a dCaAP (`dcaap`).
 """
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, replace
 import math
 
 import numpy as np
 
-# (name, parent, length in um, diameter in um, kind). The soma is lumped (its area is a parameter).
-MORPHOLOGY = (
-    ("soma", None, None, None, "soma"),
-    ("b1.p", "soma", 60.0, 1.0, "branch"),
-    ("b1.m", "b1.p", 60.0, 0.9, "branch"),
-    ("b1.d", "b1.m", 60.0, 0.8, "branch"),
-    ("b2.p", "soma", 60.0, 1.0, "branch"),
-    ("b2.m", "b2.p", 60.0, 0.9, "branch"),
-    ("b2.d", "b2.m", 60.0, 0.8, "branch"),
-    ("trunk", "soma", 150.0, 2.5, "trunk"),
-    ("zone", "trunk", 100.0, 2.0, "zone"),
-    ("t1.p", "zone", 60.0, 0.9, "branch"),
-    ("t1.m", "t1.p", 60.0, 0.8, "branch"),
-    ("t1.d", "t1.m", 60.0, 0.7, "branch"),
-    ("t2.p", "zone", 60.0, 0.9, "branch"),
-    ("t2.m", "t2.p", 60.0, 0.8, "branch"),
-    ("t2.d", "t2.m", 60.0, 0.7, "branch"),
-)
-NAMES = tuple(m[0] for m in MORPHOLOGY)
-INDEX = {n: i for i, n in enumerate(NAMES)}
-SOMA, ZONE = INDEX["soma"], INDEX["zone"]
-BASAL = tuple(INDEX[n] for n in NAMES if n.startswith("b"))
-TUFT = tuple(INDEX[n] for n in NAMES if n.startswith("t") and n != "trunk")
-
 
 @dataclass(frozen=True)
-class Params:
-    """Every number of the cell. Defaults are LAB.md E0's; `dca_w` is set by its rule (`protocols.calibrate`)."""
-    # passive (Cm: human L2/3, Eyal et al. 2016; the rest typical cortical values)
-    Cm: float = 0.5            # uF/cm^2
-    Rm: float = 20000.0        # Ohm cm^2
-    Ra: float = 150.0          # Ohm cm
-    EL: float = -70.0          # mV
-    soma_area: float = 25000.0  # um^2: the soma plus the dendrites not modelled
-    # synapses, per contact (conductances: human L2/3, Eyal et al. 2018)
+class Synapses:
+    """One contact = one AMPA + one NMDA conductance (Eyal et al. 2018's human L2/3 values; LAB.md E0)."""
     g_ampa: float = 0.88       # nS
     ampa_rise: float = 0.3     # ms
     ampa_decay: float = 1.8
@@ -52,77 +29,109 @@ class Params:
     nmda_decay: float = 70.0
     mg: float = 1.0            # mM (Jahr & Stevens 1990)
     mg_gamma: float = 0.062    # 1/mV
-    # the soma: AdEx (Brette & Gerstner 2005), "adapting" (Naud et al. 2008)
+
+    def norms(self):
+        """Each conductance's peak per contact (nS), for a difference of two exponentials."""
+        return self.g_ampa * _peak_norm(self.ampa_rise, self.ampa_decay), self.g_nmda * _peak_norm(self.nmda_rise,
+                                                                                                   self.nmda_decay)
+
+
+@dataclass(frozen=True)
+class AdEx:
+    """The AdEx soma (Brette & Gerstner 2005), "adapting" (Naud et al. 2008), with E0's spike waveform and refractory
+    hold (amendments 3 and 6)."""
     VT: float = -50.0
     DT: float = 2.0
     a: float = 2.0             # nS
     tau_w: float = 300.0       # ms
     b: float = 60.0            # pA
     Vr: float = -58.0
-    V_detect: float = 0.0      # a spike is a crossing of this
-    V_spike: float = 30.0      # the soma is held here for t_spike: the spike's waveform, and so the bAP
+    V_detect: float = 0.0
+    V_spike: float = 30.0
     t_spike: float = 1.0
-    t_ref: float = 2.0         # ms held at Vr after the spike's hold (amendment 3)
-    # the dCaAP (Gidon et al. 2020's model, as in Hashemi et al. 2025)
-    dca_theta: float = -36.0
-    dca_tauA: float = 3.0
-    dca_tauB: float = 0.4
-    dca_delta: float = 21.0
-    dca_ref: float = 200.0
-    dca_tauK: float = 0.3
-    dca_w: float = 0.0         # pA; 0 = not yet set by its rule
-    dca_Ith: float = 0.0       # pA: the zone's threshold current for a long step (amendment 1), set by its rule
+    t_ref: float = 2.0
 
-    def with_(self, **kw):
-        return replace(self, **{k: float(v) for k, v in kw.items()})
 
-    @staticmethod
-    def names():
-        return [f.name for f in fields(Params)]
+@dataclass(frozen=True)
+class DCaAP:
+    """Gidon et al. 2020's dCaAP (`dCaAP.mod`, `xor.hoc`), with K in its step-free form (LAB.md E0b)."""
+    zone: int                  # the compartment
+    w: float = 2970.0          # pA
+    tauK: float = 0.0          # ms; fitted by `protocols.fit_tauK`
+    theta: float = -36.0
+    D: float = 0.3
+    V_rest: float = -75.0
+    tauA: float = 3.0
+    tauB: float = 0.4
+    delta: float = 21.0
+    ref: float = 200.0
+
+
+@dataclass
+class Cell:
+    name: str
+    names: list
+    parent: np.ndarray
+    gax: np.ndarray            # nS, to the parent (0 for the soma)
+    area: np.ndarray           # µm²
+    C: np.ndarray              # pF
+    gL: np.ndarray             # nS
+    EL: np.ndarray             # mV
+    dist: np.ndarray           # µm from the soma, path distance to the centre
+    length: np.ndarray         # µm, each compartment's own length (0 for the soma); contacts are spread by length
+    groups: dict = field(default_factory=dict)
+    syn: Synapses = Synapses()
+    adex: AdEx = None
+    dcaap: DCaAP = None
+    hh: object = None          # channels.HH
+    rest: dict = None          # the initial state: {"V": (N,), and for hh cells the gates}
+
+    @property
+    def N(self):
+        return len(self.names)
+
+    def index(self, name):
+        return self.names.index(name)
+
+    def site(self, name):
+        """A named site's one compartment (a group of one, e.g. "zone", "b1.d")."""
+        (c,) = self.groups[name]
+        return c
+
+    def with_dcaap(self, **kw):
+        return replace(self, dcaap=replace(self.dcaap, **kw))
+
+    def passive_matrix(self):
+        """The conductance matrix of the passive cell (nS): leak on the diagonal, axial coupling off it."""
+        G = np.diag(self.gL.astype(float))
+        for i in range(1, self.N):
+            p, g = self.parent[i], self.gax[i]
+            G[i, i] += g
+            G[p, p] += g
+            G[i, p] -= g
+            G[p, i] -= g
+        return G
+
+    def impedance(self):
+        """Steady-state transfer resistances (MΩ): Z[i, j] = V_i / I_j."""
+        return 1000.0 * np.linalg.inv(self.passive_matrix())
+
+    def input_resistance(self, i=0):
+        return float(self.impedance()[i, i])
+
+
+def passive(geo, Cm, Rm, EL, name, Cm_of=None, Rm_of=None):
+    """Arrays from a geometry: C = Cm·area, gL = area / Rm, gax = 1 / R. Cm_of / Rm_of: per-compartment overrides."""
+    area = np.asarray(geo.area, float)
+    cm = np.array([Cm_of(i) if Cm_of else Cm for i in range(len(area))])
+    rm = np.array([Rm_of(i) if Rm_of else Rm for i in range(len(area))])
+    gax = np.where(np.asarray(geo.R) > 0, 1000.0 / np.where(np.asarray(geo.R) > 0, geo.R, 1.0), 0.0)
+    return Cell(name=name, names=list(geo.names), parent=np.asarray(geo.parent, int), gax=gax, area=area,
+                C=cm * area * 1e-2, gL=area * 10.0 / rm, EL=np.full(len(area), float(EL)), dist=np.asarray(geo.dist),
+                length=np.asarray(geo.length, float))
 
 
 def _peak_norm(rise, decay):
     """The factor that makes exp(-t/decay) - exp(-t/rise) peak at 1."""
     tp = rise * decay / (decay - rise) * math.log(decay / rise)
     return 1.0 / (math.exp(-tp / decay) - math.exp(-tp / rise))
-
-
-class Cell:
-    """The cell's electrical structure, built from Params: per compartment C and g_L, the coupling, the step matrix."""
-
-    def __init__(self, p: Params):
-        self.p = p
-        n = len(MORPHOLOGY)
-        self.N = n
-        area = np.zeros(n)
-        R = np.zeros(n)                    # each compartment's axial resistance (MOhm); 0 for the lumped soma
-        for i, (name, parent, L, d, kind) in enumerate(MORPHOLOGY):
-            if kind == "soma":
-                area[i] = p.soma_area
-            else:
-                area[i] = math.pi * d * L
-                R[i] = 4.0 * p.Ra * L * 0.01 / (math.pi * d * d)
-        self.area = area
-        self.C = p.Cm * area * 1e-2                   # pF
-        self.gL = area * 10.0 / p.Rm                  # nS
-        self.parent = np.array([-1 if m[1] is None else INDEX[m[1]] for m in MORPHOLOGY])
-        self.G = np.zeros((n, n))                     # coupling conductances (nS), symmetric
-        for i in range(n):
-            j = self.parent[i]
-            if j >= 0:
-                g = 1000.0 / (R[i] / 2 + R[j] / 2)
-                self.G[i, j] = self.G[j, i] = g
-        self.ampa_norm = p.g_ampa * _peak_norm(p.ampa_rise, p.ampa_decay)
-        self.nmda_norm = p.g_nmda * _peak_norm(p.nmda_rise, p.nmda_decay)
-
-    def step_matrix(self, dt):
-        """M0 for backward Euler: (C/dt + g_L + sum of couplings) on the diagonal, minus the couplings off it."""
-        M = -self.G.copy()
-        M[np.diag_indices(self.N)] = self.C / dt + self.gL + self.G.sum(1)
-        return M
-
-    def input_resistance(self):
-        """The soma's input resistance (MOhm), from the passive structure."""
-        M = -self.G.copy()
-        M[np.diag_indices(self.N)] = self.gL + self.G.sum(1)
-        return 1000.0 * np.linalg.inv(M)[SOMA, SOMA]

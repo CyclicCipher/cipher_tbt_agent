@@ -1,35 +1,54 @@
-"""Stepping cells through time (LAB.md E0, "Numerics"): one simulator for every experiment and for the viz.
+"""Stepping cells through time (LAB.md E0b, "The simulator"): one simulator for every experiment and for the viz.
 
-**What runs:** a batch of runs (`Stim`s), each a copy of a `Wiring` of cells, all with one `Params`.
+**What runs:** a batch of runs (`Stim`s), each a copy of a `Wiring` of cells. Every compartment of every cell of
+every run is one node of a forest (each cell a tree, its soma the root), stepped together by one compiled loop.
 
-**The step:**
-- **Backward Euler** for the leak, the coupling and the synaptic conductances (stable for thin branches).
-- **From the previous step:** the NMDA Mg2+ block, the AdEx exponential, the adaptation and the dCaAP current.
-- **A spike:** the soma crosses V_detect. It is then held at V_spike for t_spike (its waveform, which is the bAP
-  through the coupling), then at Vr for t_ref (refractory; LAB.md E0, amendment 3).
-- **A dCaAP:** the zone crosses dca_theta upward outside its refractory period. Its strength
-  K = exp(-(I_in - I_th) / (tauK I_th)), capped at 1. I_in is the injected and synaptic current into the zone and the
-  tuft at the crossing (amendment 2); I_th is the zone's threshold current for a long step (amendment 1).
+**The step** (dt, from t to t + dt):
+1. **Inputs** for this step: synaptic contacts (each opens one AMPA + one NMDA conductance), current steps, voltage
+   clamps of the soma, and contacts delivered by the wiring after its delays.
+2. **Backward Euler** for the leak, the coupling and every conductance (synaptic and channel), each conductance taken
+   at the start of the step (NEURON's linearization). From the start of the step: the NMDA Mg²⁺ block, the AdEx
+   exponential and adaptation, the dCaAP current, the channel gates.
+3. **The solve:** Hines elimination (children into parents, then back out), O(compartments). A held soma (a spike's
+   hold, or a clamp) is set, not solved.
+4. **Spikes:**
+   - an AdEx soma crosses V_detect: it is held at V_spike for t_spike (the spike's waveform, and so the bAP), then at
+     Vr for t_ref (LAB.md E0, amendment 3). The crossing step is solved again with the soma held, so the dendrites
+     never see the upstroke's overshoot (amendment 6).
+   - a Hodgkin–Huxley soma crosses 0 mV upward.
+5. **The dCaAP** (Gidon et al. 2020's `dCaAP.mod`, level-triggered): the zone is above θ outside the refractory
+   period. K = exp(−(level + τ_K·V̇)/(D·(θ − V_rest))), capped at 1, with level = how far above θ the zone already
+   was at the start of the step (0 for a crossing) and V̇ its dV/dt over the step (LAB.md E0b). Its current from the
+   next step: w·K·(A − B), A and B logistic from 0.001, B from Δ after the onset.
+6. **Gates** advance by exponential Euler at the new voltage (`channels.advance`); synapses decay.
+
+**"Spiking off"** (as with TTX): an AdEx soma loses its exponential and its spikes; a Hodgkin–Huxley cell loses its
+Na⁺ conductances.
 """
 from dataclasses import dataclass, field
 import math
+import time
 
 import numpy as np
+from numba import njit
 
-from .cell import Cell, Params, SOMA, TUFT, ZONE
+from . import channels as ch
+from .channels import P_ECA, P_EHD, P_EK, P_ENA
 
 DT = 0.05            # ms
 REC_EVERY = 10       # record every 0.5 ms
+NA, NI = 21, 4       # per-cell parameters: floats, ints (see `_cell_arrays`)
 
 
 @dataclass
 class Stim:
-    """One run's interventions. Times in ms; `neuron` indexes the wiring's cells."""
+    """One run's interventions. Times in ms; `neuron` indexes the wiring's cells; `comp` is a compartment index."""
     label: str = ""
-    spiking: bool = True                                # False: the soma's spike mechanism off (as with TTX)
+    spiking: bool = True                                # False: the spike mechanism off (as with TTX)
     syn: list = field(default_factory=list)            # (t, neuron, comp, contacts)
     steps: list = field(default_factory=list)          # (t0, t1, neuron, comp, pA)
     poisson: list = field(default_factory=list)        # (t0, t1, neuron, comp, contacts, rate_hz, seed)
+    clamps: list = field(default_factory=list)         # (t0, t1, neuron, mV): the soma held at mV
 
     def contacts(self, t, comp, n, neuron=0):
         if n:
@@ -43,7 +62,11 @@ class Stim:
 
     def train(self, t0, t1, comp, contacts, rate, seed, neuron=0):
         if contacts and rate:
-            self.poisson.append((float(t0), float(t1), int(neuron), int(comp), int(contacts), float(rate), seed))
+            self.poisson.append((float(t0), float(t1), int(neuron), int(comp), float(contacts), float(rate), seed))
+        return self
+
+    def clamp(self, t0, t1, mV, neuron=0):
+        self.clamps.append((float(t0), float(t1), int(neuron), float(mV)))
         return self
 
 
@@ -57,172 +80,328 @@ class Wiring:
 @dataclass
 class Result:
     t: np.ndarray            # recorded times (ms)
-    V: np.ndarray            # (runs, cells, compartments, times), float32
-    spikes: list             # [run][cell] -> list of spike times
-    dcaap: list              # [run][cell] -> list of (onset time, K)
-    syn: list                # [run] -> list of (t, cell, comp, contacts): every activation delivered
+    V: list                  # [run][cell] -> (recorded compartments, times), float32 by default
+    rec: list                # [cell] -> the compartments recorded
+    vmax: list               # [run][cell] -> (N,): each compartment's peak over the run
+    spikes: list             # [run][cell] -> spike times
+    dcaap: list              # [run][cell] -> [(onset time, K, V̇ in mV/ms, level in mV)]
+    syn: list                # [run] -> [(t, cell, comp, contacts)]: every activation (with keep_syn)
+    final: list              # [run][cell] -> {"V", "X"} (with final=True)
     seconds: float           # wall-clock
     steps: int
 
+    def v(self, b, comp, cell=0):
+        return self.V[b][cell][list(self.rec[cell]).index(comp)]
 
-def simulate(stims, T, p: Params, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY, keep_syn=False):
-    import time
+
+def simulate(stims, T, cells, wiring: Wiring = None, dt=DT, rec_every=REC_EVERY, record=None, keep_syn=False,
+             final=False, rec_dtype=np.float32):
+    """cells: one Cell for every neuron of the wiring, or a list (one per neuron). record: compartments to record,
+    for every cell (None: the soma; "all": every one)."""
     t_start = time.perf_counter()
     wiring = wiring or Wiring()
-    cell = Cell(p)
-    nn, N, B = wiring.n, cell.N, len(stims)
+    nn, B = wiring.n, len(stims)
+    kinds = list(cells) if isinstance(cells, (list, tuple)) else [cells] * nn
+    assert len(kinds) == nn and len({c.syn for c in kinds}) == 1, "one synapse type for every cell"
     S = B * nn
     K = int(round(T / dt))
-    sid = lambda b, nrn: b * nn + nrn
+    insts = [kinds[s % nn] for s in range(S)]
+    off = np.concatenate([[0], np.cumsum([c.N for c in insts])]).astype(np.int64)
+    M = int(off[-1])
+    sid = lambda b, j: b * nn + j
 
-    # ---- the drive, built CHUNK steps at a time (bounded memory): contacts activated and current injected ----
-    CHUNK = 1000
+    # ---- the forest ----
+    par = np.concatenate([np.where(c.parent >= 0, c.parent + off[s], -1) for s, c in enumerate(insts)]).astype(np.int64)
+    gax = np.concatenate([c.gax for c in insts]).astype(float)
+    C = np.concatenate([c.C for c in insts]).astype(float)
+    gL = np.concatenate([c.gL for c in insts]).astype(float)
+    EL = np.concatenate([c.EL for c in insts]).astype(float)
+    V = np.concatenate([c.rest["V"] for c in insts]).astype(float)
+    hh = np.zeros(M, np.int8)
+    G = np.zeros((8, M))
+    vsh2 = np.zeros(M)
+    gcad = np.zeros(M)
+    X = np.zeros((13, M))
+    P = ch.HH(dens={}, vshift2_nat=None).params()
+    for s, c in enumerate(insts):
+        if c.hh is not None:
+            a, z = off[s], off[s + 1]
+            hh[a:z] = np.any([c.hh.dens[n] > 0 for n in ch.NAMES], axis=0)
+            G[:, a:z] = c.hh.gmax(c.area)
+            vsh2[a:z] = c.hh.vshift2_nat
+            gcad[a:z] = c.hh.dens["sca"] * c.hh.tadj(23)
+            X[:, a:z] = c.rest["X"]
+            P = c.hh.params()
+    ccell = np.repeat(np.arange(S), [c.N for c in insts]).astype(np.int64)
+    fa, ia = _cell_arrays(insts, off, [stims[s // nn].spiking for s in range(S)])
+
+    # ---- inputs, as sorted event lists ----
     syn_log = [[] for _ in range(B)]
-    events = {}                                   # step -> [(system, comp, contacts)]
-    currents = []                                 # (k0, k1, system, comp, pA)
-    trains = []                                   # (k0, k1, system, comp, contacts x rate per step, rng, run, cell)
+    ev, cur, cl = [], [], []
     for b, st in enumerate(stims):
-        for t, nrn, c, n in st.syn:
+        for t, j, c, n in st.syn:
             k = int(round(t / dt))
             if 0 <= k < K:
-                events.setdefault(k, []).append((sid(b, nrn), c, n))
+                ev.append((k, off[sid(b, j)] + c, n))
                 if keep_syn:
-                    syn_log[b].append((t, nrn, c, n))
-        for t0, t1, nrn, c, amp in st.steps:
-            currents.append((int(round(t0 / dt)), int(round(t1 / dt)), sid(b, nrn), c, amp))
-        for t0, t1, nrn, c, n, rate, seed in st.poisson:
-            trains.append((int(round(t0 / dt)), int(round(t1 / dt)), sid(b, nrn), c, n * rate * dt / 1000.0,
-                           np.random.default_rng(seed), b, nrn))
-    spiking = np.repeat(np.array([st.spiking for st in stims]), nn)
-    edges = [(s, d, c, n, int(round(dl / dt))) for s, d, c, n, dl in wiring.edges]
-    out_edges = [[e for e in edges if e[0] == i] for i in range(nn)]
-    ring = np.zeros((max([e[4] for e in edges], default=0) + 1, S, N))   # contacts delivered by the wiring
-    inc = np.zeros((CHUNK, S, N))
-    inj = np.zeros((CHUNK, S, N))
+                    syn_log[b].append((t, j, c, n))
+        for t0, t1, j, c, amp in st.steps:
+            k0, k1 = max(0, int(round(t0 / dt))), int(round(t1 / dt))
+            if k0 < min(k1, K):
+                cur.append((k0, off[sid(b, j)] + c, amp))
+                cur.append((k1, off[sid(b, j)] + c, -amp))
+        for t0, t1, j, c, n, rate, seed in st.poisson:
+            rng = np.random.default_rng(seed)
+            times = np.sort(rng.uniform(t0, t1, rng.poisson(n * rate * (t1 - t0) / 1000.0)))
+            for t in times:
+                k = int(t / dt)
+                if k < K:
+                    ev.append((k, off[sid(b, j)] + c, 1.0))
+                    if keep_syn:
+                        syn_log[b].append((k * dt, j, c, 1.0))
+        for t0, t1, j, v in st.clamps:
+            cl.append((max(0, int(round(t0 / dt))), sid(b, j), v))
+            cl.append((int(round(t1 / dt)), sid(b, j), np.nan))
+    ev.sort(key=lambda e: e[0])
+    cur.sort(key=lambda e: e[0])
+    cl.sort(key=lambda e: e[0])
+    arr = lambda L, i, dtype: np.array([e[i] for e in L], dtype) if L else np.zeros(0, dtype)
 
-    def build(k0):
-        """The drive for steps k0 .. k0 + CHUNK."""
-        inc[:] = 0.0
-        inj[:] = 0.0
-        k1 = k0 + CHUNK
-        for k in range(k0, min(k1, K)):
-            for s, c, n in events.get(k, ()):
-                inc[k - k0, s, c] += n
-        for a, z, s, c, amp in currents:
-            lo, hi = max(a, k0), min(z, k1)
-            if lo < hi:
-                inj[lo - k0:hi - k0, s, c] += amp
-        for a, z, s, c, lam, rng, b, nrn in trains:
-            lo, hi = max(a, k0), min(z, k1, K)
-            if lo < hi:
-                counts = rng.poisson(lam, hi - lo)
-                inc[lo - k0:hi - k0, s, c] += counts
-                if keep_syn:
-                    for j in np.flatnonzero(counts):
-                        syn_log[b].append(((lo + j) * dt, nrn, c, float(counts[j])))
+    # ---- the wiring: edges by source cell (CSR), delays in steps ----
+    out = [[] for _ in range(S)]
+    for src, dst, c, n, dl in wiring.edges:
+        for b in range(B):
+            out[sid(b, src)].append((off[sid(b, dst)] + c, n, max(1, int(round(dl / dt)))))
+    e_ptr = np.concatenate([[0], np.cumsum([len(o) for o in out])]).astype(np.int64)
+    flat = [e for o in out for e in o]
+    e_dst, e_n, e_d = arr(flat, 0, np.int64), arr(flat, 1, float), arr(flat, 2, np.int64)
+    D = int(e_d.max()) + 1 if len(e_d) else 1
 
-    # ---- constants ----
-    M0 = cell.step_matrix(dt)
-    Cdt = cell.C / dt
-    rest = cell.gL * p.EL
-    dAd, dAr = math.exp(-dt / p.ampa_decay), math.exp(-dt / p.ampa_rise)
-    dNd, dNr = math.exp(-dt / p.nmda_decay), math.exp(-dt / p.nmda_rise)
-    ii = np.arange(N)
-    gL0 = cell.gL[SOMA]
-    APICAL = [ZONE] + list(TUFT)
-    if p.dca_w > 0 and p.dca_Ith <= 0:
-        raise ValueError("the dCaAP needs dca_Ith (its rule: protocols.zone_rheobase)")
-
-    # ---- state ----
-    V = np.full((S, N), p.EL)
-    aA = np.zeros((S, N)); bA = np.zeros((S, N)); aN = np.zeros((S, N)); bN = np.zeros((S, N))
-    w = np.zeros(S)
-    clamp = np.zeros(S)                       # ms of spike hold left
-    d_on = np.full(S, -1.0)                   # ms since the dCaAP's onset; -1 when none
-    d_K = np.zeros(S)
-    d_ref = np.zeros(S)
+    # ---- recording ----
+    rec_local = [list(range(c.N)) if record == "all" else list(record or [0]) for c in kinds]
+    rec_c = np.array([off[sid(b, j)] + i for b in range(B) for j in range(nn) for i in rec_local[j]], np.int64)
     R = K // rec_every
-    rec = np.zeros((S, N, R), np.float32)
-    spikes = [[] for _ in range(S)]
-    dca = [[] for _ in range(S)]
-    A = np.empty((S, N, N))
-    sig = lambda x: 1.0 / (1.0 + np.exp(-np.clip(x, -60, 60)))
+    rec = np.zeros((R, len(rec_c)), rec_dtype)
+    vmax = V.copy()
+    cap_s = int(S * (T / 2.0 + 2) + 16)
+    cap_d = int(S * (T / max(1.0, min((c.dcaap.ref for c in kinds if c.dcaap), default=200.0)) + 2) + 16)
+    spk_t, spk_s = np.zeros(cap_s), np.zeros(cap_s, np.int64)
+    dca = np.zeros((cap_d, 5))
+    cap_l = 4 * cap_s * max(1, max((len(o) for o in out), default=0)) if keep_syn else 0
+    dlog = np.zeros((cap_l, 3))
+    syn0 = kinds[0].syn
+    na, nm = syn0.norms()
+    counts = _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccell, fa, ia,
+                  arr(ev, 0, np.int64), arr(ev, 1, np.int64), arr(ev, 2, float),
+                  arr(cur, 0, np.int64), arr(cur, 1, np.int64), arr(cur, 2, float),
+                  arr(cl, 0, np.int64), arr(cl, 1, np.int64), arr(cl, 2, float),
+                  e_ptr, e_dst, e_n, e_d, D,
+                  na, nm, math.exp(-dt / syn0.ampa_decay), math.exp(-dt / syn0.ampa_rise),
+                  math.exp(-dt / syn0.nmda_decay), math.exp(-dt / syn0.nmda_rise), syn0.mg / 3.57, syn0.mg_gamma,
+                  rec_c, rec, vmax, spk_t, spk_s, dca, dlog)
+    n_spk, n_dca, n_log = counts
+    if n_spk > cap_s or n_dca > cap_d or n_log > cap_l:
+        raise RuntimeError("an output buffer overflowed")
 
+    # ---- results ----
+    spikes = [[[] for _ in range(nn)] for _ in range(B)]
+    for t, s in zip(spk_t[:n_spk], spk_s[:n_spk]):
+        spikes[s // nn][s % nn].append(float(t))
+    dcaap = [[[] for _ in range(nn)] for _ in range(B)]
+    for t, s, Kv, vd, lv in dca[:n_dca]:
+        dcaap[int(s) // nn][int(s) % nn].append((float(t), float(Kv), float(vd), float(lv)))
+    for k, c, n in dlog[:n_log]:
+        s = int(np.searchsorted(off, int(c), side="right") - 1)
+        syn_log[s // nn].append((k * dt, s % nn, int(c) - int(off[s]), float(n)))
+    Vr, i = [[None] * nn for _ in range(B)], 0
+    for b in range(B):
+        for j in range(nn):
+            Vr[b][j] = rec[:, i:i + len(rec_local[j])].T
+            i += len(rec_local[j])
+    vm = [[vmax[off[sid(b, j)]:off[sid(b, j) + 1]] for j in range(nn)] for b in range(B)]
+    fin = [[{"V": V[off[sid(b, j)]:off[sid(b, j) + 1]].copy(), "X": X[:, off[sid(b, j)]:off[sid(b, j) + 1]].copy()}
+            for j in range(nn)] for b in range(B)] if final else None
+    t_rec = (np.arange(R) * rec_every + rec_every - 1) * dt
+    return Result(t_rec, Vr, rec_local, vm, spikes, dcaap, syn_log, fin, time.perf_counter() - t_start, K)
+
+
+# per-cell parameter columns
+(F_VT, F_DT, F_A, F_TAUW, F_B, F_VR, F_VDET, F_VSPK, F_TSPK, F_TREF, F_EL,
+ F_W, F_TAUK, F_TH, F_D, F_VREST, F_TAUA, F_TAUB, F_DELTA, F_REF, F_HHDET) = range(NA)
+I_ROOT, I_END, I_KIND, I_ZONE = range(NI)
+KIND_PASSIVE, KIND_ADEX, KIND_HH = 0, 1, 2
+
+
+def _cell_arrays(insts, off, spiking):
+    fa = np.zeros((len(insts), NA))
+    ia = np.full((len(insts), NI), -1, np.int64)
+    for s, c in enumerate(insts):
+        ia[s, I_ROOT], ia[s, I_END] = off[s], off[s + 1]
+        ia[s, I_KIND] = KIND_ADEX if c.adex else (KIND_HH if c.hh is not None else KIND_PASSIVE)
+        if c.adex:
+            a = c.adex
+            fa[s, :F_EL + 1] = (a.VT, a.DT, a.a, a.tau_w, a.b, a.Vr, a.V_detect, a.V_spike, a.t_spike, a.t_ref,
+                                c.EL[0])
+        if c.dcaap is not None and c.dcaap.w > 0:
+            d = c.dcaap
+            ia[s, I_ZONE] = off[s] + d.zone
+            fa[s, F_W:F_REF + 1] = (d.w, d.tauK, d.theta, d.D, d.V_rest, d.tauA, d.tauB, d.delta, d.ref)
+        fa[s, F_HHDET] = 0.0
+    # spiking: the AdEx exponential and spikes, or the HH Na+ conductances; kept in the kind column's sign
+    for s, on in enumerate(spiking):
+        if not on:
+            ia[s, I_KIND] = -ia[s, I_KIND] - 1          # -1 passive, -2 AdEx off, -3 HH off
+    return fa, ia
+
+
+@njit(cache=True)
+def _run(K, dt, rec_every, par, gax, C, gL, EL, V, hh, G, vsh2, gcad, X, P, ccell, fa, ia,
+         ev_k, ev_c, ev_n, cur_k, cur_c, cur_a, cl_k, cl_s, cl_v, e_ptr, e_dst, e_n, e_d, D,
+         na, nm, dAd, dAr, dNd, dNr, mg357, gam, rec_c, rec, vmax, spk_t, spk_s, dca, dlog):
+    M, S = V.shape[0], fa.shape[0]
+    aA, bA, aN, bN = np.zeros(M), np.zeros(M), np.zeros(M), np.zeros(M)
+    inj, d, r, Vn = np.zeros(M), np.zeros(M), np.zeros(M), np.zeros(M)
+    ring = np.zeros((D, M))
+    w, hold, ext = np.zeros(S), np.zeros(S), np.full(S, np.nan)
+    don, dK, dref = np.full(S, -1.0), np.zeros(S), np.zeros(S)
+    ie = ic = il = 0
+    n_spk = n_dca = n_log = 0
+    has_ring = e_dst.shape[0] > 0
+    ena, ek, eca, ehd = P[P_ENA], P[P_EK], P[P_ECA], P[P_EHD]
     for k in range(K):
         t = k * dt
-        if k % CHUNK == 0:
-            build(k)
-        slot = k % len(ring)
-        x = inc[k % CHUNK] + ring[slot]
-        ring[slot] = 0.0
-        if x.any():
-            aA += x * cell.ampa_norm; bA += x * cell.ampa_norm
-            aN += x * cell.nmda_norm; bN += x * cell.nmda_norm
-        gs = (aA - bA) + (aN - bN) / (1.0 + p.mg / 3.57 * np.exp(-p.mg_gamma * V))   # E_syn = 0
-        rhs = Cdt * V + rest + inj[k % CHUNK]
-        # the soma: AdEx's exponential and adaptation, where spiking is on
-        expo = gL0 * p.DT * np.exp(np.minimum((V[:, SOMA] - p.VT) / p.DT, 20.0))
-        rhs[:, SOMA] += np.where(spiking, expo - w, 0.0)
-        # the dCaAP's current
-        on = d_on >= 0
-        if on.any():
-            I_d = p.dca_w * d_K * (sig(d_on / p.dca_tauA) - sig((d_on - p.dca_delta) / p.dca_tauB))
-            rhs[:, ZONE] += np.where(on, I_d, 0.0)
-        A[:] = M0
-        A[:, ii, ii] += gs
-        held = clamp > 0                          # the spike's hold at V_spike, then the refractory hold at Vr
-        if held.any():
-            A[held, SOMA, :] = 0.0
-            A[held, SOMA, SOMA] = 1.0
-            rhs[held, SOMA] = np.where(clamp[held] > p.t_ref + 1e-9, p.V_spike, p.Vr)
-        Vn = np.linalg.solve(A, rhs[..., None])[..., 0]
-
-        # spikes: count down the hold, detect new crossings
-        if held.any():
-            clamp[held] -= dt
-        new = spiking & ~held & (Vn[:, SOMA] >= p.V_detect)
-        if new.any():
-            # The spike starts on this step. Solve again with the soma held at V_spike: the exponential term, taken from
-            # the previous step, overshoots to hundreds of mV in one step, and through the coupling the dendrites
-            # would see that overshoot instead of the spike's waveform (LAB.md E0, amendment 6).
-            A2, r2 = A[new].copy(), rhs[new].copy()
-            A2[:, SOMA, :] = 0.0
-            A2[:, SOMA, SOMA] = 1.0
-            r2[:, SOMA] = p.V_spike
-            Vn[new] = np.linalg.solve(A2, r2[..., None])[..., 0]
-            for s in np.flatnonzero(new):
-                spikes[s].append(t)
-                b, src = divmod(s, nn)
-                for _, dst, c, n, dl in out_edges[src]:
-                    if k + dl < K:
-                        ring[(k + dl) % len(ring), sid(b, dst), c] += n
-                        if keep_syn:
-                            syn_log[b].append(((k + dl) * dt, dst, c, n))
-            clamp[new] = p.t_spike + p.t_ref
-            w[new] += p.b
-            Vn[new, SOMA] = p.V_spike
-        w += np.where(spiking, dt / p.tau_w * (p.a * (V[:, SOMA] - p.EL) - w), 0.0)
-
-        # the dCaAP: onset, its strength K, its time course
-        if p.dca_w > 0:
-            cross = (V[:, ZONE] < p.dca_theta) & (Vn[:, ZONE] >= p.dca_theta) & (d_ref <= 0)
-            if cross.any():                       # the input: injected and synaptic current into the zone and tuft
-                I_in = (inj[k % CHUNK][:, APICAL] - gs[:, APICAL] * Vn[:, APICAL]).sum(1)
-                Kv = np.minimum(1.0, np.exp(-np.maximum(0.0, I_in - p.dca_Ith) / (p.dca_tauK * p.dca_Ith)))
-                for s in np.flatnonzero(cross):
-                    dca[s].append((t, float(Kv[s])))
-                d_on[cross] = 0.0
-                d_K[cross] = Kv[cross]
-                d_ref[cross] = p.dca_ref
-            d_on = np.where(d_on >= 0, d_on + dt, d_on)
-            d_on[d_on > p.dca_delta + 10 * p.dca_tauB] = -1.0
-            d_ref -= dt
-
-        aA *= dAd; bA *= dAr; aN *= dNd; bN *= dNr
-        V = Vn
-        if k % rec_every == rec_every - 1:
-            rec[:, :, k // rec_every] = V
-    t_rec = (np.arange(R) * rec_every + rec_every - 1) * dt
-    reshape = lambda L: [[L[sid(b, i)] for i in range(nn)] for b in range(B)]
-    return Result(t_rec, rec.reshape(B, nn, N, R), reshape(spikes), reshape(dca), syn_log,
-                  time.perf_counter() - t_start, K)
+        # 1. inputs
+        while ic < cur_k.shape[0] and cur_k[ic] == k:
+            inj[cur_c[ic]] += cur_a[ic]
+            ic += 1
+        while ie < ev_k.shape[0] and ev_k[ie] == k:
+            c, n = ev_c[ie], ev_n[ie]
+            aA[c] += n * na
+            bA[c] += n * na
+            aN[c] += n * nm
+            bN[c] += n * nm
+            ie += 1
+        if has_ring:
+            slot = k % D
+            for c in range(M):
+                n = ring[slot, c]
+                if n != 0.0:
+                    aA[c] += n * na
+                    bA[c] += n * na
+                    aN[c] += n * nm
+                    bN[c] += n * nm
+                    ring[slot, c] = 0.0
+        while il < cl_k.shape[0] and cl_k[il] == k:
+            ext[cl_s[il]] = cl_v[il]
+            il += 1
+        # 2. the matrix: diagonal d, right-hand side r; the off-diagonal is -gax
+        for i in range(M):
+            v = V[i]
+            g = (aA[i] - bA[i]) + (aN[i] - bN[i]) / (1.0 + mg357 * math.exp(-gam * v))       # E_syn = 0
+            d[i] = C[i] / dt + gL[i] + g
+            r[i] = C[i] / dt * v + gL[i] * EL[i] + inj[i]
+            if hh[i]:
+                gna, gk, gh, gca = ch.conductances(X, i, G, 1.0 if ia[ccell[i], I_KIND] >= 0 else 0.0)
+                d[i] += gna + gk + gh + gca
+                r[i] += gna * ena + gk * ek + gh * ehd + gca * eca
+        for i in range(M):
+            p = par[i]
+            if p >= 0:
+                d[i] += gax[i]
+                d[p] += gax[i]
+        for s in range(S):
+            rt = ia[s, I_ROOT]
+            if ia[s, I_KIND] == KIND_ADEX:
+                r[rt] += gL[rt] * fa[s, F_DT] * math.exp(min((V[rt] - fa[s, F_VT]) / fa[s, F_DT], 20.0)) - w[s]
+            z = ia[s, I_ZONE]
+            if z >= 0 and don[s] >= 0.0:
+                A = 1.0 / (1.0 + 999.0 * math.exp(-don[s] / fa[s, F_TAUA]))
+                Bv = 0.0
+                if don[s] >= fa[s, F_DELTA]:
+                    Bv = 1.0 / (1.0 + 999.0 * math.exp(-(don[s] - fa[s, F_DELTA]) / fa[s, F_TAUB]))
+                r[z] += fa[s, F_W] * dK[s] * (A - Bv)
+        # 3. Hines: eliminate children into parents, then solve outward
+        for i in range(M - 1, -1, -1):
+            p = par[i]
+            if p >= 0:
+                f = gax[i] / d[i]
+                d[p] -= f * gax[i]
+                r[p] += f * r[i]
+        for s in range(S):
+            rt = ia[s, I_ROOT]
+            kind = ia[s, I_KIND]
+            if (kind == KIND_ADEX or kind == -KIND_ADEX - 1) and hold[s] > 0.0:
+                Vn[rt] = fa[s, F_VSPK] if hold[s] > fa[s, F_TREF] + 1e-9 else fa[s, F_VR]
+            elif ext[s] == ext[s]:
+                Vn[rt] = ext[s]
+            else:
+                Vn[rt] = r[rt] / d[rt]
+        for i in range(M):
+            p = par[i]
+            if p >= 0:
+                Vn[i] = (r[i] + gax[i] * Vn[p]) / d[i]
+        # 4. spikes
+        for s in range(S):
+            rt, kind = ia[s, I_ROOT], ia[s, I_KIND]
+            new = False
+            if kind == KIND_ADEX or kind == -KIND_ADEX - 1:
+                held = hold[s] > 0.0
+                if held:
+                    hold[s] -= dt
+                if kind == KIND_ADEX and not held and Vn[rt] >= fa[s, F_VDET]:
+                    new = True
+                    Vn[rt] = fa[s, F_VSPK]                    # solve the step again with the soma held (amendment 6)
+                    for i in range(rt + 1, ia[s, I_END]):
+                        Vn[i] = (r[i] + gax[i] * Vn[par[i]]) / d[i]
+                    hold[s] = fa[s, F_TSPK] + fa[s, F_TREF]
+                    w[s] += fa[s, F_B]
+                if kind == KIND_ADEX:
+                    w[s] += dt / fa[s, F_TAUW] * (fa[s, F_A] * (V[rt] - fa[s, F_EL]) - w[s])
+            elif kind == KIND_HH:
+                new = V[rt] < fa[s, F_HHDET] and Vn[rt] >= fa[s, F_HHDET]
+            if new:
+                if n_spk < spk_t.shape[0]:
+                    spk_t[n_spk] = t
+                    spk_s[n_spk] = s
+                n_spk += 1
+                for e in range(e_ptr[s], e_ptr[s + 1]):
+                    if k + e_d[e] < K:
+                        ring[(k + e_d[e]) % D, e_dst[e]] += e_n[e]
+                        if n_log < dlog.shape[0]:
+                            dlog[n_log, 0], dlog[n_log, 1], dlog[n_log, 2] = k + e_d[e], e_dst[e], e_n[e]
+                        n_log += 1
+        # 5. the dCaAP
+        for s in range(S):
+            z = ia[s, I_ZONE]
+            if z < 0:
+                continue
+            if don[s] >= 0.0:
+                don[s] += dt
+                if don[s] > 100.0:
+                    don[s] = -1.0
+            dref[s] -= dt
+            th = fa[s, F_TH]
+            if dref[s] <= 1e-9 and Vn[z] > th:
+                level = max(0.0, V[z] - th)
+                vdot = max(0.0, (Vn[z] - V[z]) / dt)
+                Kv = min(1.0, math.exp(-(level + fa[s, F_TAUK] * vdot) / (fa[s, F_D] * (th - fa[s, F_VREST]))))
+                don[s], dK[s], dref[s] = 0.0, Kv, fa[s, F_REF]
+                if n_dca < dca.shape[0]:
+                    dca[n_dca, 0], dca[n_dca, 1], dca[n_dca, 2], dca[n_dca, 3], dca[n_dca, 4] = t, s, Kv, vdot, level
+                n_dca += 1
+        # 6. gates, synapses, the new state
+        for i in range(M):
+            if hh[i]:
+                ch.advance(X, i, Vn[i], dt, vsh2[i], gcad[i], P)
+            aA[i] *= dAd
+            bA[i] *= dAr
+            aN[i] *= dNd
+            bN[i] *= dNr
+            V[i] = Vn[i]
+            if Vn[i] > vmax[i]:
+                vmax[i] = Vn[i]
+        if k % rec_every == rec_every - 1 and k // rec_every < rec.shape[0]:
+            row = k // rec_every
+            for j in range(rec_c.shape[0]):
+                rec[row, j] = V[rec_c[j]]
+    return n_spk, n_dca, n_log

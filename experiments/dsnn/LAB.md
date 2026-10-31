@@ -516,3 +516,79 @@ burst mechanism.
 - how the two types are wired into the 2 × 2 and 2 × 3 networks (E2);
 - plasticity (E1);
 - the viz, which is updated after the run.
+
+### Amendments (2026-10-30, during the build, before the run)
+
+**What ran before these were written:** while building, I ran checks 1–3 and nothing else. No protocol of N1–N6, and
+no rule that sets an input strength.
+- **Check 3's protocol** (Bahl's example 1, at dt 0.05 and 0.025 ms): 9 spikes, the first two 5.0 ms apart. The bAP
+  peaks at +26.4 mV at apical(0.5), and tuft(0.5) peaks at −35.7 mV. Nothing was changed after it.
+- **Check 1:** first with a guessed pulse that gave no spikes. Then with E0's values, below.
+- **Check 2:** failed with the pre-registered lumping, which led to amendment 2.
+
+1. **The dCaAP's onset is level-triggered,** as in Gidon's `dCaAP.mod`, not a crossing.
+   - **Onset:** the zone is above θ at the end of a step, outside the 200 ms refractory period.
+   - **K = exp(−(level + τ_K·V̇)/(D·(θ − V_rest))),** capped at 1:
+     - level: how far above θ the zone already was at the step's start (0 for a crossing);
+     - V̇: the zone's dV/dt over the step.
+   - **This matters when** the refractory period ends with the zone above θ. Gidon's code then fires with
+     K = exp(−(v − θ)/…), and so does this.
+   - **The current, as in the source:** w·K·(A − B) goes negative once B overtakes A, about 22 to 40 ms after onset.
+     That is a hyperpolarizing tail.
+2. **The lumping rule is revised (check 2 failed),** as the pre-registration says to do.
+   - **The first result, with each unmodelled section's membrane lumped into the compartment nearest its
+     attachment** (reduced / full):
+
+     | soma R_in | R_in at the site | R_in at basal 1's tip | transfer, site → soma | bAP at the site |
+     |---|---|---|---|---|
+     | 0.969 | 0.977 | 0.991 | 0.958 | **0.70** (23.7 against 33.8 mV) |
+
+     As predicted, the lumped membrane sits directly on the trunk as capacitance. That overloads fast signals while
+     keeping the steady ones.
+   - **The new rule: Rall's equivalent cylinder,** chosen on that principle before its result was seen, and kept
+     whatever check 2 gave.
+     - **What it replaces:** each of the 31 unmodelled subtrees (an unmodelled section whose parent is modelled,
+       and everything beyond it).
+     - **Where it attaches:** where the subtree attaches.
+     - **Its area:** the subtree's membrane area.
+     - **Its electrotonic length:** twice the subtree's area-weighted mean electrotonic distance from its start, with
+       λ = sqrt(d·Rm/(4·Ra)) per 3-D piece. So the cylinder's membrane has the same mean electrotonic distance as the
+       subtree's.
+     - **Diameter and length** follow from those two.
+     - **The cut:** NEURON's d_lambda rule at 0.1 λ at 100 Hz, which is the rule the pre-registration used to
+       justify 30 µm. For check 6, it is 0.05.
+   - **The cell now has 241 compartments:** 72 on the paths, and 169 in the cylinders. The full reconstruction has
+     615.
+   - **Check 2 with the new rule passes:** 0.990, 0.994, 0.997, 0.988, and **0.954** for the bAP (32.3 against
+     33.8 mV). No type A verdict had been run.
+3. **Sites are points on a path,** not compartment indices, so check 6's finer cut keeps them in place.
+   - b1.d is the compartment that holds basal 1's tip.
+   - b1.m holds the point 60 µm nearer the soma.
+   - **N4 uses 9 points evenly spaced along basal 1,** distal first. The pre-registration's "basal 1's 9
+     compartments" was wrong: basal 1 has 13 compartments at ≤ 30 µm. s ∈ {1, 2, 3} as pre-registered.
+4. **Spread inputs are spread in proportion to compartment length:** N2's n tuft contacts, and N5's 60 basal and 60
+   tuft contacts (E0: 10 per segment on 6 equal segments, so 60 in all).
+   - The density stays uniform along the paths, and the input doesn't change with the cut.
+   - Type B: the tuft's compartments and the basal compartment.
+5. **Type B's N2 rule:** n = (the smallest even n whose tuft input alone fires the soma) − 2. Type B has no dCaAP.
+   - **Grids:** n up to 2000 for type B, and up to 400 for type A (E0: 200).
+6. **Port details (type B):**
+   - **Kinetics:** the exact rate functions replace NEURON's tables. trap0 is evaluated at its true singular point
+     (the source guards the wrong one). km and cad advance by exponential Euler where the source uses Euler.
+   - **Integration:** the source's example runs NEURON's variable-step integrator. Ours is fixed-step.
+   - **Initial state:** check 3 starts at v_init = −65 mV, as the source's session does. Every other protocol starts
+     from the rest state: 20 s run silent from −65 mV (soma −70.06 mV).
+   - **"A doublet":** the first interval is under 10 ms.
+   - **Check 6:** each section gets nseg = max(the source's nseg, ceil(L/30 µm)). That is never coarser than the
+     source.
+7. **Simulator details:**
+   - **Gate updates:** gates advance at the end of each step on the step's new voltage (NEURON's order). The next
+     step's currents use them, which is what the pre-registration's "on the previous step's voltage" meant.
+   - **Poisson input:** trains are drawn as event times, not as per-step counts; it is the same process.
+   - **Check 1:** runs E0's N6 protocol with E0's run-3 values (c = 9, a 1900 pA pulse, Δ = 50), recorded in float64.
+     The reference's copy changes only its recording's dtype. **Result:** voltages within 1.0 × 10⁻¹¹ mV, and the
+     same spike (62.0 ms) in both. It passes.
+   - **Check 2's bAP:** depolarization from rest at the site, for a soma clamped to +30 mV for 1 ms, then −58 mV
+     for 2 ms.
+   - **The cost's 2 × 3 network:** L2/3, L2/3 | L2/3, L5 | L5, L5. It uses the viz's stand-in wiring, with contacts
+     spread over the basal side and the tuft. It is not E2's wiring.
